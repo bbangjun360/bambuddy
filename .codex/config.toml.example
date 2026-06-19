@@ -1,0 +1,12 @@
+# Copy selected settings into your trusted repo-local .codex/config.toml.
+# Keep AGENTS concise rather than increasing this limit.
+project_doc_max_bytes = 32768
+
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[features]
+hooks = true
+
+[sandbox_workspace_write]
+network_access = false
