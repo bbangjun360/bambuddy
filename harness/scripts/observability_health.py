@@ -8,12 +8,116 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping
+from pathlib import Path
 
-BAMBUDDY_BASE_URL = os.environ.get("BAMBUDDY_BASE_URL", "http://127.0.0.1:18000").rstrip("/")
-MOCK_BASE_URL = os.environ.get("MOCK_BASE_URL", "http://127.0.0.1:19099").rstrip("/")
-PROMETHEUS_BASE_URL = os.environ.get("PROMETHEUS_BASE_URL", "http://127.0.0.1:19090").rstrip("/")
-OBSERVER_BASE_URL = os.environ.get("OBSERVER_BASE_URL", "http://127.0.0.1:19101").rstrip("/")
+ROOT = Path(__file__).resolve().parents[2]
+HARNESS_ENV_FILE = ROOT / ".env.harness"
 SYNTHETIC_SECRET = "wp020-access-code-00000000"
+
+
+def _read_harness_env(env_file: Path = HARNESS_ENV_FILE) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not env_file.exists():
+        return values
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key] = value
+    return values
+
+
+def _base_url_from_env(
+    values: Mapping[str, str],
+    environ: Mapping[str, str],
+    *,
+    override_key: str,
+    port_key: str,
+    default_port: str,
+    health_url_key: str | None = None,
+) -> str:
+    override = environ.get(override_key) or values.get(override_key, "")
+    if override:
+        return override.rstrip("/")
+
+    if health_url_key is not None:
+        health_url = environ.get(health_url_key) or values.get(health_url_key, "")
+        health_url = health_url.rstrip("/")
+        if health_url.endswith("/health"):
+            return health_url.removesuffix("/health")
+        if health_url:
+            return health_url
+
+    port = environ.get(port_key) or values.get(port_key, default_port)
+    return f"http://127.0.0.1:{port}"
+
+
+def resolve_endpoints(
+    *,
+    env_file: Path = HARNESS_ENV_FILE,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    env = os.environ if environ is None else environ
+    values = _read_harness_env(env_file)
+    return {
+        "bambuddy_base_url": _base_url_from_env(
+            values,
+            env,
+            override_key="BAMBUDDY_BASE_URL",
+            health_url_key="BAMBUDDY_HEALTH_URL",
+            port_key="BAMBUDDY_PORT",
+            default_port="18000",
+        ),
+        "mock_base_url": _base_url_from_env(
+            values,
+            env,
+            override_key="MOCK_BASE_URL",
+            health_url_key="MOCK_HEALTH_URL",
+            port_key="MOCK_PORT",
+            default_port="19099",
+        ),
+        "prometheus_base_url": _base_url_from_env(
+            values,
+            env,
+            override_key="PROMETHEUS_BASE_URL",
+            port_key="PROMETHEUS_PORT",
+            default_port="19090",
+        ),
+        "grafana_base_url": _base_url_from_env(
+            values,
+            env,
+            override_key="GRAFANA_BASE_URL",
+            port_key="GRAFANA_PORT",
+            default_port="13030",
+        ),
+        "observer_base_url": _base_url_from_env(
+            values,
+            env,
+            override_key="OBSERVER_BASE_URL",
+            port_key="HARNESS_OBSERVER_PORT",
+            default_port="19101",
+        ),
+    }
+
+
+def probe_urls(endpoints: Mapping[str, str]) -> dict[str, str]:
+    return {
+        "bambuddy-health": f"{endpoints['bambuddy_base_url']}/health",
+        "prometheus-ready": f"{endpoints['prometheus_base_url']}/-/ready",
+        "grafana-health": f"{endpoints['grafana_base_url']}/api/health",
+        "observer-metrics": f"{endpoints['observer_base_url']}/metrics",
+    }
+
+
+_ENDPOINTS = resolve_endpoints()
+_PROBE_URLS = probe_urls(_ENDPOINTS)
+BAMBUDDY_BASE_URL = _ENDPOINTS["bambuddy_base_url"]
+MOCK_BASE_URL = _ENDPOINTS["mock_base_url"]
+PROMETHEUS_BASE_URL = _ENDPOINTS["prometheus_base_url"]
+GRAFANA_BASE_URL = _ENDPOINTS["grafana_base_url"]
+OBSERVER_BASE_URL = _ENDPOINTS["observer_base_url"]
 
 
 def request(url: str, *, method: str = "GET", payload: dict | None = None, headers: dict | None = None) -> tuple[int, str]:
@@ -24,8 +128,13 @@ def request(url: str, *, method: str = "GET", payload: dict | None = None, heade
         method=method,
         headers={"Content-Type": "application/json", **(headers or {})},
     )
-    with urllib.request.urlopen(req, timeout=10) as result:
-        return result.status, result.read().decode("utf-8", errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as result:
+            return result.status, result.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError:
+        raise
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError(f"{method} {url} failed: {exc}") from exc
 
 
 def request_json(url: str, *, method: str = "GET", payload: dict | None = None) -> dict:
@@ -118,12 +227,13 @@ def force_mock_failure() -> dict:
 
 
 def main() -> int:
-    health = wait_for_json(f"{BAMBUDDY_BASE_URL}/health")
+    health = wait_for_json(_PROBE_URLS["bambuddy-health"])
     system_info = request_json(f"{BAMBUDDY_BASE_URL}/api/v1/system/info")
     bambuddy_metrics = enable_bambuddy_metrics()
 
-    request_text(f"{PROMETHEUS_BASE_URL}/-/ready")
-    observer_metrics = request_text(f"{OBSERVER_BASE_URL}/metrics")
+    request_text(_PROBE_URLS["prometheus-ready"])
+    grafana_health = wait_for_json(_PROBE_URLS["grafana-health"])
+    observer_metrics = request_text(_PROBE_URLS["observer-metrics"])
     if SYNTHETIC_SECRET in observer_metrics:
         raise RuntimeError("synthetic secret leaked into observer metrics")
 
@@ -138,8 +248,10 @@ def main() -> int:
         "bambuddy_version": system_info.get("app", {}).get("version"),
         "bambuddy_metrics_contains_build_info": "bambuddy_build_info" in bambuddy_metrics,
         "prometheus_url": PROMETHEUS_BASE_URL,
-        "grafana_url": os.environ.get("GRAFANA_BASE_URL", "http://127.0.0.1:13030"),
+        "grafana_url": GRAFANA_BASE_URL,
+        "grafana_health": grafana_health,
         "observer_url": OBSERVER_BASE_URL,
+        "probe_urls": _PROBE_URLS,
         "prometheus_samples": {
             "bambuddy_up": bambuddy_up,
             "build_info": build_info,
