@@ -35,6 +35,10 @@ npm-debug.log*
 # Archive files (user data)
 archive/
 
+# Harness source docs intentionally keep the archived v1.1 specification here.
+!docs/archive/
+!docs/archive/**
+
 # Firmware cache (downloaded firmware files)
 firmware/
 
@@ -92,3 +96,6 @@ gitleaks-report.json
 scripts/pip-audit.sh
 
 security/
+
+# Harness local environment
+.env.harness

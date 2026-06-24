@@ -1,0 +1,29 @@
+name: Codex scoped review
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'codex-review'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@REPLACE_WITH_REVIEWED_SHA
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # Pin openai/codex-action to a reviewed commit SHA before enabling.
+      - name: Codex review
+        uses: openai/codex-action@REPLACE_WITH_REVIEWED_SHA
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .github/codex-review-prompt.md
+          sandbox: read-only
+          codex-args: '["--ephemeral"]'

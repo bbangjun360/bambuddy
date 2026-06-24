@@ -1,0 +1,22 @@
+name: Harness fast gate
+
+on:
+  pull_request:
+  push:
+    branches: [farm-main]
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    steps:
+      # Pin Actions to reviewed commit SHAs before enabling this workflow.
+      - uses: actions/checkout@REPLACE_WITH_REVIEWED_SHA
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@REPLACE_WITH_REVIEWED_SHA
+        with:
+          python-version: "3.12"
+      - run: make verify-fast
