@@ -12,7 +12,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 PORT = int(os.environ.get("MOCK_PORT", "9099"))
+ALLOWED_SCENARIOS = frozenset({
+    "success",
+    "http_500",
+    "rate_limit",
+    "timeout",
+    "obico_failure",
+    "bed_failure",
+    "erp_missing_artifact",
+    "erp_missing_profile",
+    "erp_invalid_payload",
+    "erp_expired_token",
+})
 DEFAULT_SCENARIO = os.environ.get("MOCK_SCENARIO", "success")
+if DEFAULT_SCENARIO not in ALLOWED_SCENARIOS:
+    DEFAULT_SCENARIO = "success"
 
 LOCK = threading.Lock()
 STATE = {
@@ -20,6 +34,7 @@ STATE = {
     "erp_documents": {},
     "bed_cycles": {},
     "request_count": 0,
+    "failure_counts": {scenario: 0 for scenario in sorted(ALLOWED_SCENARIOS)},
 }
 
 
@@ -32,6 +47,15 @@ def response(handler: BaseHTTPRequestHandler, status: int, payload: dict) -> Non
     handler.wfile.write(body)
 
 
+def text_response(handler: BaseHTTPRequestHandler, status: int, body: str, content_type: str) -> None:
+    encoded = body.encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(encoded)))
+    handler.end_headers()
+    handler.wfile.write(encoded)
+
+
 def read_json(handler: BaseHTTPRequestHandler) -> dict:
     length = int(handler.headers.get("Content-Length", "0"))
     if length <= 0:
@@ -40,18 +64,26 @@ def read_json(handler: BaseHTTPRequestHandler) -> dict:
     return json.loads(raw.decode("utf-8"))
 
 
+def record_failure(scenario: str) -> None:
+    with LOCK:
+        STATE["failure_counts"][scenario] = STATE["failure_counts"].get(scenario, 0) + 1
+
+
 def maybe_fault(handler: BaseHTTPRequestHandler) -> bool:
     with LOCK:
         scenario = STATE["scenario"]
     if scenario == "http_500":
+        record_failure(scenario)
         response(handler, HTTPStatus.INTERNAL_SERVER_ERROR, {"error": "injected failure"})
         return True
     if scenario == "rate_limit":
+        record_failure(scenario)
         handler.send_response(HTTPStatus.TOO_MANY_REQUESTS)
         handler.send_header("Retry-After", "1")
         handler.end_headers()
         return True
     if scenario == "timeout":
+        record_failure(scenario)
         time.sleep(5)
     return False
 
@@ -75,6 +107,45 @@ def erp_work_order_payload(work_order_id: str, scenario: str) -> dict:
     return payload
 
 
+def prometheus_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+
+def metrics_payload() -> str:
+    with LOCK:
+        scenario = str(STATE["scenario"])
+        request_count = int(STATE["request_count"])
+        failure_counts = dict(STATE["failure_counts"])
+
+    lines = [
+        "# HELP farm_harness_mock_up Mock service exporter availability.",
+        "# TYPE farm_harness_mock_up gauge",
+        "farm_harness_mock_up 1",
+        "",
+        "# HELP farm_harness_mock_requests_total Requests handled by mock services.",
+        "# TYPE farm_harness_mock_requests_total counter",
+        f"farm_harness_mock_requests_total {request_count}",
+        "",
+        "# HELP farm_harness_mock_scenario_info Current deterministic mock scenario.",
+        "# TYPE farm_harness_mock_scenario_info gauge",
+    ]
+    for candidate in sorted(ALLOWED_SCENARIOS):
+        value = 1 if candidate == scenario else 0
+        lines.append(f'farm_harness_mock_scenario_info{{scenario="{prometheus_escape(candidate)}"}} {value}')
+
+    lines.extend([
+        "",
+        "# HELP farm_harness_mock_failures_total Injected mock-service failures by scenario.",
+        "# TYPE farm_harness_mock_failures_total counter",
+    ])
+    for candidate in sorted(ALLOWED_SCENARIOS):
+        count = int(failure_counts.get(candidate, 0))
+        lines.append(f'farm_harness_mock_failures_total{{scenario="{prometheus_escape(candidate)}"}} {count}')
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "FarmHarnessMock/1.0"
 
@@ -92,8 +163,14 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
 
+        if path == "/metrics":
+            text_response(self, HTTPStatus.OK, metrics_payload(), "text/plain; version=0.0.4; charset=utf-8")
+            return
+
         if path in {"/health", "/erp/health", "/printflow/health"}:
-            response(self, HTTPStatus.OK, {"status": "ok", "scenario": STATE["scenario"]})
+            with LOCK:
+                scenario = STATE["scenario"]
+            response(self, HTTPStatus.OK, {"status": "ok", "scenario": scenario})
             return
 
         if path == "/erp/api/resource/Work Order":
@@ -129,7 +206,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/obico/p/":
             query = parse_qs(parsed.query)
-            score = 0.95 if STATE["scenario"] == "obico_failure" else 0.02
+            with LOCK:
+                scenario = STATE["scenario"]
+            score = 0.95 if scenario == "obico_failure" else 0.02
             response(self, HTTPStatus.OK, {
                 "detections": [] if score < 0.5 else [{"label": "failure", "score": score}],
                 "image_received": bool(query.get("img")),
@@ -157,12 +236,19 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["erp_documents"].clear()
                 STATE["bed_cycles"].clear()
                 STATE["request_count"] = 0
+                STATE["failure_counts"] = {scenario: 0 for scenario in sorted(ALLOWED_SCENARIOS)}
             response(self, HTTPStatus.OK, {"status": "reset"})
             return
 
         if path == "/admin/scenario":
             payload = read_json(self)
             scenario = str(payload.get("scenario", "success"))
+            if scenario not in ALLOWED_SCENARIOS:
+                response(self, HTTPStatus.BAD_REQUEST, {
+                    "error": "unknown scenario",
+                    "allowed": sorted(ALLOWED_SCENARIOS),
+                })
+                return
             with LOCK:
                 STATE["scenario"] = scenario
             response(self, HTTPStatus.OK, {"scenario": scenario})
@@ -218,7 +304,11 @@ class Handler(BaseHTTPRequestHandler):
         response(self, HTTPStatus.NOT_FOUND, {"error": "not found", "path": path})
 
 
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+
 if __name__ == "__main__":
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    server = ReusableThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(json.dumps({"service": "mock-services", "port": PORT, "status": "starting"}), flush=True)
     server.serve_forever()

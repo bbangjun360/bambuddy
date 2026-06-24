@@ -1,13 +1,15 @@
-.PHONY: harness-config harness-up harness-up-slicer harness-down harness-reset harness-health \
+.PHONY: harness-config harness-up harness-up-slicer harness-up-observability harness-down harness-reset harness-health \
         harness-persistence harness-backup harness-restore harness-orca-health harness-orca-slice \
-        test-unit test-characterization test-contract test-integration test-scenario test-erp-readonly \
-        verify-fast verify-full context-check workpack-check hooks-check
+        harness-observability-health test-unit test-characterization test-contract test-integration \
+        test-scenario test-observability test-erp-readonly verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
 include $(HARNESS_ENV)
 HARNESS_COMPOSE ?= harness/docker-compose.harness.yml
+HARNESS_OBSERVABILITY_COMPOSE ?= harness/docker-compose.observability.yml
 GIT_BRANCH ?= $(shell git branch --show-current 2>/dev/null || echo main)
 COMPOSE = COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) GIT_BRANCH=$(GIT_BRANCH) docker compose --env-file $(HARNESS_ENV) -f $(HARNESS_COMPOSE)
+COMPOSE_OBSERVABILITY = COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) GIT_BRANCH=$(GIT_BRANCH) docker compose --env-file $(HARNESS_ENV) -f $(HARNESS_COMPOSE) -f $(HARNESS_OBSERVABILITY_COMPOSE)
 
 harness-config:
 	$(COMPOSE) config >/dev/null
@@ -17,6 +19,9 @@ harness-up:
 
 harness-up-slicer:
 	$(COMPOSE) --profile slicer up -d --build postgres mock-services orca-slicer-api bambuddy
+
+harness-up-observability:
+	$(COMPOSE_OBSERVABILITY) --profile slicer --profile observability up -d --build postgres mock-services orca-slicer-api bambuddy harness-observer prometheus grafana
 
 harness-down:
 	$(COMPOSE) down --remove-orphans
@@ -34,6 +39,9 @@ harness-orca-health:
 
 harness-orca-slice:
 	python3 harness/scripts/orca_direct_slice.py
+
+harness-observability-health:
+	python3 harness/scripts/observability_health.py
 
 harness-persistence:
 	python3 harness/scripts/persistence.py
@@ -71,6 +79,9 @@ test-erp-readonly:
 
 test-scenario:
 	python3 -m unittest discover -s harness/tests -p 'scenario_*.py'
+
+test-observability:
+	python3 -m unittest discover -s harness/tests -p 'test_observability_*.py'
 
 verify-fast: context-check workpack-check hooks-check test-contract test-unit test-characterization
 	@echo "Fast deterministic gate passed."
