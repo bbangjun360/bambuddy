@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Farm Harness
+    orgId: 1
+    folder: Farm Harness
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards
