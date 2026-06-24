@@ -11,6 +11,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,6 +24,7 @@ MAKEFILE = ROOT / "Makefile"
 ENV_FILE = ROOT / ".env.harness"
 EXAMPLE_ENV_FILE = ROOT / ".env.harness.example"
 EXPORTER = ROOT / "harness/scripts/observability_exporter.py"
+HEALTH_SCRIPT = ROOT / "harness/scripts/observability_health.py"
 PORT = 19220
 BASE = f"http://127.0.0.1:{PORT}"
 SYNTHETIC_SECRET = "wp020-access-code-00000000"
@@ -136,6 +138,139 @@ class ObservabilityConfigTest(unittest.TestCase):
         self.assertIn("--profile observability", _target_body(text, "harness-up-observability"))
         self.assertIn("observability_health.py", _target_body(text, "harness-observability-health"))
         self.assertIn("test_observability_*.py", _target_body(text, "test-observability"))
+
+    def test_makefile_observability_health_can_use_defaults_without_harness_env_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing_env = Path(tmpdir) / "missing.env"
+            result = subprocess.run(
+                ["make", "-n", f"HARNESS_ENV={missing_env}", "harness-observability-health"],
+                cwd=ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("python3 harness/scripts/observability_health.py", result.stdout)
+
+
+class ObservabilityHealthEnvResolutionTest(unittest.TestCase):
+    def _load_health(self):
+        spec = importlib.util.spec_from_file_location("observability_health", HEALTH_SCRIPT)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _write_env(self, tmpdir: str, body: str) -> Path:
+        env_file = Path(tmpdir) / ".env.harness"
+        env_file.write_text(body, encoding="utf-8")
+        return env_file
+
+    def test_health_loads_custom_observability_ports_from_harness_env(self) -> None:
+        module = self._load_health()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_file = self._write_env(
+                tmpdir,
+                "\n".join(
+                    [
+                        "BAMBUDDY_PORT=18131",
+                        "MOCK_PORT=19131",
+                        "ORCA_API_PORT=13131",
+                        "PROMETHEUS_PORT=19091",
+                        "GRAFANA_PORT=13031",
+                        "HARNESS_OBSERVER_PORT=19132",
+                    ]
+                ),
+            )
+
+            endpoints = module.resolve_endpoints(env_file=env_file, environ={})
+
+        self.assertEqual(endpoints["bambuddy_base_url"], "http://127.0.0.1:18131")
+        self.assertEqual(endpoints["mock_base_url"], "http://127.0.0.1:19131")
+        self.assertEqual(endpoints["prometheus_base_url"], "http://127.0.0.1:19091")
+        self.assertEqual(endpoints["grafana_base_url"], "http://127.0.0.1:13031")
+        self.assertEqual(endpoints["observer_base_url"], "http://127.0.0.1:19132")
+
+    def test_health_explicit_endpoint_env_vars_override_harness_env(self) -> None:
+        module = self._load_health()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_file = self._write_env(
+                tmpdir,
+                "\n".join(
+                    [
+                        "BAMBUDDY_PORT=18131",
+                        "MOCK_PORT=19131",
+                        "PROMETHEUS_PORT=19091",
+                        "GRAFANA_PORT=13031",
+                        "HARNESS_OBSERVER_PORT=19132",
+                    ]
+                ),
+            )
+
+            endpoints = module.resolve_endpoints(
+                env_file=env_file,
+                environ={
+                    "BAMBUDDY_BASE_URL": "http://127.0.0.1:28131/",
+                    "MOCK_BASE_URL": "http://127.0.0.1:29131/",
+                    "PROMETHEUS_BASE_URL": "http://127.0.0.1:29091/",
+                    "GRAFANA_BASE_URL": "http://127.0.0.1:23031/",
+                    "OBSERVER_BASE_URL": "http://127.0.0.1:29132/",
+                },
+            )
+
+        self.assertEqual(endpoints["bambuddy_base_url"], "http://127.0.0.1:28131")
+        self.assertEqual(endpoints["mock_base_url"], "http://127.0.0.1:29131")
+        self.assertEqual(endpoints["prometheus_base_url"], "http://127.0.0.1:29091")
+        self.assertEqual(endpoints["grafana_base_url"], "http://127.0.0.1:23031")
+        self.assertEqual(endpoints["observer_base_url"], "http://127.0.0.1:29132")
+
+    def test_health_defaults_remain_available_without_harness_env_file(self) -> None:
+        module = self._load_health()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            endpoints = module.resolve_endpoints(env_file=Path(tmpdir) / "missing.env", environ={})
+
+        self.assertEqual(endpoints["bambuddy_base_url"], "http://127.0.0.1:18000")
+        self.assertEqual(endpoints["mock_base_url"], "http://127.0.0.1:19099")
+        self.assertEqual(endpoints["prometheus_base_url"], "http://127.0.0.1:19090")
+        self.assertEqual(endpoints["grafana_base_url"], "http://127.0.0.1:13030")
+        self.assertEqual(endpoints["observer_base_url"], "http://127.0.0.1:19101")
+
+    def test_health_does_not_hardcode_default_observability_ports_when_custom_ports_exist(self) -> None:
+        module = self._load_health()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_file = self._write_env(
+                tmpdir,
+                "\n".join(
+                    [
+                        "PROMETHEUS_PORT=19091",
+                        "GRAFANA_PORT=13031",
+                        "HARNESS_OBSERVER_PORT=19132",
+                    ]
+                ),
+            )
+            endpoints = module.resolve_endpoints(env_file=env_file, environ={})
+            probe_urls = module.probe_urls(endpoints)
+
+        rendered = json.dumps({"endpoints": endpoints, "probe_urls": probe_urls}, sort_keys=True)
+        self.assertEqual(probe_urls["prometheus-ready"], "http://127.0.0.1:19091/-/ready")
+        self.assertEqual(probe_urls["grafana-health"], "http://127.0.0.1:13031/api/health")
+        self.assertEqual(probe_urls["observer-metrics"], "http://127.0.0.1:19132/metrics")
+        self.assertNotIn("http://127.0.0.1:19090", rendered)
+        self.assertNotIn("http://127.0.0.1:13030", rendered)
+        self.assertNotIn("http://127.0.0.1:19101", rendered)
+
+    def test_request_failure_message_names_probed_endpoint(self) -> None:
+        module = self._load_health()
+        target = "http://127.0.0.1:19091/-/ready"
+
+        with mock.patch.object(module.urllib.request, "urlopen", side_effect=module.urllib.error.URLError("boom")):
+            with self.assertRaises(RuntimeError) as raised:
+                module.request(target)
+
+        self.assertIn(target, str(raised.exception))
 
 
 class LiveMockService:

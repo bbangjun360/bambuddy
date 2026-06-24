@@ -4,7 +4,7 @@
         test-scenario test-observability test-erp-readonly verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
-include $(HARNESS_ENV)
+-include $(HARNESS_ENV)
 HARNESS_COMPOSE ?= harness/docker-compose.harness.yml
 HARNESS_OBSERVABILITY_COMPOSE ?= harness/docker-compose.observability.yml
 GIT_BRANCH ?= $(shell git branch --show-current 2>/dev/null || echo main)
