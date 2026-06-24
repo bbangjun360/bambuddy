@@ -1,8 +1,9 @@
 .PHONY: harness-config harness-up harness-up-slicer harness-up-observability harness-down harness-reset harness-health \
         harness-persistence harness-backup harness-restore harness-orca-health harness-orca-slice \
         harness-observability-health harness-bed-automation harness-erp-draft-write harness-obico-shadow \
+        harness-printflow-canary \
         test-unit test-characterization test-contract test-integration test-scenario test-observability \
-        test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow \
+        test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary \
         verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
@@ -48,6 +49,9 @@ harness-observability-health:
 harness-obico-shadow:
 	FARM_OBICO_SHADOW_ENABLED=true $(COMPOSE) up -d --build postgres mock-services bambuddy
 	python3 harness/scripts/obico_shadow.py
+
+harness-printflow-canary:
+	python3 -m unittest harness.tests.test_printflow_canary_readiness_mock
 
 harness-bed-automation:
 	python3 -m unittest harness.tests.test_bed_automation_mock
@@ -104,6 +108,10 @@ test-observability:
 test-obico-shadow:
 	python3 -m unittest backend.tests.unit.services.test_obico_shadow backend.tests.unit.test_obico_shadow_architecture harness.tests.test_obico_shadow_mock
 	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-wp070-tests -e LOG_DIR=/tmp/bambuddy-wp070-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.integration.test_obico_shadow_api
+
+test-printflow-canary: harness-printflow-canary
+	python3 -m unittest backend.tests.unit.services.test_printflow_canary backend.tests.unit.test_printflow_canary_architecture
+	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-wp060-tests -e LOG_DIR=/tmp/bambuddy-wp060-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.integration.test_printflow_canary_api
 
 verify-fast: context-check workpack-check hooks-check test-contract test-unit test-characterization
 	@echo "Fast deterministic gate passed."

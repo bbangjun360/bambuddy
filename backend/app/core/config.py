@@ -107,6 +107,12 @@ class Settings(BaseSettings):
     # WP-070 Obico Shadow Mode. Disabled by default and records observations only.
     farm_obico_shadow_enabled: bool = False
 
+    # WP-060 PrintFlow canary readiness. Disabled by default; dry-run,
+    # human-gated, mock-readiness checks only.
+    farm_printflow_canary_readiness_enabled: bool = False
+    farm_printflow_canary_dry_run: bool = True
+    farm_printflow_canary_human_approval_required: bool = True
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
