@@ -98,4 +98,10 @@ scripts/pip-audit.sh
 security/
 
 # Harness local environment
+# WP-000 keeps .env.harness tracked with synthetic local-only defaults.
+!.env.harness
+harness/artifacts/*
+!harness/artifacts/.gitignore
+
+# Harness local environment
 .env.harness

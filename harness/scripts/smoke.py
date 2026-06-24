@@ -8,18 +8,23 @@ import time
 import urllib.error
 import urllib.request
 
+BAMBUDDY_BASE_URL = os.environ.get("BAMBUDDY_BASE_URL", "http://127.0.0.1:18000").rstrip("/")
+MOCK_BASE_URL = os.environ.get("MOCK_BASE_URL", "http://127.0.0.1:19099").rstrip("/")
+
 TARGETS = {
-    "bambuddy": os.environ.get("BAMBUDDY_HEALTH_URL", "http://127.0.0.1:18000/"),
-    "mock-services": os.environ.get("MOCK_HEALTH_URL", "http://127.0.0.1:19099/health"),
+    "bambuddy-root": f"{BAMBUDDY_BASE_URL}/",
+    "bambuddy-health": f"{BAMBUDDY_BASE_URL}/health",
+    "bambuddy-docs": f"{BAMBUDDY_BASE_URL}/docs",
+    "mock-services": f"{MOCK_BASE_URL}/health",
 }
 
 
-def wait_for(name: str, url: str, timeout: float = 60.0) -> dict:
+def wait_for(name: str, url: str, timeout: float = 90.0) -> dict:
     deadline = time.monotonic() + timeout
     last_error = ""
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=3) as result:
+            with urllib.request.urlopen(url, timeout=5) as result:
                 body = result.read(4096).decode("utf-8", errors="replace")
                 if 200 <= result.status < 400:
                     return {"name": name, "url": url, "status": result.status, "body": body[:200]}
