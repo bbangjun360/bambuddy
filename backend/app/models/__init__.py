@@ -5,6 +5,7 @@ from backend.app.models.archive import PrintArchive
 from backend.app.models.auth_ephemeral import AuthEphemeralToken, AuthRateLimitEvent
 from backend.app.models.bed_automation import BedAutomationCycle
 from backend.app.models.color_catalog import ColorCatalogEntry
+from backend.app.models.erp_draft_write import ErpDraftWriteRecord
 from backend.app.models.erp_readonly import ErpProductionRequest
 from backend.app.models.filament import Filament
 from backend.app.models.github_backup import GitHubBackupConfig, GitHubBackupLog
@@ -40,6 +41,7 @@ __all__ = [
     "Printer",
     "PrintArchive",
     "Filament",
+    "ErpDraftWriteRecord",
     "ErpProductionRequest",
     "Settings",
     "SmartPlug",

@@ -174,6 +174,7 @@ async def init_db():
         bed_automation,
         bug_report,
         color_catalog,
+        erp_draft_write,
         erp_readonly,
         external_link,
         filament,

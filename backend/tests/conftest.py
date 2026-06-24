@@ -109,6 +109,7 @@ async def test_engine():
         auth_ephemeral,
         bed_automation,
         color_catalog,
+        erp_draft_write,
         erp_readonly,
         external_link,
         filament,
