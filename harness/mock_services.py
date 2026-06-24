@@ -24,6 +24,9 @@ ALLOWED_SCENARIOS = frozenset({
     "erp_missing_profile",
     "erp_invalid_payload",
     "erp_expired_token",
+    "erp_draft_timeout_after_create",
+    "erp_draft_invalid_payload",
+    "erp_draft_reconciliation_mismatch",
 })
 DEFAULT_SCENARIO = os.environ.get("MOCK_SCENARIO", "success")
 if DEFAULT_SCENARIO not in ALLOWED_SCENARIOS:
@@ -95,6 +98,10 @@ LOCK = threading.Lock()
 STATE = {
     "scenario": DEFAULT_SCENARIO,
     "erp_documents": {},
+    "erp_draft_documents": {},
+    "erp_submit_calls": 0,
+    "erp_inventory_post_calls": 0,
+    "erp_accounting_post_calls": 0,
     "bed_cycles": {},
     "request_count": 0,
     "failure_counts": {scenario: 0 for scenario in sorted(ALLOWED_SCENARIOS)},
@@ -168,6 +175,32 @@ def erp_work_order_payload(work_order_id: str, scenario: str) -> dict:
     elif scenario == "erp_invalid_payload":
         payload.pop("name")
     return payload
+
+
+def erp_draft_result_payload(event_id: str, payload: dict, sequence: int) -> dict:
+    return {
+        "name": f"FDR-HARNESS-{sequence:04d}",
+        "doctype": "Farm Draft Result",
+        "docstatus": 0,
+        "status": "Draft",
+        "farm_event_id": event_id,
+        "production_request_id": payload.get("production_request_id"),
+        "external_work_order_id": payload.get("external_work_order_id"),
+        "production_item": payload.get("production_item"),
+        "quantity_completed": payload.get("quantity_completed"),
+        "completed_at": payload.get("completed_at"),
+    }
+
+
+def lookup_erp_draft_document(event_id: str, scenario: str) -> dict | None:
+    with LOCK:
+        existing = STATE["erp_draft_documents"].get(event_id)
+        if existing is None:
+            return None
+        document = json.loads(json.dumps(existing))
+    if scenario == "erp_draft_reconciliation_mismatch":
+        document["quantity_completed"] = int(document.get("quantity_completed") or 0) + 1
+    return document
 
 
 def prometheus_escape(value: str) -> str:
@@ -244,6 +277,26 @@ class Handler(BaseHTTPRequestHandler):
             response(self, HTTPStatus.OK, {"data": [erp_work_order_payload("WO-HARNESS-0001", scenario)]})
             return
 
+        if path == "/erp/api/resource/Farm Draft Result":
+            query = parse_qs(parsed.query)
+            event_id = (query.get("farm_event_id") or [None])[0]
+            with LOCK:
+                scenario = STATE["scenario"]
+            if scenario == "erp_expired_token" or self.headers.get("Authorization") == "token expired-token":
+                response(self, HTTPStatus.UNAUTHORIZED, {"error": "expired token"})
+                return
+            if maybe_fault(self):
+                return
+            if not event_id:
+                response(self, HTTPStatus.BAD_REQUEST, {"error": "missing farm_event_id"})
+                return
+            document = lookup_erp_draft_document(event_id, scenario)
+            if document is None:
+                response(self, HTTPStatus.NOT_FOUND, {"error": "draft not found"})
+                return
+            response(self, HTTPStatus.OK, {"data": document})
+            return
+
         match = re.fullmatch(r"/erp/api/resource/Work Order/([^/]+)", path)
         if match:
             with LOCK:
@@ -307,6 +360,10 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 STATE["scenario"] = DEFAULT_SCENARIO
                 STATE["erp_documents"].clear()
+                STATE["erp_draft_documents"].clear()
+                STATE["erp_submit_calls"] = 0
+                STATE["erp_inventory_post_calls"] = 0
+                STATE["erp_accounting_post_calls"] = 0
                 STATE["bed_cycles"].clear()
                 STATE["request_count"] = 0
                 STATE["failure_counts"] = {scenario: 0 for scenario in sorted(ALLOWED_SCENARIOS)}
@@ -327,6 +384,39 @@ class Handler(BaseHTTPRequestHandler):
             response(self, HTTPStatus.OK, {"scenario": scenario})
             return
 
+        match = re.fullmatch(r"/erp/api/resource/Farm Draft Result/([^/]+)/submit", path)
+        if match:
+            with LOCK:
+                STATE["erp_submit_calls"] += 1
+            response(self, HTTPStatus.METHOD_NOT_ALLOWED, {"error": "submit disabled in harness"})
+            return
+
+        if path == "/erp/api/resource/Farm Draft Result":
+            with LOCK:
+                scenario = STATE["scenario"]
+            if scenario == "erp_expired_token" or self.headers.get("Authorization") == "token expired-token":
+                response(self, HTTPStatus.UNAUTHORIZED, {"error": "expired token"})
+                return
+            if maybe_fault(self):
+                return
+            payload = read_json(self)
+            key = self.headers.get("Idempotency-Key") or payload.get("farm_event_id")
+            if not key:
+                response(self, HTTPStatus.BAD_REQUEST, {"error": "missing idempotency key"})
+                return
+            with LOCK:
+                existing = STATE["erp_draft_documents"].get(key)
+                if existing is None:
+                    existing = erp_draft_result_payload(key, payload, len(STATE["erp_draft_documents"]) + 1)
+                    if scenario == "erp_draft_invalid_payload":
+                        existing = {"name": existing["name"], "farm_event_id": key}
+                    STATE["erp_draft_documents"][key] = existing
+            if scenario == "erp_draft_timeout_after_create":
+                record_failure(scenario)
+                time.sleep(5)
+            response(self, HTTPStatus.OK, {"data": existing})
+            return
+
         if path == "/erp/api/resource/Stock Entry":
             if maybe_fault(self):
                 return
@@ -336,6 +426,7 @@ class Handler(BaseHTTPRequestHandler):
                 response(self, HTTPStatus.BAD_REQUEST, {"error": "missing idempotency key"})
                 return
             with LOCK:
+                STATE["erp_inventory_post_calls"] += 1
                 existing = STATE["erp_documents"].get(key)
                 if existing is None:
                     existing = {
@@ -345,6 +436,12 @@ class Handler(BaseHTTPRequestHandler):
                     }
                     STATE["erp_documents"][key] = existing
             response(self, HTTPStatus.OK, {"data": existing})
+            return
+
+        if path in {"/erp/api/resource/GL Entry", "/erp/api/resource/Sales Invoice", "/erp/api/resource/Payment Entry"}:
+            with LOCK:
+                STATE["erp_accounting_post_calls"] += 1
+            response(self, HTTPStatus.METHOD_NOT_ALLOWED, {"error": "accounting posting disabled in harness"})
             return
 
         if path == "/printflow/v1/cycles":
