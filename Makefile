@@ -1,7 +1,7 @@
 .PHONY: harness-config harness-up harness-up-slicer harness-up-observability harness-down harness-reset harness-health \
         harness-persistence harness-backup harness-restore harness-orca-health harness-orca-slice \
         harness-observability-health test-unit test-characterization test-contract test-integration \
-        test-scenario test-observability test-erp-readonly verify-fast verify-full context-check workpack-check hooks-check
+        test-scenario test-observability test-erp-readonly test-obico-shadow harness-obico-shadow verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
 -include $(HARNESS_ENV)
@@ -43,6 +43,10 @@ harness-orca-slice:
 harness-observability-health:
 	python3 harness/scripts/observability_health.py
 
+harness-obico-shadow:
+	FARM_OBICO_SHADOW_ENABLED=true $(COMPOSE) up -d --build postgres mock-services bambuddy
+	python3 harness/scripts/obico_shadow.py
+
 harness-persistence:
 	python3 harness/scripts/persistence.py
 
@@ -82,6 +86,10 @@ test-scenario:
 
 test-observability:
 	python3 -m unittest discover -s harness/tests -p 'test_observability_*.py'
+
+test-obico-shadow:
+	python3 -m unittest backend.tests.unit.services.test_obico_shadow backend.tests.unit.test_obico_shadow_architecture harness.tests.test_obico_shadow_mock
+	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-wp070-tests -e LOG_DIR=/tmp/bambuddy-wp070-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.integration.test_obico_shadow_api
 
 verify-fast: context-check workpack-check hooks-check test-contract test-unit test-characterization
 	@echo "Fast deterministic gate passed."

@@ -50,6 +50,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bambuddy}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bambuddy}
       PORT: "8000"
       SLICER_API_URL: http://orca-slicer-api:3000
+      FARM_OBICO_SHADOW_ENABLED: ${FARM_OBICO_SHADOW_ENABLED:-false}
       # No real printer, ERP, slicer, or actuator credentials are present in the harness.
     ports:
       - "${BAMBUDDY_PORT:-18000}:8000"

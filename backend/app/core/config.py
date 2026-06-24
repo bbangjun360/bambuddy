@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     farm_erp_api_token: str | None = None
     farm_erp_timeout_seconds: float = 5.0
 
+    # WP-070 Obico Shadow Mode. Disabled by default and records observations only.
+    farm_obico_shadow_enabled: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
