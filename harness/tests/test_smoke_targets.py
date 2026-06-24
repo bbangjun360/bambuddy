@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import http.client
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest import mock
 
-import harness.scripts.orca_direct_slice as orca_direct_slice
-import harness.scripts.orca_health as orca_health
 import harness.scripts.smoke as smoke
 
 
@@ -23,19 +23,78 @@ class _FakeResponse:
 
 
 class SmokeTargetsTest(unittest.TestCase):
+    def _write_env(self, tmpdir: str, body: str) -> Path:
+        env_file = Path(tmpdir) / ".env.harness"
+        env_file.write_text(body, encoding="utf-8")
+        return env_file
+
     def test_smoke_checks_bambuddy_root_health_docs_and_mock_services(self) -> None:
-        self.assertTrue(smoke.TARGETS["bambuddy-root"].endswith("/"))
-        self.assertTrue(smoke.TARGETS["bambuddy-health"].endswith("/health"))
-        self.assertTrue(smoke.TARGETS["bambuddy-docs"].endswith("/docs"))
-        self.assertTrue(smoke.TARGETS["mock-services"].endswith("/health"))
+        with TemporaryDirectory() as tmpdir:
+            targets = smoke.resolve_targets(env_file=Path(tmpdir) / "missing.env", environ={})
 
+        self.assertTrue(targets["bambuddy-root"].endswith("/"))
+        self.assertTrue(targets["bambuddy-health"].endswith("/health"))
+        self.assertTrue(targets["bambuddy-docs"].endswith("/docs"))
+        self.assertTrue(targets["mock-services"].endswith("/health"))
 
-    def test_scripts_default_to_harness_env_ports(self) -> None:
-        self.assertEqual(smoke.TARGETS["bambuddy-root"], "http://127.0.0.1:18130/")
-        self.assertEqual(smoke.TARGETS["bambuddy-health"], "http://127.0.0.1:18130/health")
-        self.assertEqual(smoke.TARGETS["mock-services"], "http://127.0.0.1:19130/health")
-        self.assertEqual(orca_health.ORCA_BASE_URL, "http://127.0.0.1:13130")
-        self.assertEqual(orca_direct_slice.ORCA_BASE_URL, "http://127.0.0.1:13130")
+    def test_scripts_use_default_ports_from_selected_harness_env(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            env_file = self._write_env(
+                tmpdir,
+                "\n".join(
+                    [
+                        "BAMBUDDY_PORT=18130",
+                        "MOCK_PORT=19130",
+                    ]
+                ),
+            )
+            targets = smoke.resolve_targets(env_file=env_file, environ={})
+
+        self.assertEqual(targets["bambuddy-root"], "http://127.0.0.1:18130/")
+        self.assertEqual(targets["bambuddy-health"], "http://127.0.0.1:18130/health")
+        self.assertEqual(targets["mock-services"], "http://127.0.0.1:19130/health")
+
+    def test_scripts_use_custom_ports_from_selected_harness_env(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            env_file = self._write_env(
+                tmpdir,
+                "\n".join(
+                    [
+                        "BAMBUDDY_PORT=18131",
+                        "MOCK_PORT=19131",
+                    ]
+                ),
+            )
+            targets = smoke.resolve_targets(env_file=env_file, environ={})
+
+        self.assertEqual(targets["bambuddy-root"], "http://127.0.0.1:18131/")
+        self.assertEqual(targets["bambuddy-health"], "http://127.0.0.1:18131/health")
+        self.assertEqual(targets["mock-services"], "http://127.0.0.1:19131/health")
+
+    def test_explicit_endpoint_env_vars_override_selected_harness_env(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            env_file = self._write_env(
+                tmpdir,
+                "\n".join(
+                    [
+                        "BAMBUDDY_PORT=18131",
+                        "MOCK_PORT=19131",
+                    ]
+                ),
+            )
+            with mock.patch.dict(
+                smoke.os.environ,
+                {
+                    "BAMBUDDY_BASE_URL": "http://127.0.0.1:28131/",
+                    "MOCK_BASE_URL": "http://127.0.0.1:29131/",
+                },
+                clear=True,
+            ):
+                targets = smoke.resolve_targets(env_file=env_file)
+
+        self.assertEqual(targets["bambuddy-root"], "http://127.0.0.1:28131/")
+        self.assertEqual(targets["bambuddy-health"], "http://127.0.0.1:28131/health")
+        self.assertEqual(targets["mock-services"], "http://127.0.0.1:29131/health")
 
     def test_wait_for_retries_transient_connection_reset_before_success(self) -> None:
         attempts = []
