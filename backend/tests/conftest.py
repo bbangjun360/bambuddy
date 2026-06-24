@@ -108,6 +108,7 @@ async def test_engine():
         archive,
         auth_ephemeral,
         color_catalog,
+        erp_readonly,
         external_link,
         filament,
         group,

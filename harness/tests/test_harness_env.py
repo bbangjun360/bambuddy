@@ -22,18 +22,25 @@ class HarnessEnvTest(unittest.TestCase):
     def test_harness_env_exists_and_uses_isolated_project(self) -> None:
         values = _read_env()
 
-        self.assertEqual(values["COMPOSE_PROJECT_NAME"], "farm_harness")
-        self.assertEqual(values["POSTGRES_DB"], "bambuddy_harness")
-        self.assertEqual(values["POSTGRES_USER"], "bambuddy_harness")
-        self.assertEqual(values["POSTGRES_PASSWORD"], "bambuddy_harness_password")
+        self.assertEqual(values["COMPOSE_PROJECT_NAME"], "farm_wp030")
+        self.assertEqual(values["POSTGRES_DB"], "bambuddy")
+        self.assertEqual(values["POSTGRES_USER"], "bambuddy")
+        self.assertEqual(values["POSTGRES_PASSWORD"], "local-harness-only")
 
     def test_harness_env_pins_images_and_local_ports(self) -> None:
         values = _read_env()
 
-        self.assertIn(":", values["POSTGRES_IMAGE"])
-        self.assertIn(":", values["PYTHON_IMAGE"])
-        self.assertTrue(values["BAMBUDDY_PORT"].startswith("18"))
-        self.assertTrue(values["MOCK_PORT"].startswith("19"))
+        for key in ("POSTGRES_IMAGE", "PYTHON_IMAGE", "ORCA_IMAGE"):
+            with self.subTest(key=key):
+                image = values[key]
+                self.assertIn(":", image)
+                self.assertIn("@sha256:", image)
+                self.assertNotIn("REPLACE", image)
+                self.assertNotIn(":latest", image)
+
+        self.assertEqual(values["BAMBUDDY_PORT"], "18130")
+        self.assertEqual(values["MOCK_PORT"], "19130")
+        self.assertEqual(values["ORCA_API_PORT"], "13130")
 
 
 if __name__ == "__main__":

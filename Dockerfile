@@ -60,14 +60,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy backend
 COPY backend/ ./backend/
 
-# Capture the current git branch at build time. `.git/HEAD` is the only
-# .git metadata the build context lets through (see .dockerignore); it
-# contains `ref: refs/heads/<branch>`, which the SpoolBuddy remote-update
-# flow reads at runtime via detect_current_branch() in spoolbuddy_ssh.py.
-# Without this, the production image has no git metadata at all and would
-# always pull `main` on the remote device regardless of which branch
-# Bambuddy itself was built from.
-COPY .git/HEAD ./.git/HEAD
+# Capture the current git branch at build time. In a normal checkout,
+# `.git/HEAD` is available through .dockerignore; in a Git worktree, `.git` is
+# a pointer file and `.git/HEAD` does not exist in the build context. Copy the
+# metadata path that exists and set GIT_BRANCH as the runtime fallback used by
+# detect_current_branch() in spoolbuddy_ssh.py.
+ARG GIT_BRANCH=main
+ENV GIT_BRANCH=${GIT_BRANCH}
+COPY .git ./.git
 
 # Copy built frontend from builder stage
 COPY --from=frontend-builder /app/static ./static

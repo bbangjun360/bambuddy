@@ -7,8 +7,30 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
-ORCA_BASE_URL = os.environ.get("ORCA_BASE_URL", "http://127.0.0.1:13003").rstrip("/")
+ROOT = Path(__file__).resolve().parents[2]
+HARNESS_ENV_FILE = ROOT / ".env.harness"
+
+
+def _read_harness_env() -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not HARNESS_ENV_FILE.exists():
+        return values
+    for line in HARNESS_ENV_FILE.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        values[key] = value
+    return values
+
+
+_HARNESS_ENV = _read_harness_env()
+ORCA_BASE_URL = os.environ.get(
+    "ORCA_BASE_URL",
+    f"http://127.0.0.1:{_HARNESS_ENV.get('ORCA_API_PORT', '13003')}",
+).rstrip("/")
 
 
 def wait_for_health(timeout: float = 120.0) -> dict:

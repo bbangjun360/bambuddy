@@ -19,6 +19,10 @@ ALLOWED_SCENARIOS = frozenset({
     "timeout",
     "obico_failure",
     "bed_failure",
+    "erp_missing_artifact",
+    "erp_missing_profile",
+    "erp_invalid_payload",
+    "erp_expired_token",
 })
 DEFAULT_SCENARIO = os.environ.get("MOCK_SCENARIO", "success")
 if DEFAULT_SCENARIO not in ALLOWED_SCENARIOS:
@@ -82,6 +86,25 @@ def maybe_fault(handler: BaseHTTPRequestHandler) -> bool:
         record_failure(scenario)
         time.sleep(5)
     return False
+
+
+def erp_work_order_payload(work_order_id: str, scenario: str) -> dict:
+    payload = {
+        "name": work_order_id,
+        "production_item": "SKU-HARNESS",
+        "qty": 1,
+        "status": "Submitted",
+        "customer": "Customer HARNESS",
+        "custom_artifact_reference": "fixture-cube-v1",
+        "custom_profile_set_id": "p1p-pla-fixture-v1",
+    }
+    if scenario == "erp_missing_artifact":
+        payload["custom_artifact_reference"] = "missing-artifact-v1"
+    elif scenario == "erp_missing_profile":
+        payload["custom_profile_set_id"] = None
+    elif scenario == "erp_invalid_payload":
+        payload.pop("name")
+    return payload
 
 
 def prometheus_escape(value: str) -> str:
@@ -153,16 +176,21 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/erp/api/resource/Work Order":
             if maybe_fault(self):
                 return
-            response(self, HTTPStatus.OK, {
-                "data": [{
-                    "name": "WO-HARNESS-0001",
-                    "production_item": "SKU-HARNESS",
-                    "qty": 1,
-                    "status": "Submitted",
-                    "custom_artifact_reference": "fixture-cube-v1",
-                    "custom_profile_set_id": "p1s-pla-fixture-v1",
-                }]
-            })
+            with LOCK:
+                scenario = STATE["scenario"]
+            response(self, HTTPStatus.OK, {"data": [erp_work_order_payload("WO-HARNESS-0001", scenario)]})
+            return
+
+        match = re.fullmatch(r"/erp/api/resource/Work Order/([^/]+)", path)
+        if match:
+            with LOCK:
+                scenario = STATE["scenario"]
+            if scenario == "erp_expired_token" or self.headers.get("Authorization") == "token expired-token":
+                response(self, HTTPStatus.UNAUTHORIZED, {"error": "expired token"})
+                return
+            if maybe_fault(self):
+                return
+            response(self, HTTPStatus.OK, {"data": erp_work_order_payload(match.group(1), scenario)})
             return
 
         match = re.fullmatch(r"/printflow/v1/cycles/([^/]+)", path)

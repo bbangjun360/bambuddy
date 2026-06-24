@@ -4,6 +4,8 @@ import http.client
 import unittest
 from unittest import mock
 
+import harness.scripts.orca_direct_slice as orca_direct_slice
+import harness.scripts.orca_health as orca_health
 import harness.scripts.smoke as smoke
 
 
@@ -26,6 +28,14 @@ class SmokeTargetsTest(unittest.TestCase):
         self.assertTrue(smoke.TARGETS["bambuddy-health"].endswith("/health"))
         self.assertTrue(smoke.TARGETS["bambuddy-docs"].endswith("/docs"))
         self.assertTrue(smoke.TARGETS["mock-services"].endswith("/health"))
+
+
+    def test_scripts_default_to_harness_env_ports(self) -> None:
+        self.assertEqual(smoke.TARGETS["bambuddy-root"], "http://127.0.0.1:18130/")
+        self.assertEqual(smoke.TARGETS["bambuddy-health"], "http://127.0.0.1:18130/health")
+        self.assertEqual(smoke.TARGETS["mock-services"], "http://127.0.0.1:19130/health")
+        self.assertEqual(orca_health.ORCA_BASE_URL, "http://127.0.0.1:13130")
+        self.assertEqual(orca_direct_slice.ORCA_BASE_URL, "http://127.0.0.1:13130")
 
     def test_wait_for_retries_transient_connection_reset_before_success(self) -> None:
         attempts = []

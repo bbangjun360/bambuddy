@@ -6,6 +6,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MAKEFILE = ROOT / "Makefile"
+DOCKERFILE = ROOT / "Dockerfile"
+HARNESS_COMPOSE = ROOT / "harness/docker-compose.harness.yml"
 
 
 def _target_body(text: str, target: str) -> str:
@@ -23,11 +25,38 @@ class MakefileContractTest(unittest.TestCase):
             self.assertNotIn("TODO WP-000", body)
             self.assertNotIn("exit 2", body)
 
-    def test_harness_reset_is_guarded_to_farm_harness_project(self) -> None:
-        body = _target_body(MAKEFILE.read_text(encoding="utf-8"), "harness-reset")
 
+    def test_harness_build_passes_git_branch_for_worktree_builds(self) -> None:
+        makefile = MAKEFILE.read_text(encoding="utf-8")
+        compose = HARNESS_COMPOSE.read_text(encoding="utf-8")
+        dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+        self.assertIn("git branch --show-current", makefile)
+        self.assertIn("GIT_BRANCH=$(GIT_BRANCH)", makefile)
+        self.assertIn("GIT_BRANCH: ${GIT_BRANCH:-main}", compose)
+        self.assertIn("ARG GIT_BRANCH=main", dockerfile)
+        self.assertIn("ENV GIT_BRANCH=${GIT_BRANCH}", dockerfile)
+        self.assertIn("COPY .git ./.git", dockerfile)
+        dockerfile_lines = {line.strip() for line in dockerfile.splitlines()}
+        self.assertNotIn("COPY .git/HEAD ./.git/HEAD", dockerfile_lines)
+
+
+    def test_wp030_erp_readonly_target_runs_focused_tests(self) -> None:
+        body = _target_body(MAKEFILE.read_text(encoding="utf-8"), "test-erp-readonly")
+
+        self.assertIn("harness.tests.test_mock_services", body)
+        self.assertIn("backend/tests/unit/services/test_erp_readonly.py", body)
+        self.assertIn("backend/tests/unit/test_erp_readonly_architecture.py", body)
+        self.assertIn("backend/tests/integration/test_erp_readonly_api.py", body)
+
+    def test_harness_reset_is_guarded_to_configured_project(self) -> None:
+        text = MAKEFILE.read_text(encoding="utf-8")
+        body = _target_body(text, "harness-reset")
+
+        self.assertIn("COMPOSE_PROJECT_NAME", text)
+        self.assertIn(".env.harness", text)
         self.assertIn("COMPOSE_PROJECT_NAME", body)
-        self.assertIn("farm_harness", body)
+        self.assertIn("farm_wp030", body)
         self.assertIn("down -v --remove-orphans", body)
 
 
