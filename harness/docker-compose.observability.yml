@@ -1,0 +1,83 @@
+services:
+  harness-observer:
+    profiles: ["observability"]
+    image: ${PYTHON_IMAGE:?Set a pinned PYTHON_IMAGE in .env.harness}
+    working_dir: /app
+    command: ["python", "/app/observability_exporter.py"]
+    environment:
+      OBSERVER_PORT: "9101"
+      BAMBUDDY_BASE_URL: http://bambuddy:8000
+      ORCA_BASE_URL: http://orca-slicer-api:3000
+      ORCA_EVIDENCE_PATH: /app/harness/artifacts/orca/fixture-cube-v1.evidence.json
+    ports:
+      - "127.0.0.1:${HARNESS_OBSERVER_PORT:-19101}:9101"
+    volumes:
+      - ./scripts/observability_exporter.py:/app/observability_exporter.py:ro
+      - ./artifacts:/app/harness/artifacts:ro
+    depends_on:
+      bambuddy:
+        condition: service_started
+      orca-slicer-api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "python", "-c",
+         "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9101/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      harness:
+        aliases:
+          - harness-observer
+
+  prometheus:
+    profiles: ["observability"]
+    image: ${PROMETHEUS_IMAGE:?Set PROMETHEUS_IMAGE in .env.harness}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-19090}:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - harness_prometheus_data:/prometheus
+    depends_on:
+      bambuddy:
+        condition: service_started
+      mock-services:
+        condition: service_healthy
+      harness-observer:
+        condition: service_healthy
+    networks:
+      harness:
+        aliases:
+          - prometheus
+
+  grafana:
+    profiles: ["observability"]
+    image: ${GRAFANA_IMAGE:?Set GRAFANA_IMAGE in .env.harness}
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-bambuddy_harness_grafana}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-13030}:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - harness_grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks:
+      harness:
+        aliases:
+          - grafana
+
+volumes:
+  harness_prometheus_data:
+  harness_grafana_data:
