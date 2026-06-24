@@ -13,19 +13,23 @@ assert on the captured state.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import zipfile
 from collections.abc import Callable
+from pathlib import Path
 
 import httpx
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import func, select
 
 from backend.app.api.routes.library import _slicer_rejection_message
 from backend.app.core.config import settings as app_settings
 from backend.app.models.library import LibraryFile
 from backend.app.models.local_preset import LocalPreset
+from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.settings import Settings as SettingsModel
 from backend.app.services import slicer_api as slicer_api_module
 from backend.app.services.slice_dispatch import slice_dispatch
@@ -67,6 +71,23 @@ def _install_mock_sidecar(handler: Callable[[httpx.Request], httpx.Response]) ->
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler), timeout=10.0)
     slicer_api_module.set_shared_http_client(client)
     return client
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_text(data: str) -> str:
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+def _profile_set_sha256(profile_hashes: dict) -> str:
+    payload = {
+        "printer": profile_hashes["printer"],
+        "process": profile_hashes["process"],
+        "filaments": profile_hashes["filaments"],
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 async def _wait_for_job(client: AsyncClient, job_id: int, timeout: float = 5.0) -> dict:
@@ -134,6 +155,86 @@ async def slice_test_setup(db_session, tmp_path):
         "printer_id": presets["printer"].id,
         "process_id": presets["process"].id,
         "filament_id": presets["filament"].id,
+        "tmp_path": tmp_path,
+    }
+
+    app_settings.base_dir = original_base_dir
+    slicer_api_module.set_shared_http_client(None)
+
+
+@pytest.fixture
+async def orca_wp010_setup(db_session, tmp_path):
+    """WP-010 fixture STL + approved deterministic local profile set."""
+    root = Path(__file__).resolve().parents[3]
+    fixture_dir = root / "harness" / "fixtures" / "orca"
+    profile_dir = fixture_dir / "profiles"
+    manifest = json.loads((fixture_dir / "profile-set.json").read_text(encoding="utf-8"))
+
+    storage_dir = tmp_path / "library" / "files"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    src_path = storage_dir / "fixture-cube-v1.stl"
+    src_bytes = (fixture_dir / "fixture-cube-v1.stl").read_bytes()
+    src_path.write_bytes(src_bytes)
+
+    original_base_dir = app_settings.base_dir
+    app_settings.base_dir = tmp_path
+
+    src_file = LibraryFile(
+        filename="fixture-cube-v1.stl",
+        file_path=str(src_path.relative_to(tmp_path)),
+        file_type="stl",
+        file_size=src_path.stat().st_size,
+        file_hash=_sha256_bytes(src_bytes),
+    )
+    db_session.add(src_file)
+
+    profile_paths = {
+        "printer": profile_dir / "p1p-printer.json",
+        "process": profile_dir / "p1p-pla-process.json",
+        "filament": profile_dir / "p1p-pla-filament.json",
+    }
+    presets = {}
+    profile_settings = {}
+    for kind, path in profile_paths.items():
+        setting = path.read_text(encoding="utf-8")
+        profile_settings[kind] = setting
+        p = LocalPreset(
+            name=manifest["profiles"][kind]["name"],
+            preset_type=kind,
+            source="p1p-pla-fixture-v1",
+            setting=setting,
+        )
+        db_session.add(p)
+        presets[kind] = p
+
+    invalid_setting = (profile_dir / "invalid-profile.json").read_text(encoding="utf-8")
+    invalid_process = LocalPreset(
+        name="Invalid process profile",
+        preset_type="process",
+        source="p1p-pla-fixture-v1",
+        setting=invalid_setting,
+    )
+    db_session.add(invalid_process)
+
+    db_session.add(SettingsModel(key="preferred_slicer", value="orcaslicer"))
+    await db_session.commit()
+
+    for p in [*presets.values(), invalid_process]:
+        await db_session.refresh(p)
+    await db_session.refresh(src_file)
+
+    yield {
+        "src_file_id": src_file.id,
+        "src_sha256": _sha256_bytes(src_bytes),
+        "printer_id": presets["printer"].id,
+        "process_id": presets["process"].id,
+        "filament_id": presets["filament"].id,
+        "invalid_process_id": invalid_process.id,
+        "profile_hashes": {
+            "printer": _sha256_text(profile_settings["printer"]),
+            "process": _sha256_text(profile_settings["process"]),
+            "filaments": [_sha256_text(profile_settings["filament"])],
+        },
         "tmp_path": tmp_path,
     }
 
@@ -533,6 +634,177 @@ class TestSliceLibraryFile:
         assert "Metadata/slice_info.config" in names
         assert "Metadata/cut_information.xml" in names
         assert "3D/3dmodel.model" in names
+
+
+# ---------------------------------------------------------------------------
+# WP-010 Orca server-side STL vertical slice
+# ---------------------------------------------------------------------------
+
+
+class TestWP010OrcaVerticalSlice:
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_fixture_stl_slices_to_visible_library_file_with_hash_provenance(
+        self, async_client: AsyncClient, db_session, orca_wp010_setup
+    ):
+        captured: dict = {}
+        output = _make_3mf_with_settings({"wp010": "sliced-output"})
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["url"] = str(request.url)
+            captured["body"] = bytes(request.content)
+            return httpx.Response(
+                status_code=200,
+                content=output,
+                headers={
+                    "x-print-time-seconds": "42",
+                    "x-filament-used-g": "0.34",
+                    "x-filament-used-mm": "123.4",
+                },
+            )
+
+        _install_mock_sidecar(handler)
+        response = await async_client.post(
+            f"/api/v1/library/files/{orca_wp010_setup['src_file_id']}/slice",
+            json={
+                "printer_preset_id": orca_wp010_setup["printer_id"],
+                "process_preset_id": orca_wp010_setup["process_id"],
+                "filament_preset_id": orca_wp010_setup["filament_id"],
+            },
+        )
+        assert response.status_code == 202, response.text
+
+        final = await _wait_for_job(async_client, response.json()["job_id"])
+        assert final["status"] == "completed", final
+        library_file_id = final["result"]["library_file_id"]
+
+        detail = await async_client.get(f"/api/v1/library/files/{library_file_id}")
+        assert detail.status_code == 200, detail.text
+        body = detail.json()
+        assert body["filename"] == "fixture-cube-v1.gcode.3mf"
+        assert body["file_type"] == "gcode.3mf"
+        assert body["file_hash"] == _sha256_bytes(output)
+
+        slicer_meta = body["metadata"]["slicer"]
+        assert slicer_meta["engine"] == "orcaslicer"
+        assert slicer_meta["source_sha256"] == orca_wp010_setup["src_sha256"]
+        assert slicer_meta["output_sha256"] == body["file_hash"]
+        assert slicer_meta["profile_sha256"] == orca_wp010_setup["profile_hashes"]
+        assert slicer_meta["profile_set_sha256"] == _profile_set_sha256(orca_wp010_setup["profile_hashes"])
+
+        queued = await db_session.scalar(select(func.count()).select_from(PrintQueueItem))
+        assert queued == 0
+        assert captured["url"].endswith("/slice")
+        forbidden = (b"BAMBU_ACCESS_CODE", b"PRINTER_SERIAL", b"MQTT_PASSWORD", b"access_code", b"mqtt_password")
+        for token in forbidden:
+            assert token not in captured["body"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_invalid_model_fails_safely_without_output_or_queue(
+        self, async_client: AsyncClient, db_session, orca_wp010_setup
+    ):
+        invalid_path = orca_wp010_setup["tmp_path"] / "library" / "files" / "invalid-model-v1.stl"
+        fixture_root = Path(__file__).resolve().parents[3] / "harness" / "fixtures" / "orca"
+        invalid_bytes = (fixture_root / "invalid-model-v1.stl").read_bytes()
+        invalid_path.write_bytes(invalid_bytes)
+        invalid_file = LibraryFile(
+            filename="invalid-model-v1.stl",
+            file_path=str(invalid_path.relative_to(orca_wp010_setup["tmp_path"])),
+            file_type="stl",
+            file_size=invalid_path.stat().st_size,
+            file_hash=_sha256_bytes(invalid_bytes),
+        )
+        db_session.add(invalid_file)
+        await db_session.commit()
+        await db_session.refresh(invalid_file)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=400, json={"message": "invalid model fixture"})
+
+        _install_mock_sidecar(handler)
+        response = await async_client.post(
+            f"/api/v1/library/files/{invalid_file.id}/slice",
+            json={
+                "printer_preset_id": orca_wp010_setup["printer_id"],
+                "process_preset_id": orca_wp010_setup["process_id"],
+                "filament_preset_id": orca_wp010_setup["filament_id"],
+            },
+        )
+        assert response.status_code == 202
+
+        final = await _wait_for_job(async_client, response.json()["job_id"])
+        assert final["status"] == "failed"
+        assert final["error_status"] == 400
+        assert "invalid model" in (final["error_detail"] or "")
+        sliced = await db_session.scalar(
+            select(func.count()).select_from(LibraryFile).where(LibraryFile.source_type == "sliced")
+        )
+        queued = await db_session.scalar(select(func.count()).select_from(PrintQueueItem))
+        assert sliced == 0
+        assert queued == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_invalid_profile_fails_safely_without_output_or_queue(
+        self, async_client: AsyncClient, db_session, orca_wp010_setup
+    ):
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert b"invalid-profile-fixture" in request.content
+            return httpx.Response(status_code=400, json={"message": "invalid profile fixture"})
+
+        _install_mock_sidecar(handler)
+        response = await async_client.post(
+            f"/api/v1/library/files/{orca_wp010_setup['src_file_id']}/slice",
+            json={
+                "printer_preset_id": orca_wp010_setup["printer_id"],
+                "process_preset_id": orca_wp010_setup["invalid_process_id"],
+                "filament_preset_id": orca_wp010_setup["filament_id"],
+            },
+        )
+        assert response.status_code == 202
+
+        final = await _wait_for_job(async_client, response.json()["job_id"])
+        assert final["status"] == "failed"
+        assert final["error_status"] == 400
+        assert "invalid profile" in (final["error_detail"] or "")
+        sliced = await db_session.scalar(
+            select(func.count()).select_from(LibraryFile).where(LibraryFile.source_type == "sliced")
+        )
+        queued = await db_session.scalar(select(func.count()).select_from(PrintQueueItem))
+        assert sliced == 0
+        assert queued == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.integration
+    async def test_timeout_fails_safely_and_leaves_no_temp_files(
+        self, async_client: AsyncClient, db_session, orca_wp010_setup
+    ):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ReadTimeout("slice timed out", request=request)
+
+        _install_mock_sidecar(handler)
+        response = await async_client.post(
+            f"/api/v1/library/files/{orca_wp010_setup['src_file_id']}/slice",
+            json={
+                "printer_preset_id": orca_wp010_setup["printer_id"],
+                "process_preset_id": orca_wp010_setup["process_id"],
+                "filament_preset_id": orca_wp010_setup["filament_id"],
+            },
+        )
+        assert response.status_code == 202
+
+        final = await _wait_for_job(async_client, response.json()["job_id"])
+        assert final["status"] == "failed"
+        assert final["error_status"] == 502
+        assert "unreachable" in (final["error_detail"] or "").lower()
+        sliced = await db_session.scalar(
+            select(func.count()).select_from(LibraryFile).where(LibraryFile.source_type == "sliced")
+        )
+        queued = await db_session.scalar(select(func.count()).select_from(PrintQueueItem))
+        assert sliced == 0
+        assert queued == 0
+        assert list(orca_wp010_setup["tmp_path"].rglob("*.orca-tmp")) == []
 
 
 # ---------------------------------------------------------------------------
