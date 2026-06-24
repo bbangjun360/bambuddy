@@ -107,6 +107,7 @@ async def test_engine():
         api_key,
         archive,
         auth_ephemeral,
+        bed_automation,
         color_catalog,
         erp_readonly,
         external_link,
