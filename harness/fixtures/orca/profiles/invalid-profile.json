@@ -1,0 +1,5 @@
+{
+  "name": "invalid-profile-fixture",
+  "from": "system",
+  "type": "not-a-process"
+}

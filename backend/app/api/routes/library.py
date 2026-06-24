@@ -3142,6 +3142,19 @@ def _patch_process_bed_type(process_json: str, bed_type: str) -> str:
 _SLICER_REJECTION_MARKER = "Slicing failed with error from slicer:"
 
 
+def _sha256_utf8(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _profile_set_sha256(profile_hashes: dict) -> str:
+    payload = {
+        "printer": profile_hashes["printer"],
+        "process": profile_hashes["process"],
+        "filaments": profile_hashes["filaments"],
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
 def _slicer_rejection_message(error_text: str) -> str | None:
     """Extract the slicer's own rejection reason from a sidecar error string,
     or ``None`` when the failure is not a slicer content rejection.
@@ -3174,7 +3187,7 @@ async def _run_slicer_with_fallback(
 ):
     """Validate presets, dispatch to the right sidecar, run the slicer with
     the auto-fallback for 3MF inputs whose `--load-settings` path crashes the
-    CLI. Returns ``(SliceResult, used_embedded_settings: bool)``. Raises
+    CLI. Returns ``(SliceResult, used_embedded_settings: bool, slicer_provenance: dict)``. Raises
     ``HTTPException`` for any caller-facing error.
 
     `current_user_id` is needed to resolve **cloud** presets — the cloud token
@@ -3339,6 +3352,17 @@ async def _run_slicer_with_fallback(
 
         filament_jsons = substitute_unused_plate_filaments(primary_bytes, request.plate, filament_jsons)
 
+    profile_hashes = {
+        "printer": _sha256_utf8(presets["printer"]),
+        "process": _sha256_utf8(presets["process"]),
+        "filaments": [_sha256_utf8(value) for value in filament_jsons],
+    }
+    slicer_provenance = {
+        "engine": preferred,
+        "profile_sha256": profile_hashes,
+        "profile_set_sha256": _profile_set_sha256(profile_hashes),
+    }
+
     # Cross-class slice-all loop (#1493): when the user asks for
     # ``plate=0`` (all plates) AND the source's nozzle class differs from
     # the target's, ``--slice 0 --arrange 1`` consolidates every plate's
@@ -3488,7 +3512,7 @@ async def _run_slicer_with_fallback(
     finally:
         await service.close()
 
-    return result, used_embedded_settings
+    return result, used_embedded_settings, slicer_provenance
 
 
 def _canonical_printer_model(raw: str | None) -> str | None:
@@ -3577,7 +3601,7 @@ async def slice_and_persist(
 
     library_request = request.model_copy(update={"export_3mf": True})
 
-    result, used_embedded_settings = await _run_slicer_with_fallback(
+    result, used_embedded_settings, slicer_provenance = await _run_slicer_with_fallback(
         db,
         model_bytes=model_bytes,
         model_filename=model_filename,
@@ -3585,6 +3609,9 @@ async def slice_and_persist(
         current_user_id=current_user_id,
         job_id=job_id,
     )
+
+    source_sha256 = hashlib.sha256(model_bytes).hexdigest()
+    output_sha256 = hashlib.sha256(result.content).hexdigest()
 
     base_name = model_filename.rsplit(".", 1)[0]
     out_filename = f"{base_name}.gcode.3mf"
@@ -3628,6 +3655,11 @@ async def slice_and_persist(
             "print_time_seconds": result.print_time_seconds,
             "filament_used_g": filament_g,
             "filament_used_mm": filament_mm,
+            "slicer": {
+                **slicer_provenance,
+                "source_sha256": source_sha256,
+                "output_sha256": output_sha256,
+            },
         }
     )
     if used_embedded_settings:
@@ -3647,7 +3679,7 @@ async def slice_and_persist(
         # and gates for "gcode.3mf" are explicit at the call sites.
         file_type="gcode.3mf",
         file_size=len(result.content),
-        file_hash=hashlib.sha256(result.content).hexdigest(),
+        file_hash=output_sha256,
         thumbnail_path=thumbnail_relative,
         file_metadata=metadata,
         source_type="sliced",
@@ -3693,7 +3725,7 @@ async def slice_and_persist_as_archive(
     # caller's `export_3mf` flag; here we override.
     archive_request = request.model_copy(update={"export_3mf": True})
 
-    result, used_embedded_settings = await _run_slicer_with_fallback(
+    result, used_embedded_settings, slicer_provenance = await _run_slicer_with_fallback(
         db,
         model_bytes=model_bytes,
         model_filename=model_filename,
@@ -3701,6 +3733,9 @@ async def slice_and_persist_as_archive(
         job_id=job_id,
         current_user_id=current_user_id,
     )
+
+    source_sha256 = hashlib.sha256(model_bytes).hexdigest()
+    output_sha256 = hashlib.sha256(result.content).hexdigest()
 
     base_name = model_filename.rsplit(".", 1)[0]
     out_filename = f"{base_name}.gcode.3mf"
@@ -3770,6 +3805,11 @@ async def slice_and_persist_as_archive(
             "print_time_seconds": result.print_time_seconds,
             "filament_used_g": filament_g,
             "filament_used_mm": filament_mm,
+            "slicer": {
+                **slicer_provenance,
+                "source_sha256": source_sha256,
+                "output_sha256": output_sha256,
+            },
         }
     )
     if used_embedded_settings:
@@ -3804,7 +3844,7 @@ async def slice_and_persist_as_archive(
         filename=out_filename,
         file_path=str(out_path.relative_to(app_settings.base_dir)),
         file_size=len(result.content),
-        content_hash=hashlib.sha256(result.content).hexdigest(),
+        content_hash=output_sha256,
         thumbnail_path=thumbnail_path,
         # Inherit identity from the source archive so the new entry shows
         # up alongside its sibling in the archives list.

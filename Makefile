@@ -1,5 +1,5 @@
-.PHONY: harness-config harness-up harness-down harness-reset harness-health \
-        harness-persistence harness-backup harness-restore \
+.PHONY: harness-config harness-up harness-up-slicer harness-down harness-reset harness-health \
+        harness-persistence harness-backup harness-restore harness-orca-health harness-orca-slice \
         test-unit test-characterization test-contract test-integration test-scenario \
         verify-fast verify-full context-check workpack-check hooks-check
 
@@ -13,6 +13,9 @@ harness-config:
 harness-up:
 	$(COMPOSE) up -d --build postgres mock-services bambuddy
 
+harness-up-slicer:
+	$(COMPOSE) --profile slicer up -d --build postgres mock-services orca-slicer-api bambuddy
+
 harness-down:
 	$(COMPOSE) down --remove-orphans
 
@@ -23,6 +26,12 @@ harness-reset:
 
 harness-health:
 	python3 harness/scripts/smoke.py
+
+harness-orca-health:
+	python3 harness/scripts/orca_health.py
+
+harness-orca-slice:
+	python3 harness/scripts/orca_direct_slice.py
 
 harness-persistence:
 	python3 harness/scripts/persistence.py
