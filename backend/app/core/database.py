@@ -171,6 +171,7 @@ async def init_db():
         api_key,
         archive,
         auth_ephemeral,
+        bed_automation,
         bug_report,
         color_catalog,
         erp_readonly,

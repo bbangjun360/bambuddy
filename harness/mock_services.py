@@ -19,6 +19,7 @@ ALLOWED_SCENARIOS = frozenset({
     "timeout",
     "obico_failure",
     "bed_failure",
+    "bed_timeout",
     "erp_missing_artifact",
     "erp_missing_profile",
     "erp_invalid_payload",
@@ -290,13 +291,33 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 if existing is None:
                     cycle_id = payload.get("cycle_id") or str(uuid.uuid4())
-                    status = "failed" if STATE["scenario"] == "bed_failure" else "completed"
-                    existing = {
-                        "cycle_id": cycle_id,
-                        "idempotency_key": key,
-                        "status": status,
-                        "dry_run": bool(payload.get("dry_run", True)),
-                    }
+                    scenario = STATE["scenario"]
+                    if scenario == "bed_failure":
+                        existing = {
+                            "cycle_id": cycle_id,
+                            "idempotency_key": key,
+                            "status": "failed",
+                            "dry_run": bool(payload.get("dry_run", True)),
+                            "failure_class": "simulated_failure",
+                            "manual_review_required": True,
+                        }
+                    elif scenario == "bed_timeout":
+                        existing = {
+                            "cycle_id": cycle_id,
+                            "idempotency_key": key,
+                            "status": "timeout",
+                            "dry_run": bool(payload.get("dry_run", True)),
+                            "failure_class": "simulated_timeout",
+                            "manual_review_required": True,
+                        }
+                    else:
+                        existing = {
+                            "cycle_id": cycle_id,
+                            "idempotency_key": key,
+                            "status": "completed",
+                            "dry_run": bool(payload.get("dry_run", True)),
+                            "manual_review_required": False,
+                        }
                     STATE["bed_cycles"][cycle_id] = existing
             response(self, HTTPStatus.ACCEPTED, existing)
             return

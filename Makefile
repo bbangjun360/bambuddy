@@ -1,7 +1,7 @@
 .PHONY: harness-config harness-up harness-up-slicer harness-up-observability harness-down harness-reset harness-health \
         harness-persistence harness-backup harness-restore harness-orca-health harness-orca-slice \
-        harness-observability-health test-unit test-characterization test-contract test-integration \
-        test-scenario test-observability test-erp-readonly verify-fast verify-full context-check workpack-check hooks-check
+        harness-observability-health harness-bed-automation test-unit test-characterization test-contract test-integration \
+        test-scenario test-observability test-erp-readonly test-bed-automation verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
 -include $(HARNESS_ENV)
@@ -43,6 +43,9 @@ harness-orca-slice:
 harness-observability-health:
 	python3 harness/scripts/observability_health.py
 
+harness-bed-automation:
+	python3 -m unittest harness.tests.test_bed_automation_mock
+
 harness-persistence:
 	python3 harness/scripts/persistence.py
 
@@ -76,6 +79,9 @@ test-integration:
 test-erp-readonly:
 	python3 -m unittest harness.tests.test_mock_services
 	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-wp030-tests -e LOG_DIR=/tmp/bambuddy-wp030-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend/tests/unit/services/test_erp_readonly.py backend/tests/unit/test_erp_readonly_architecture.py backend/tests/integration/test_erp_readonly_api.py
+
+test-bed-automation: harness-bed-automation
+	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-wp050-bed-tests -e LOG_DIR=/tmp/bambuddy-wp050-bed-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m pytest -q -p no:cacheprovider backend/tests/unit/test_bed_automation_simulator.py backend/tests/unit/test_bed_automation_architecture.py
 
 test-scenario:
 	python3 -m unittest discover -s harness/tests -p 'scenario_*.py'
