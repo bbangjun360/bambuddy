@@ -21,7 +21,6 @@ GRAFANA_DATASOURCE = ROOT / "harness/observability/grafana/provisioning/datasour
 GRAFANA_DASHBOARD_PROVIDER = ROOT / "harness/observability/grafana/provisioning/dashboards/dashboards.yml"
 GRAFANA_DASHBOARD = ROOT / "harness/observability/grafana/dashboards/farm-observability.json"
 MAKEFILE = ROOT / "Makefile"
-ENV_FILE = ROOT / ".env.harness"
 EXAMPLE_ENV_FILE = ROOT / ".env.harness.example"
 EXPORTER = ROOT / "harness/scripts/observability_exporter.py"
 HEALTH_SCRIPT = ROOT / "harness/scripts/observability_health.py"
@@ -121,16 +120,14 @@ class ObservabilityConfigTest(unittest.TestCase):
         ):
             self.assertIn(expression, expressions)
 
-    def test_harness_env_documents_observability_ports_and_images(self) -> None:
-        env = _read_env(ENV_FILE)
-        example = _read_env(EXAMPLE_ENV_FILE)
+    def test_harness_example_documents_default_observability_ports_and_images(self) -> None:
+        values = _read_env(EXAMPLE_ENV_FILE)
 
-        for values in (env, example):
-            self.assertIn("PROMETHEUS_IMAGE", values)
-            self.assertIn("GRAFANA_IMAGE", values)
-            self.assertEqual(values["PROMETHEUS_PORT"], "19090")
-            self.assertEqual(values["GRAFANA_PORT"], "13030")
-            self.assertEqual(values["HARNESS_OBSERVER_PORT"], "19101")
+        self.assertIn("PROMETHEUS_IMAGE", values)
+        self.assertIn("GRAFANA_IMAGE", values)
+        self.assertEqual(values["PROMETHEUS_PORT"], "19090")
+        self.assertEqual(values["GRAFANA_PORT"], "13030")
+        self.assertEqual(values["HARNESS_OBSERVER_PORT"], "19101")
 
     def test_makefile_exposes_clear_wp020_targets(self) -> None:
         text = _read(MAKEFILE)
@@ -210,16 +207,18 @@ class ObservabilityHealthEnvResolutionTest(unittest.TestCase):
                 ),
             )
 
-            endpoints = module.resolve_endpoints(
-                env_file=env_file,
-                environ={
+            with mock.patch.dict(
+                os.environ,
+                {
                     "BAMBUDDY_BASE_URL": "http://127.0.0.1:28131/",
                     "MOCK_BASE_URL": "http://127.0.0.1:29131/",
                     "PROMETHEUS_BASE_URL": "http://127.0.0.1:29091/",
                     "GRAFANA_BASE_URL": "http://127.0.0.1:23031/",
                     "OBSERVER_BASE_URL": "http://127.0.0.1:29132/",
                 },
-            )
+                clear=True,
+            ):
+                endpoints = module.resolve_endpoints(env_file=env_file)
 
         self.assertEqual(endpoints["bambuddy_base_url"], "http://127.0.0.1:28131")
         self.assertEqual(endpoints["mock_base_url"], "http://127.0.0.1:29131")
