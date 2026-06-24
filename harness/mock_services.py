@@ -32,6 +32,68 @@ DEFAULT_SCENARIO = os.environ.get("MOCK_SCENARIO", "success")
 if DEFAULT_SCENARIO not in ALLOWED_SCENARIOS:
     DEFAULT_SCENARIO = "success"
 
+OBICO_SHADOW_EVENTS = {
+    "healthy": {
+        "event_id": "shadow-healthy-0001",
+        "event_type": "PRINT_HEALTH_OK",
+        "printer_id": "printer-fixture-001",
+        "print_id": "print-fixture-cube-001",
+        "observed_at": "2026-06-24T10:00:00Z",
+        "confidence": 0.02,
+        "metadata": {"scenario": "healthy", "synthetic": True},
+    },
+    "spaghetti": {
+        "event_id": "shadow-spaghetti-0001",
+        "event_type": "POSSIBLE_SPAGHETTI",
+        "printer_id": "printer-fixture-001",
+        "print_id": "print-fixture-cube-001",
+        "observed_at": "2026-06-24T10:01:00Z",
+        "confidence": 0.95,
+        "metadata": {"scenario": "spaghetti", "synthetic": True},
+    },
+    "layer-shift": {
+        "event_id": "shadow-layer-shift-0001",
+        "event_type": "POSSIBLE_LAYER_SHIFT",
+        "printer_id": "printer-fixture-001",
+        "print_id": "print-fixture-cube-001",
+        "observed_at": "2026-06-24T10:02:00Z",
+        "confidence": 0.88,
+        "metadata": {"scenario": "layer-shift", "synthetic": True},
+    },
+    "detachment": {
+        "event_id": "shadow-detachment-0001",
+        "event_type": "POSSIBLE_DETACHMENT",
+        "printer_id": "printer-fixture-001",
+        "print_id": "print-fixture-cube-001",
+        "observed_at": "2026-06-24T10:03:00Z",
+        "confidence": 0.82,
+        "metadata": {"scenario": "detachment", "synthetic": True},
+    },
+    "camera-unavailable": {
+        "event_id": "shadow-camera-unavailable-0001",
+        "event_type": "CAMERA_UNAVAILABLE",
+        "printer_id": "printer-fixture-001",
+        "print_id": "print-fixture-cube-001",
+        "observed_at": "2026-06-24T10:04:00Z",
+        "confidence": None,
+        "metadata": {"scenario": "camera-unavailable", "synthetic": True},
+    },
+    "timeout": {
+        "event_id": "shadow-timeout-0001",
+        "event_type": "MONITORING_TIMEOUT",
+        "printer_id": "printer-fixture-001",
+        "print_id": "print-fixture-cube-001",
+        "observed_at": "2026-06-24T10:05:00Z",
+        "confidence": None,
+        "metadata": {"scenario": "timeout", "synthetic": True},
+    },
+    "invalid": {
+        "event_type": "POSSIBLE_SPAGHETTI",
+        "printer_id": "",
+        "metadata": {"scenario": "invalid", "synthetic": True},
+    },
+}
+
 LOCK = threading.Lock()
 STATE = {
     "scenario": DEFAULT_SCENARIO,
@@ -267,6 +329,16 @@ class Handler(BaseHTTPRequestHandler):
                 "detections": [] if score < 0.5 else [{"label": "failure", "score": score}],
                 "image_received": bool(query.get("img")),
             })
+            return
+
+        match = re.fullmatch(r"/obico-shadow/v1/events/([^/]+)", path)
+        if match:
+            scenario_name = match.group(1)
+            payload = OBICO_SHADOW_EVENTS.get(scenario_name)
+            if payload is None:
+                response(self, HTTPStatus.NOT_FOUND, {"error": "unknown obico shadow scenario", "allowed": sorted(OBICO_SHADOW_EVENTS)})
+                return
+            response(self, HTTPStatus.OK, json.loads(json.dumps(payload)))
             return
 
         if path == "/admin/state":
