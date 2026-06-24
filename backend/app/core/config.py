@@ -100,6 +100,9 @@ class Settings(BaseSettings):
     farm_bed_automation_enabled: bool = False
     farm_bed_automation_dry_run: bool = True
 
+    # WP-070 Obico Shadow Mode. Disabled by default and records observations only.
+    farm_obico_shadow_enabled: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

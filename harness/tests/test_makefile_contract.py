@@ -49,6 +49,20 @@ class MakefileContractTest(unittest.TestCase):
         self.assertIn("backend/tests/unit/test_erp_readonly_architecture.py", body)
         self.assertIn("backend/tests/integration/test_erp_readonly_api.py", body)
 
+    def test_wp070_obico_shadow_target_runs_focused_tests(self) -> None:
+        body = _target_body(MAKEFILE.read_text(encoding="utf-8"), "test-obico-shadow")
+
+        self.assertIn("backend.tests.unit.services.test_obico_shadow", body)
+        self.assertIn("backend.tests.unit.test_obico_shadow_architecture", body)
+        self.assertIn("harness.tests.test_obico_shadow_mock", body)
+        self.assertIn("backend.tests.integration.test_obico_shadow_api", body)
+
+    def test_wp070_harness_shadow_target_opts_in_explicitly(self) -> None:
+        body = _target_body(MAKEFILE.read_text(encoding="utf-8"), "harness-obico-shadow")
+
+        self.assertIn("FARM_OBICO_SHADOW_ENABLED=true", body)
+        self.assertIn("harness/scripts/obico_shadow.py", body)
+
     def test_harness_reset_is_guarded_to_configured_project(self) -> None:
         text = MAKEFILE.read_text(encoding="utf-8")
         body = _target_body(text, "harness-reset")
