@@ -43,6 +43,8 @@ services:
   bambuddy:
     build:
       context: ..
+      args:
+        GIT_BRANCH: ${GIT_BRANCH:-main}
     environment:
       TZ: Asia/Seoul
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bambuddy}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bambuddy}

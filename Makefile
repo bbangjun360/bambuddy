@@ -1,11 +1,13 @@
 .PHONY: harness-config harness-up harness-up-slicer harness-down harness-reset harness-health \
         harness-persistence harness-backup harness-restore harness-orca-health harness-orca-slice \
-        test-unit test-characterization test-contract test-integration test-scenario \
+        test-unit test-characterization test-contract test-integration test-scenario test-erp-readonly \
         verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
+include $(HARNESS_ENV)
 HARNESS_COMPOSE ?= harness/docker-compose.harness.yml
-COMPOSE = COMPOSE_PROJECT_NAME=farm_harness docker compose --env-file $(HARNESS_ENV) -f $(HARNESS_COMPOSE)
+GIT_BRANCH ?= $(shell git branch --show-current 2>/dev/null || echo main)
+COMPOSE = COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) GIT_BRANCH=$(GIT_BRANCH) docker compose --env-file $(HARNESS_ENV) -f $(HARNESS_COMPOSE)
 
 harness-config:
 	$(COMPOSE) config >/dev/null
@@ -21,7 +23,7 @@ harness-down:
 
 harness-reset:
 	@echo "This deletes only the isolated harness project volumes."
-	@test "$${COMPOSE_PROJECT_NAME:-farm_harness}" = "farm_harness"
+	@test "$(COMPOSE_PROJECT_NAME)" = "farm_wp030"
 	$(COMPOSE) down -v --remove-orphans
 
 harness-health:
@@ -62,6 +64,10 @@ test-contract:
 
 test-integration:
 	python3 harness/scripts/smoke.py
+
+test-erp-readonly:
+	python3 -m unittest harness.tests.test_mock_services
+	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-wp030-tests -e LOG_DIR=/tmp/bambuddy-wp030-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend/tests/unit/services/test_erp_readonly.py backend/tests/unit/test_erp_readonly_architecture.py backend/tests/integration/test_erp_readonly_api.py
 
 test-scenario:
 	python3 -m unittest discover -s harness/tests -p 'scenario_*.py'

@@ -27,6 +27,7 @@ from backend.app.api.routes import (
     camera,
     cloud,
     discovery,
+    erp_readonly,
     external_links,
     filaments,
     firmware,
@@ -6227,6 +6228,7 @@ app.include_router(system.router, prefix=app_settings.api_prefix)
 app.include_router(support.router, prefix=app_settings.api_prefix)
 app.include_router(websocket.router, prefix=app_settings.api_prefix)
 app.include_router(discovery.router, prefix=app_settings.api_prefix)
+app.include_router(erp_readonly.router, prefix=app_settings.api_prefix)
 app.include_router(pending_uploads.router, prefix=app_settings.api_prefix)
 app.include_router(firmware.router, prefix=app_settings.api_prefix)
 app.include_router(github_backup.router, prefix=app_settings.api_prefix)

@@ -89,6 +89,13 @@ class Settings(BaseSettings):
     slicer_api_url: str = "http://localhost:3003"
     bambu_studio_api_url: str = "http://localhost:3001"
 
+    # WP-030 ERP read-only import. Disabled by default; tests and harness
+    # scenarios opt in explicitly. This integration reads Work Orders only.
+    farm_erp_import_enabled: bool = False
+    farm_erp_base_url: str = "http://mock-services:9099"
+    farm_erp_api_token: str | None = None
+    farm_erp_timeout_seconds: float = 5.0
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
