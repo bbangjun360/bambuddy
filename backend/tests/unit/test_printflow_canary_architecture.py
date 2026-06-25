@@ -27,6 +27,22 @@ class PrintFlowCanaryArchitectureTest(unittest.TestCase):
         self.assertIn("farm_printflow_base_url: str | None = None", text)
         self.assertIn("farm_printflow_api_token: str | None = None", text)
 
+    def test_external_server_adapter_is_pending_redesign_not_live_http_client(self) -> None:
+        combined = self._combined_implementation_text()
+
+        self.assertIn("external_adapter_pending_redesign", combined)
+        forbidden = [
+            "import http.client",
+            "HTTPConnection",
+            "HTTPSConnection",
+            "/printflow/v1/canary/runs",
+            "_split_printflow_base_url",
+        ]
+
+        for token in forbidden:
+            with self.subTest(token=token):
+                self.assertNotIn(token, combined)
+
     def test_wp060_files_have_no_real_control_plane_or_external_client_imports(self) -> None:
         combined = self._combined_implementation_text()
         forbidden = [

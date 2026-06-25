@@ -23,12 +23,14 @@ def _require_enabled() -> None:
 
 
 def printflow_real_canary_adapter_factory(*, base_url: str, api_token: str) -> RealPrintFlowCanaryAdapter:
+    # Legacy server-adapter hook retained only so tests can prove it is not called
+    # while the external adapter canary remains pending redesign.
     return RealPrintFlowCanaryAdapter(base_url=base_url, api_token=api_token)
 
 
 def _require_real_canary_enabled() -> None:
     if not settings.farm_printflow_canary_readiness_enabled:
-        raise HTTPException(status_code=404, detail="real PrintFlow canary is disabled")
+        raise HTTPException(status_code=404, detail="experimental external adapter canary is disabled")
 
 
 def _error_detail(exc: PrintFlowCanaryError) -> dict[str, str]:

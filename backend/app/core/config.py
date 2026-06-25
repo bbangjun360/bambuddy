@@ -108,8 +108,9 @@ class Settings(BaseSettings):
     farm_obico_shadow_enabled: bool = False
 
     # WP-060 PrintFlow canary readiness. Disabled by default; dry-run,
-    # human-gated, mock-readiness checks only. Real canary dispatch remains
-    # independently default-off and blocked unless every explicit gate is open.
+    # human-gated, mock-readiness checks only. The previous server-adapter
+    # model is deprecated/pending redesign because PrintFlow/SwapMod are 3MF
+    # post-processing workflows, not remote control servers for live operation.
     farm_printflow_canary_readiness_enabled: bool = False
     farm_printflow_real_adapter_enabled: bool = False
     farm_printflow_canary_dry_run: bool = True

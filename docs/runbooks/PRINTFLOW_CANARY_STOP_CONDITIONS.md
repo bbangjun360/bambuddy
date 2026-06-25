@@ -1,46 +1,58 @@
-# PrintFlow Canary Stop Conditions
+# WP-060 Plate-Change Stop Conditions
 
 ## Purpose
 
-These stop conditions apply to WP-060 canary readiness, mock harness dry-runs,
-and any later separately approved physical canary. This PR must not execute a
-real PrintFlow call. When a stop condition is met, halt canary preparation or
-rollout, preserve evidence, and move the affected printer or bed-cycle record to
-manual review where applicable.
+These stop conditions apply to WP-060 mock readiness, corrected architecture
+work, and any later separately approved plate-change canary. This PR must not
+execute a real canary, call a fake PrintFlow server, or send a printer command.
 
 ## Immediate Stop Conditions
 
 Stop immediately if any of the following occur:
 
-- The exact approval phrase `CONFIRM_REAL_PRINTFLOW_CANARY <printer_id> <job_id>`
-  is missing, mismatched, stale, partial, or refers to the wrong printer or job.
-- More than one printer appears in a canary request, allow-list, approval
-  record, operator note, log, or downstream request.
-- A real adapter enabled unexpectedly condition is observed, including when
-  `FARM_PRINTFLOW_REAL_ADAPTER_ENABLED` is true.
-- A dry-run disabled unexpectedly condition is observed, including when
-  `FARM_PRINTFLOW_CANARY_DRY_RUN` is false.
-- A PrintFlow request is attempted before safe defaults, single-printer scope,
-  human approval, operator readiness, emergency stop, and rollback gates are
-  confirmed.
+- Anyone attempts to use PrintFlow or SwapMod as a remote control server.
+- `FARM_PRINTFLOW_BASE_URL` or `FARM_PRINTFLOW_API_TOKEN` is set for live
+  operation.
+- A Bambu printer IP address, access code, serial number, local printer URL,
+  production URL, or fake PrintFlow server endpoint is used as a PrintFlow base
+  URL.
+- The legacy `/real-canary-runs` path constructs an adapter, makes a network
+  call, or returns anything other than a blocked pending-redesign result.
+- A real printer, ERPNext instance, Obico instance, Bambu MQTT service, FTPS
+  service, or hardware interface receives an unexpected command.
 - Queue, scheduler, ERP, Obico, or bed side effects occur during readiness or
   dry-run evidence collection.
+- A non-dry-run path is enabled without explicit approval.
+- A feature flag that should be default-off is enabled unexpectedly.
+- A general arbitrary G-code endpoint is introduced or exposed.
+- Direct Bambu MQTT or FTPS access is added outside Bambuddy authority.
 - A leaked secret, token, access code, serial number, production URL, real
   network address, printer identifier, or customer datum appears in logs,
   fixtures, checklists, commits, or PR text.
-- A real printer, PrintFlow device, ERPNext instance, Obico instance, Bambu MQTT
-  service, FTPS service, or hardware interface receives an unexpected command.
-- A non-dry-run path is enabled without explicit approval.
-- A feature flag that should be default-off is enabled unexpectedly.
-- `FARM_PRINTFLOW_BASE_URL` or `FARM_PRINTFLOW_API_TOKEN` is set without a
-  separate approved physical canary record.
-- Any log, fixture, checklist, commit, or PR text contains a secret, access
-  code, serial number, production URL, real network address, or customer data.
-- Any external module attempts to control a printer or connect directly to Bambu
-  MQTT or FTPS.
-- A general arbitrary G-code endpoint is introduced or exposed.
 - Bambuddy fails to start or loses the ability to record state transitions.
 - The operator or safety observer is unavailable for a physical canary decision.
+
+## Future 3MF Post-Process Stops
+
+Stop a future 3MF post-process path if:
+
+- The input is not a reviewed `.3mf` fixture or approved artifact.
+- The output is not a deterministic modified `.3mf`.
+- Extraction or diff tests cannot prove the expected G-code change.
+- The modified artifact bypasses the existing Bambuddy flow.
+- The transformation requires printer credentials or customer data.
+
+## Future Direct Command Stops
+
+Stop a future Bambuddy-native direct command path if:
+
+- More than one printer is selected.
+- The operator has not confirmed bed and plate state.
+- The command is not one predefined allowlisted G-code sequence.
+- Any arbitrary G-code input is accepted.
+- A scheduler, queue, retry, or repeat path can trigger the command.
+- Audit logging is missing or incomplete.
+- Hardware canary evidence is missing before enabling.
 
 ## Printer and Bed State Stops
 
@@ -74,7 +86,7 @@ Stop if the adapter or mock harness shows unsafe behavior:
 
 Stop if downstream systems cross their allowed boundary:
 
-- ERPNext attempts to control a printer or PrintFlow device.
+- ERPNext attempts to control a printer or plate-change device.
 - ERP inventory or accounting writes are not idempotent.
 - ERP writes are not Draft-only during readiness work.
 - Obico attempts to control the printer instead of notify-only behavior.
@@ -84,12 +96,11 @@ Stop if downstream systems cross their allowed boundary:
 
 For any later approved physical canary, stop before the request if the operator
 cannot reach an emergency stop or power cutoff. Stop before the request if the
-rollback path is unknown, unassigned, or would delete logs, metrics, screenshots,
-harness artifacts, or audit evidence.
+rollback path is unknown, unassigned, or would delete logs, metrics,
+screenshots, harness artifacts, or audit evidence.
 
-Rollback must disable the real adapter, restore dry-run, preserve evidence, and
-leave any uncertain printer or bed state in manual review until a human resolves
-it.
+Rollback must preserve evidence and leave any uncertain printer or bed state in
+manual review until a human resolves it.
 
 ## Required Stop Response
 

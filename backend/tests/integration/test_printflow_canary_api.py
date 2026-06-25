@@ -334,6 +334,26 @@ class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(count, 0, effect)
         await self.assert_no_control_rows()
 
+    async def test_enabled_readiness_does_not_require_printflow_base_url_or_token(self) -> None:
+        self.enable_canary()
+        self.set_safe_real_canary_defaults_if_present()
+
+        response = await self.client.post(
+            "/api/v1/printflow-canary/readiness-checks",
+            json={
+                "check_key": "no-base-url-needed",
+                "dry_run": True,
+                "audit_only": True,
+                "operator_approved": True,
+                "mock_scenario": "ready",
+            },
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["status"], READINESS_PASSED)
+        self.assertTrue(response.json()["mock_only"])
+        await self.assert_no_control_rows()
+
     async def test_enabled_api_rejects_non_dry_run_or_non_audit_requests(self) -> None:
         self.enable_canary()
 
@@ -371,6 +391,24 @@ class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["detail"]["code"], "dry_run_required")
         await self.assert_no_control_rows()
 
+    async def test_printflow_canary_router_exposes_no_direct_command_or_dispatch_endpoints(self) -> None:
+        route_paths = {route.path for route in app.routes if "printflow-canary" in route.path}
+
+        self.assertEqual(
+            route_paths,
+            {
+                "/api/v1/printflow-canary/readiness-checks",
+                "/api/v1/printflow-canary/real-canary-runs",
+                "/api/v1/printflow-canary/status",
+                "/api/v1/printflow-canary/metrics",
+            },
+        )
+        forbidden = ("command", "gcode", "queue", "scheduler", "dispatch")
+        for path in route_paths:
+            for token in forbidden:
+                with self.subTest(path=path, token=token):
+                    self.assertNotIn(token, path.lower())
+
     async def test_real_canary_api_disabled_by_default_without_control_side_effects(self) -> None:
         response = await self.client.post(
             "/api/v1/printflow-canary/real-canary-runs",
@@ -379,7 +417,7 @@ class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
 
         await self.assert_no_control_rows()
         self.assertEqual(response.status_code, 404)
-        self.assertIn("real printflow canary is disabled", response.json()["detail"].lower())
+        self.assertIn("experimental external adapter canary is disabled", response.json()["detail"].lower())
 
     async def test_enabled_readiness_with_safe_real_defaults_blocks_without_real_adapter(self) -> None:
         self.enable_canary()
@@ -388,7 +426,7 @@ class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             canary_route,
             "printflow_real_canary_adapter_factory",
-            side_effect=AssertionError("real PrintFlow adapter factory must not be called for blocked defaults"),
+            side_effect=AssertionError("external adapter factory must not be called for blocked defaults"),
             create=True,
         ) as factory:
             response = await self.client.post(
@@ -416,46 +454,38 @@ class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
         for effect, count in body["sentinels"].items():
             self.assertEqual(count, 0, effect)
 
-    async def test_real_canary_api_all_gates_pass_with_mocked_adapter_and_no_control_side_effects(self) -> None:
+    async def test_external_adapter_pending_redesign_blocks_even_when_legacy_gates_are_set(self) -> None:
         self.enable_real_canary_gates_with_fake_endpoint()
-        factory = FakeRouteRealPrintFlowCanaryFactory()
 
-        with patch.object(canary_route, "printflow_real_canary_adapter_factory", factory):
+        with patch.object(
+            canary_route,
+            "printflow_real_canary_adapter_factory",
+            side_effect=AssertionError("external adapter factory must not run while pending redesign"),
+        ) as factory:
             response = await self.client.post(
                 "/api/v1/printflow-canary/real-canary-runs",
                 json=self.real_canary_payload(),
             )
+            replay = await self.client.post(
+                "/api/v1/printflow-canary/real-canary-runs",
+                json=self.real_canary_payload(),
+            )
 
+        factory.assert_not_called()
         self.assertEqual(response.status_code, 202)
+        self.assertEqual(replay.status_code, 202)
+        self.assertEqual(response.json(), replay.json())
         body = response.json()
-        self.assertEqual(body["status"], "REAL_CANARY_DISPATCHED")
-        self.assertTrue(body["ready_for_canary"])
-        self.assertFalse(body["dry_run"])
-        self.assertFalse(body["audit_only"])
-        self.assertEqual(body["adapter_run_id"], "fake-route-real-printflow-run-001")
+        self.assertEqual(body["status"], "REAL_CANARY_BLOCKED")
+        self.assertFalse(body["ready_for_canary"])
+        self.assertIn("external_adapter_pending_redesign", body["blocked_reasons"])
         self.assertEqual(body["adapter_network_calls_made"], 0)
         self.assertEqual(body["adapter_hardware_calls_made"], 0)
-        self.assertEqual(
-            factory.calls,
-            [{"base_url": ROUTE_FAKE_PRINTFLOW_BASE_URL, "api_token": ROUTE_FAKE_PRINTFLOW_API_TOKEN}],
-        )
-        self.assertEqual(
-            factory.adapters[0].calls,
-            [
-                {
-                    "job_id": "job-fixture-001",
-                    "target_printer_id": "printer-fixture-001",
-                    "idempotency_key": "real-canary-api-idempotency-001",
-                    "dry_run": False,
-                    "audit_only": False,
-                }
-            ],
-        )
         for effect, count in body["sentinels"].items():
             self.assertEqual(count, 0, effect)
         await self.assert_no_control_rows()
 
-    async def test_real_canary_api_adapter_failure_returns_manual_review_without_retry(self) -> None:
+    async def test_external_adapter_pending_redesign_prevents_adapter_failure_path(self) -> None:
         self.enable_real_canary_gates_with_fake_endpoint()
         factory = FakeRouteRealPrintFlowCanaryFactory(adapter_cls=FailingRouteRealPrintFlowCanaryAdapter)
         payload = self.real_canary_payload(idempotency_key="real-canary-api-failure-001")
@@ -468,31 +498,24 @@ class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.status_code, 202)
         self.assertEqual(first.json(), second.json())
         body = first.json()
-        self.assertEqual(body["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(body["status"], "REAL_CANARY_BLOCKED")
         self.assertFalse(body["ready_for_canary"])
-        self.assertTrue(body["manual_review_required"])
-        self.assertTrue(body["uncertain_physical_state"])
-        self.assertIn("real_adapter_exception", body["blocked_reasons"])
+        self.assertFalse(body["manual_review_required"])
+        self.assertFalse(body["uncertain_physical_state"])
+        self.assertIn("external_adapter_pending_redesign", body["blocked_reasons"])
         self.assertEqual(body["adapter_network_calls_made"], 0)
         self.assertEqual(body["adapter_hardware_calls_made"], 0)
-        self.assertEqual(len(factory.calls), 1)
-        self.assertEqual(len(factory.adapters), 1)
-        self.assertEqual(len(factory.adapters[0].calls), 1)
+        self.assertEqual(factory.calls, [])
+        self.assertEqual(factory.adapters, [])
         await self.assert_no_control_rows()
 
-    async def test_real_canary_api_idempotency_replay_rechecks_gates_and_payload_fingerprint(self) -> None:
+    async def test_external_adapter_pending_redesign_is_not_stored_as_dispatch_replay(self) -> None:
         self.enable_real_canary_gates_with_fake_endpoint()
         factory = FakeRouteRealPrintFlowCanaryFactory()
         payload = self.real_canary_payload()
 
         with patch.object(canary_route, "printflow_real_canary_adapter_factory", factory):
             first = await self.client.post("/api/v1/printflow-canary/real-canary-runs", json=payload)
-            self.set_route_setting_if_present("farm_printflow_real_adapter_enabled", False)
-            missing_gate_replay = await self.client.post(
-                "/api/v1/printflow-canary/real-canary-runs",
-                json={**payload, "operator_approval_phrase": None},
-            )
-            self.set_route_setting_if_present("farm_printflow_real_adapter_enabled", True)
             changed_payload_replay = await self.client.post(
                 "/api/v1/printflow-canary/real-canary-runs",
                 json={
@@ -505,16 +528,13 @@ class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(first.status_code, 202)
-        self.assertEqual(first.json()["status"], "REAL_CANARY_DISPATCHED")
-        self.assertEqual(missing_gate_replay.status_code, 202)
-        self.assertEqual(missing_gate_replay.json()["status"], "REAL_CANARY_BLOCKED")
-        self.assertIn("real_adapter_disabled", missing_gate_replay.json()["blocked_reasons"])
-        self.assertIn("approval_phrase_required", missing_gate_replay.json()["blocked_reasons"])
+        self.assertEqual(first.json()["status"], "REAL_CANARY_BLOCKED")
         self.assertEqual(changed_payload_replay.status_code, 202)
         self.assertEqual(changed_payload_replay.json()["status"], "REAL_CANARY_BLOCKED")
-        self.assertIn("idempotency_payload_mismatch", changed_payload_replay.json()["blocked_reasons"])
-        self.assertEqual(len(factory.calls), 1)
-        self.assertEqual(len(factory.adapters[0].calls), 1)
+        self.assertIn("external_adapter_pending_redesign", changed_payload_replay.json()["blocked_reasons"])
+        self.assertNotIn("idempotency_payload_mismatch", changed_payload_replay.json()["blocked_reasons"])
+        self.assertEqual(factory.calls, [])
+        self.assertEqual(factory.adapters, [])
         await self.assert_no_control_rows()
 
     async def test_real_canary_api_missing_or_changed_confirmation_phrase_blocks_execution(self) -> None:

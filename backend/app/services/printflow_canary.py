@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import http.client
 import hashlib
 import json
 from collections import Counter, OrderedDict
@@ -110,6 +109,13 @@ class MockPrintFlowCanaryReadinessAdapter:
 
 @dataclass
 class RealPrintFlowCanaryAdapter:
+    """Deprecated placeholder for the previous server-adapter assumption.
+
+    PrintFlow/SwapMod are not treated as remote control servers in WP-060.
+    The `/real-canary-runs` route is retained only to return an auditable
+    blocked result while the supervised plate-change architecture is redesigned.
+    """
+
     base_url: str
     api_token: str
     timeout_seconds: float = 5.0
@@ -125,52 +131,10 @@ class RealPrintFlowCanaryAdapter:
         dry_run: bool,
         audit_only: bool,
     ) -> dict[str, object]:
-        scheme, host, prefix = _split_printflow_base_url(self.base_url)
-        connection_cls = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
-        connection = connection_cls(host, timeout=self.timeout_seconds)
-        body = json.dumps(
-            {
-                "job_id": job_id,
-                "target_printer_id": target_printer_id,
-                "idempotency_key": idempotency_key,
-                "dry_run": dry_run,
-                "audit_only": audit_only,
-            },
-            sort_keys=True,
-        ).encode("utf-8")
-        headers = {
-            "Authorization": f"Bearer {self.api_token}",
-            "Content-Type": "application/json",
-            "Idempotency-Key": idempotency_key,
-        }
-        self.network_calls_made += 1
-        self.hardware_calls_made += 1
-        try:
-            connection.request("POST", _join_path(prefix, "/printflow/v1/canary/runs"), body=body, headers=headers)
-            response = connection.getresponse()
-            response_body = response.read()
-        finally:
-            connection.close()
-
-        if response.status < 200 or response.status >= 300:
-            raise PrintFlowCanaryError(
-                "printflow_canary_failed",
-                f"PrintFlow canary endpoint returned HTTP {response.status}",
-            )
-
-        try:
-            decoded = json.loads(response_body.decode("utf-8")) if response_body.strip() else {}
-        except json.JSONDecodeError:
-            decoded = {}
-        if not isinstance(decoded, dict):
-            decoded = {}
-
-        return {
-            "status": _nonempty(decoded.get("status")) or REAL_CANARY_DISPATCHED,
-            "adapter_run_id": _nonempty(decoded.get("adapter_run_id") or decoded.get("run_id")),
-            "job_id": job_id,
-            "target_printer_id": target_printer_id,
-        }
+        raise PrintFlowCanaryError(
+            "external_adapter_pending_redesign",
+            "The experimental external adapter canary is pending redesign and must not run.",
+        )
 
 
 class PrintFlowCanaryReadinessService:
@@ -246,7 +210,11 @@ class PrintFlowCanaryReadinessService:
         effective_dry_run = global_dry_run or payload.get("dry_run") is not False
         effective_audit_only = payload.get("audit_only") is not False
 
-        blockers: list[str] = []
+        # The previous server-adapter assumption was incorrect: PrintFlow/SwapMod
+        # are post-processing workflows, not Bambuddy remote-control servers.
+        # Keep this legacy route auditable but impossible to execute until a new
+        # architecture is explicitly designed and tested.
+        blockers: list[str] = ["external_adapter_pending_redesign"]
         if idempotency_key is None:
             blockers.append("missing_idempotency_key")
         if not real_adapter_enabled:
@@ -582,27 +550,6 @@ def _required_real_canary_phrase(target_printer_id: str, job_id: str) -> str:
 def _real_canary_id(idempotency_key: str) -> str:
     return f"pfc-real:{hashlib.sha256(idempotency_key.encode('utf-8')).hexdigest()[:16]}"
 
-
-def _split_printflow_base_url(base_url: str) -> tuple[str, str, str]:
-    text = base_url.strip().rstrip("/")
-    if text.startswith("https://"):
-        scheme = "https"
-        rest = text[len("https://") :]
-    elif text.startswith("http://"):
-        scheme = "http"
-        rest = text[len("http://") :]
-    else:
-        raise PrintFlowCanaryError("invalid_printflow_base_url", "PrintFlow base URL must start with http:// or https://")
-    host, _, prefix = rest.partition("/")
-    if not host:
-        raise PrintFlowCanaryError("invalid_printflow_base_url", "PrintFlow base URL must include a host")
-    return scheme, host, f"/{prefix.strip('/')}" if prefix else ""
-
-
-def _join_path(prefix: str, suffix: str) -> str:
-    left = prefix.rstrip("/")
-    right = suffix if suffix.startswith("/") else f"/{suffix}"
-    return f"{left}{right}" if left else right
 
 
 def _new_sentinels() -> dict[str, int]:

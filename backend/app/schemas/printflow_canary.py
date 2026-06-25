@@ -17,6 +17,8 @@ class PrintFlowCanaryReadinessRequest(BaseModel):
 
 
 class PrintFlowRealCanaryRunRequest(BaseModel):
+    """Legacy external-adapter request retained only for blocked audit responses."""
+
     idempotency_key: str = Field(min_length=1)
     job_id: str | None = None
     target_printer_ids: list[str] = Field(default_factory=list)

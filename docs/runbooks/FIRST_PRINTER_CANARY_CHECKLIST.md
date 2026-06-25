@@ -1,15 +1,14 @@
-# First Printer Canary Checklist
+# First Printer Plate-Change Canary Checklist
 
 ## Purpose
 
-This checklist defines the human review gates for the first PrintFlow canary
-printer. It is not a command procedure and does not authorize real hardware
-movement. Use it to decide whether a later, separately approved physical canary
-request is ready.
+This checklist is a planning artifact for a future supervised plate-change
+canary. It is not a command procedure and does not authorize real hardware
+movement.
 
-This PR must not execute a real PrintFlow call. Treat every item below as
-readiness evidence for a later approval record, not as permission to move
-hardware.
+PrintFlow and SwapMod are treated as 3MF/G-code post-processing workflows, not
+remote control servers. The legacy external adapter canary is pending redesign
+and must not be used for live operation.
 
 ## Canary Identity Rules
 
@@ -18,8 +17,8 @@ hardware.
   mappings only in the approved private operations record.
 - Do not copy production URLs, IP addresses, customer names, or secrets into
   this checklist.
-- Keep the canary set to one printer and one PrintFlow test device until a
-  later rollout Work Package changes the policy.
+- Keep the canary set to one printer until a later rollout Work Package changes
+  the policy.
 
 ## Pre-Approval
 
@@ -55,59 +54,42 @@ hardware.
 - [ ] `FARM_PRINTFLOW_CANARY_SINGLE_PRINTER_ONLY=true`
 - [ ] `FARM_PRINTFLOW_BASE_URL` unset by default
 - [ ] `FARM_PRINTFLOW_API_TOKEN` unset by default
-- [ ] Stop if the real adapter is enabled unexpectedly, dry-run is disabled
-      unexpectedly, or real adapter credentials are present without a separate
-      approved physical canary record.
+- [ ] Stop if `FARM_PRINTFLOW_BASE_URL` or `FARM_PRINTFLOW_API_TOKEN` is set,
+      especially if either value resembles a printer IP, access code, serial,
+      production URL, or fake PrintFlow server.
 
-## Feature Flags and Modes
+## Legacy External Adapter Hold Point
 
-- [ ] Bed automation remains disabled by default.
-- [ ] Bed automation dry-run remains enabled by default.
-- [ ] Any canary-specific flag remains disabled by default.
-- [ ] Automatic rollout is disabled.
-- [ ] Automatic retry is disabled unless explicitly approved in a later Work
-      Package.
-- [ ] ERP writes remain Draft-only and idempotent if the parent flow touches ERP
-      evidence.
-- [ ] Obico remains notify-only if Obico evidence is present.
+The legacy `/real-canary-runs` endpoint is deprecated/pending redesign. It must
+return a blocked audit response and must not construct an external adapter. Do
+not use it for live operation.
 
-## Mock Harness Evidence
+## Future 3MF Post-Process Hold Point
 
-- [ ] Normal simulated completion covered.
-- [ ] Plate-already-empty or equivalent no-op case covered.
-- [ ] Adapter failure covered.
-- [ ] Adapter timeout covered.
-- [ ] Duplicate callback or duplicate command idempotency covered.
-- [ ] Lost acknowledgement covered.
-- [ ] Restart-uncertain state covered.
-- [ ] Object-remains or post-check-failed case covered.
-- [ ] E-stop-active or safety-blocked case covered if the harness supports it.
-- [ ] Logs and metrics include sanitized aliases and stop reasons.
-- [ ] Logs and metrics do not include secrets or real identifiers.
+Before a later 3MF post-process implementation can be considered:
 
-## Real PrintFlow Approval Hold Point
+- [ ] Input `.3mf` fixture selected.
+- [ ] Plate-change G-code injection location reviewed.
+- [ ] Modified `.3mf` output is deterministic.
+- [ ] Extraction and diff tests prove only expected G-code changed.
+- [ ] The resulting file is sent or started only through the existing Bambuddy
+      flow.
+- [ ] No external module receives printer credentials.
 
-This PR must not ask for or use the approval phrase to execute a real PrintFlow
-call. Before any later real hardware-affecting PrintFlow call, the release owner
-must ask for this exact approval phrase and no variant:
+## Future Bambuddy-Native Direct Command Hold Point
 
-`CONFIRM_REAL_PRINTFLOW_CANARY <printer_id> <job_id>`
+Before a later direct supervised command implementation can be considered:
 
-Do not ask for that phrase until the operator confirms this checklist:
-
-- [ ] target printer is physically visible or actively monitored
-- [ ] bed is clear
-- [ ] emergency stop or power cutoff is accessible
-- [ ] correct filament is loaded
-- [ ] correct build plate is installed
-- [ ] no production/customer job is involved
-- [ ] job is a low-risk canary job
-- [ ] operator is ready to stop the printer manually
-- [ ] logs/telemetry are being captured
-- [ ] rollback path is known
-
-The approval phrase must match exactly one printer and one job. Missing,
-mismatched, stale, or partial approval is a stop condition.
+- [ ] Operator selects exactly one printer.
+- [ ] Operator confirms bed and plate state.
+- [ ] Command is one predefined allowlisted G-code sequence.
+- [ ] No arbitrary G-code endpoint exists.
+- [ ] No scheduler path can trigger the command.
+- [ ] No queue auto-dispatch can trigger the command.
+- [ ] No repeat or automatic retry exists.
+- [ ] Audit log records operator, printer, command identifier, confirmation,
+      timestamp, and result.
+- [ ] Hardware canary evidence is complete before enabling.
 
 ## Physical Readiness Hold Point
 
@@ -117,7 +99,6 @@ be considered. They still do not authorize motion.
 - [ ] The named physical printer is idle, not running, not paused, not
       preparing, and not dispatching.
 - [ ] The bed is visually inspected by a human.
-- [ ] The PrintFlow test device is visually inspected by a human.
 - [ ] The safety observer can reach the emergency stop path.
 - [ ] Emergency stop or power cutoff is accessible before any real
       hardware-affecting request is considered.
@@ -127,8 +108,6 @@ be considered. They still do not authorize motion.
 - [ ] No production credentials or customer data are needed for the canary.
 - [ ] Network access is restricted to the approved local test environment.
 - [ ] A rollback path is documented without deleting volumes or audit evidence.
-- [ ] The rollback owner knows how to disable the real adapter, restore dry-run,
-      preserve logs, and leave the affected printer in manual review.
 
 ## Observation Rules for Any Later Approved Canary
 
@@ -136,7 +115,7 @@ If a separate approval authorizes a real canary, keep these rules visible to the
 human team:
 
 - One canary printer only.
-- One bed action at a time.
+- One bed or plate-change action at a time.
 - No automatic retry after timeout, lost acknowledgement, restart, unknown state,
   manual interruption, or post-check failure.
 - No next print until Bambuddy records bed state `READY`.
@@ -149,7 +128,6 @@ Record the result with sanitized values only:
 
 - Run identifier:
 - Sanitized printer alias:
-- Sanitized PrintFlow device alias:
 - Dry-run evidence bundle:
 - Human gate status:
 - Stop condition encountered:
