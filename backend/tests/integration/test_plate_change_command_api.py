@@ -154,12 +154,24 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
             "farm_plate_change_allow_real_commands": (
                 plate_change_route.settings.farm_plate_change_allow_real_commands
             ),
+            "farm_plate_change_transport_enabled": (
+                plate_change_route.settings.farm_plate_change_transport_enabled
+            ),
+            "farm_plate_change_allow_real_transport": (
+                plate_change_route.settings.farm_plate_change_allow_real_transport
+            ),
+            "farm_plate_change_transport_dry_run": (
+                plate_change_route.settings.farm_plate_change_transport_dry_run
+            ),
         }
         plate_change_route.settings.farm_plate_change_command_enabled = False
         plate_change_route.settings.farm_plate_change_command_dry_run = True
         plate_change_route.settings.farm_plate_change_human_approval_required = True
         plate_change_route.settings.farm_plate_change_single_printer_only = True
         plate_change_route.settings.farm_plate_change_allow_real_commands = False
+        plate_change_route.settings.farm_plate_change_transport_enabled = False
+        plate_change_route.settings.farm_plate_change_allow_real_transport = False
+        plate_change_route.settings.farm_plate_change_transport_dry_run = True
         plate_change_route.plate_change_command_service.clear()
         self.client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
@@ -213,6 +225,16 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
             with self.subTest(effect=effect):
                 self.assertEqual(count, 0)
 
+    def assert_transport_boundary_blocked(self, body: dict[str, object]) -> None:
+        self.assertEqual(body.get("transport_mode"), "DRY_RUN")
+        self.assertEqual(body.get("transport_status"), "BLOCKED_AUDIT_ONLY")
+        self.assertFalse(body.get("real_transport_supported"))
+        self.assertFalse(body.get("real_command_sent"))
+        self.assertTrue(body.get("audit_required"))
+        self.assertIn("transport_feature_disabled", body.get("blocked_reasons", []))
+        self.assertIn("real_transport_not_allowed", body.get("blocked_reasons", []))
+        self.assertIn("transport_dry_run_required", body.get("blocked_reasons", []))
+
     async def test_dry_run_command_api_disabled_by_default(self) -> None:
         response = await self.client.post("/api/v1/plate-change/dry-run-commands", json=self.payload())
 
@@ -231,6 +253,47 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(body["single_printer_only"])
         self.assertFalse(body["allow_real_commands"])
         self.assertEqual(body["allowed_command_sequences"], ALLOWED_A1_MINI_SEQUENCES)
+
+    async def test_transport_status_reports_blocked_audit_only_defaults(self) -> None:
+        response = await self.client.get("/api/v1/plate-change/transport-status")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["transport_enabled"])
+        self.assertFalse(body["allow_real_transport"])
+        self.assertTrue(body["transport_dry_run"])
+        self.assertEqual(body.get("transport_mode"), "DRY_RUN")
+        self.assertEqual(body.get("transport_status"), "BLOCKED_AUDIT_ONLY")
+        self.assertFalse(body.get("real_transport_supported"))
+        self.assertFalse(body.get("real_command_sent"))
+        self.assertTrue(body.get("audit_required"))
+        self.assertIn("transport_feature_disabled", body.get("blocked_reasons", []))
+        for effect, count in body["sentinels"].items():
+            self.assertEqual(count, 0, effect)
+
+    async def test_failure_path_reports_actual_transport_flag_state(self) -> None:
+        self.enable_boundary()
+        plate_change_route.settings.farm_plate_change_transport_enabled = True
+        plate_change_route.settings.farm_plate_change_allow_real_transport = True
+        plate_change_route.settings.farm_plate_change_transport_dry_run = False
+
+        response = await self.client.post(
+            "/api/v1/plate-change/dry-run-commands",
+            json=self.payload(operator_approved=False, operator_approval_phrase=None),
+        )
+
+        self.assertEqual(response.status_code, 202)
+        body = response.json()
+        self.assertEqual(body["status"], "APPROVAL_REQUIRED")
+        self.assertIn("operator_approval_required", body.get("blocked_reasons", []))
+        self.assertIn("real_transport_not_implemented", body.get("blocked_reasons", []))
+        self.assertNotIn("transport_feature_disabled", body.get("blocked_reasons", []))
+        self.assertNotIn("real_transport_not_allowed", body.get("blocked_reasons", []))
+        self.assertNotIn("transport_dry_run_required", body.get("blocked_reasons", []))
+        self.assertFalse(body.get("real_transport_supported"))
+        self.assertFalse(body.get("real_command_sent"))
+        self.assert_no_side_effects(body)
+        await self.assert_no_control_rows()
 
     async def test_enabled_dry_run_requires_request_dry_run_true(self) -> None:
         self.enable_boundary()
@@ -266,7 +329,8 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
         body = response.json()
         self.assertEqual(body["status"], "APPROVAL_REQUIRED")
         self.assertFalse(body["stored"])
-        self.assertIn("operator_approval_required", body["blocked_reasons"])
+        self.assertIn("operator_approval_required", body.get("blocked_reasons", []))
+        self.assert_transport_boundary_blocked(body)
         self.assert_no_side_effects(body)
         await self.assert_no_control_rows()
 
@@ -282,7 +346,26 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
         body = response.json()
         self.assertEqual(body["status"], "PLATE_CHANGE_BLOCKED")
         self.assertFalse(body["stored"])
-        self.assertIn("approval_phrase_mismatch", body["blocked_reasons"])
+        self.assertIn("approval_phrase_mismatch", body.get("blocked_reasons", []))
+        self.assert_transport_boundary_blocked(body)
+        self.assert_no_side_effects(body)
+        await self.assert_no_control_rows()
+
+    async def test_disabled_human_approval_gate_blocks_without_side_effects(self) -> None:
+        self.enable_boundary()
+        plate_change_route.settings.farm_plate_change_human_approval_required = False
+
+        response = await self.client.post(
+            "/api/v1/plate-change/dry-run-commands",
+            json=self.payload(operator_approved=False, operator_approval_phrase=None),
+        )
+
+        self.assertEqual(response.status_code, 202)
+        body = response.json()
+        self.assertEqual(body["status"], "PLATE_CHANGE_BLOCKED")
+        self.assertFalse(body["stored"])
+        self.assertIn("human_approval_gate_required", body.get("blocked_reasons", []))
+        self.assert_transport_boundary_blocked(body)
         self.assert_no_side_effects(body)
         await self.assert_no_control_rows()
 
@@ -300,18 +383,21 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 202)
         body = response.json()
         self.assertEqual(body["status"], "PLATE_CHANGE_BLOCKED")
-        self.assertIn("single_printer_required", body["blocked_reasons"])
+        self.assertIn("single_printer_required", body.get("blocked_reasons", []))
+        self.assert_transport_boundary_blocked(body)
         self.assert_no_side_effects(body)
         await self.assert_no_control_rows()
 
-    async def test_arbitrary_command_body_field_is_rejected_by_schema(self) -> None:
+    async def test_arbitrary_command_body_fields_are_rejected_by_schema(self) -> None:
         self.enable_boundary()
-        payload = self.payload()
-        payload["gcode"] = "M999"
+        for field_name in ("gcode", "command_text", "raw_command"):
+            with self.subTest(field_name=field_name):
+                payload = self.payload(idempotency_key=f"plate-change-api-{field_name}-001")
+                payload[field_name] = "M999"
 
-        response = await self.client.post("/api/v1/plate-change/dry-run-commands", json=payload)
+                response = await self.client.post("/api/v1/plate-change/dry-run-commands", json=payload)
 
-        self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.status_code, 422)
         await self.assert_no_control_rows()
 
     async def test_unknown_command_sequence_is_rejected_by_schema(self) -> None:
@@ -334,6 +420,7 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
         body = response.json()
         self.assertEqual(body["status"], "DRY_RUN_COMMANDS_READY")
         self.assertFalse(body["ready_for_real_command"])
+        self.assert_transport_boundary_blocked(body)
         plan = body["command_plan"]
         self.assertEqual(plan["sequence_id"], "A1_MINI_PLATE_CHANGE_DRY_RUN")
         self.assertEqual(plan["printer_model_family"], "A1 mini")
@@ -381,9 +468,25 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=AssertionError("Bambu MQTT G-code emitter must not run"),
             ) as mqtt_send_command,
             patch(
+                "backend.app.services.printer_manager.printer_manager.start_print",
+                side_effect=AssertionError("printer manager start_print must not run"),
+            ) as manager_start_print,
+            patch(
+                "backend.app.services.printer_manager.printer_manager.stop_print",
+                side_effect=AssertionError("printer manager stop_print must not run"),
+            ) as manager_stop_print,
+            patch(
                 "backend.app.services.bambu_ftp.upload_file_async",
                 side_effect=AssertionError("FTPS upload must not run"),
             ) as upload_file,
+            patch(
+                "backend.app.services.bambu_ftp.download_file_async",
+                side_effect=AssertionError("FTPS download must not run"),
+            ) as download_file,
+            patch(
+                "backend.app.services.bambu_ftp.delete_file_async",
+                side_effect=AssertionError("FTPS delete must not run"),
+            ) as delete_file,
             patch(
                 "backend.app.services.print_scheduler.scheduler.check_queue",
                 side_effect=AssertionError("scheduler must not run"),
@@ -407,6 +510,7 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
         body = response.json()
         self.assertEqual(body["status"], "DRY_RUN_COMMANDS_READY")
         self.assertFalse(body["ready_for_real_command"])
+        self.assert_transport_boundary_blocked(body)
         self.assert_no_side_effects(body)
         get_client.assert_not_called()
         mqtt_start_print.assert_not_called()
@@ -414,7 +518,11 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
         mqtt_pause_print.assert_not_called()
         mqtt_resume_print.assert_not_called()
         mqtt_send_command.assert_not_called()
+        manager_start_print.assert_not_called()
+        manager_stop_print.assert_not_called()
         upload_file.assert_not_called()
+        download_file.assert_not_called()
+        delete_file.assert_not_called()
         check_queue.assert_not_called()
         dispatch_reprint.assert_not_called()
         erp_draft.assert_not_called()

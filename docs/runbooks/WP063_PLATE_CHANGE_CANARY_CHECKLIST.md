@@ -5,7 +5,9 @@
 This checklist is for a later human-supervised plate-change command canary. It
 is not a command procedure and does not authorize real hardware movement.
 WP-063-A only proves the dry-run API boundary. WP-063-B adds A1 mini
-command-plan review data, but still does not approve live execution.
+command-plan review data. WP-063-C adds a blocked, audit-only local transport
+boundary. None of these Work Packages approve live execution, and WP-063-C sent
+no real printer command.
 
 ## Identity Rules
 
@@ -25,6 +27,7 @@ command-plan review data, but still does not approve live execution.
 - [ ] Reviewer assigned.
 - [ ] WP-063-A dry-run evidence reviewed.
 - [ ] WP-063-B command-plan evidence reviewed.
+- [ ] WP-063-C transport boundary evidence reviewed.
 - [ ] Stop conditions reviewed by operator and safety observer.
 - [ ] The team understands that dry-run success does not prove physical safety.
 - [ ] A separate approval record exists outside this repo for any real action.
@@ -38,7 +41,11 @@ command-plan review data, but still does not approve live execution.
 - [ ] `FARM_PLATE_CHANGE_HUMAN_APPROVAL_REQUIRED=true`.
 - [ ] `FARM_PLATE_CHANGE_SINGLE_PRINTER_ONLY=true`.
 - [ ] `FARM_PLATE_CHANGE_ALLOW_REAL_COMMANDS=false`.
+- [ ] `FARM_PLATE_CHANGE_TRANSPORT_ENABLED=false`.
+- [ ] `FARM_PLATE_CHANGE_ALLOW_REAL_TRANSPORT=false`.
+- [ ] `FARM_PLATE_CHANGE_TRANSPORT_DRY_RUN=true`.
 - [ ] `GET /api/v1/plate-change/status` reports `DRY_RUN_ONLY`.
+- [ ] `GET /api/v1/plate-change/transport-status` is read-only status.
 - [ ] `POST /api/v1/plate-change/dry-run-commands` succeeds only with exactly
       one sanitized printer alias.
 - [ ] The request uses `command_sequence=A1_MINI_PLATE_CHANGE_DRY_RUN`
@@ -48,9 +55,18 @@ command-plan review data, but still does not approve live execution.
 - [ ] The response has `ready_for_real_command=false`.
 - [ ] The response has `command_plan.real_execution_supported=false`.
 - [ ] The response has `command_plan.hardware_approval_status=NOT_APPROVED_FOR_HARDWARE`.
+- [ ] The response has `transport_mode=DRY_RUN`.
+- [ ] The response has `transport_status=BLOCKED_AUDIT_ONLY`.
+- [ ] The response has `real_transport_supported=false`.
+- [ ] The response has `real_command_sent=false`.
+- [ ] The response has `audit_required=true`.
+- [ ] The response has `blocked_reasons` containing
+      `real_transport_not_implemented` and the default blockers.
 - [ ] All action fields are `None`.
 - [ ] All sentinels are zero.
 - [ ] No arbitrary command body field is accepted.
+- [ ] No execute, live, send, raw, or general command endpoint exists.
+- [ ] `POST /api/v1/plate-change/dry-run-commands` remains the safe planner.
 
 ## Stop Conditions
 
@@ -60,9 +76,16 @@ Stop immediately if any of the following occur:
 - The approval phrase is missing or wrong.
 - `FARM_PLATE_CHANGE_ALLOW_REAL_COMMANDS=true`.
 - `FARM_PLATE_CHANGE_COMMAND_DRY_RUN=false`.
+- `FARM_PLATE_CHANGE_TRANSPORT_ENABLED=true`.
+- `FARM_PLATE_CHANGE_ALLOW_REAL_TRANSPORT=true`.
+- `FARM_PLATE_CHANGE_TRANSPORT_DRY_RUN=false`.
 - Any arbitrary command text is accepted.
 - Any command plan reports `real_execution_supported=true`.
+- Any response reports `real_transport_supported=true` or
+  `real_command_sent=true`.
 - Any Bambu MQTT command method is called during dry-run evidence collection.
+- Any direct MQTT, FTPS, raw G-code, or route-direct printer-manager path is
+  added for plate change.
 - Any FTPS helper is called during dry-run evidence collection.
 - Any queue, scheduler, or background dispatch path runs.
 - Any ERP submit/posting, Obico mutation, or bed automation mutation occurs.
@@ -82,20 +105,30 @@ any later Work Package asks for live execution:
 - [ ] Confirm no raw command text is present in request or response evidence.
 - [ ] Confirm no Bambu MQTT, FTPS, printer manager, queue, scheduler, ERP, Obico,
       or bed automation call occurs during dry-run evidence collection.
+- [ ] Confirm `PlateChangeCommandTransport`,
+      `DryRunPlateChangeCommandTransport`, and
+      `BlockedRealPlateChangeCommandTransport` are local interface boundaries
+      only.
 - [ ] Record that the candidate sequence is not approved for hardware.
 - [ ] Require separate physical validation before enabling any live executor.
 
-## Physical Canary Hold Point
+## WP-063-D Physical Canary Hold Point
 
-Before a later Work Package can request real execution:
+WP-063-D is required before actual A1 mini hardware canary execution. WP-063-C
+does not approve hardware execution. Before WP-063-D can request real execution:
 
-- [ ] Exact command sequence reviewed and versioned outside arbitrary user input.
+- [ ] Exact reviewed G-code or firmware command sequence is approved and
+      versioned outside arbitrary user input.
 - [ ] Dedicated printer-manager execution method implemented and tested.
 - [ ] Audit record design reviewed.
+- [ ] Exactly one named A1 mini canary is selected, with only a sanitized alias
+      stored in repo evidence.
 - [ ] Printer is idle and visually inspected by a human.
 - [ ] Bed and plate state are physically confirmed.
+- [ ] Physical monitoring is present for the entire canary.
 - [ ] Emergency stop or power cutoff is reachable.
 - [ ] Manual recovery path is assigned.
+- [ ] Explicit operator confirmation is captured immediately before any command.
 - [ ] No automatic retry exists.
 - [ ] Restart from uncertain state requires manual review.
 - [ ] No next print starts until bed state is verified `READY`.

@@ -12,6 +12,8 @@ class PlateChangeCommandHarnessContractTest(unittest.TestCase):
 
         self.assertIn("harness-plate-change-command:", makefile)
         self.assertIn("test-plate-change-command: harness-plate-change-command", makefile)
+        self.assertIn("harness-plate-change-transport:", makefile)
+        self.assertIn("test-plate-change-transport: harness-plate-change-transport", makefile)
 
     def test_mock_services_do_not_expose_external_plate_change_command_server(self) -> None:
         text = (ROOT / "harness/mock_services.py").read_text(encoding="utf-8")
@@ -21,6 +23,8 @@ class PlateChangeCommandHarnessContractTest(unittest.TestCase):
             "/plate-change/v1/command",
             "/plate-change/v1/dispatch",
             "plate_change_command_sends",
+            "plate_change_transport_sends",
+            "/plate-change/v1/transport",
         )
         for token in forbidden:
             with self.subTest(token=token):

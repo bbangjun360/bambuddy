@@ -127,6 +127,9 @@ class Settings(BaseSettings):
     farm_plate_change_human_approval_required: bool = True
     farm_plate_change_single_printer_only: bool = True
     farm_plate_change_allow_real_commands: bool = False
+    farm_plate_change_transport_enabled: bool = False
+    farm_plate_change_allow_real_transport: bool = False
+    farm_plate_change_transport_dry_run: bool = True
 
     class Config:
         env_file = ".env"

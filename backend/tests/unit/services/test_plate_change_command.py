@@ -57,6 +57,16 @@ class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
             with self.subTest(effect=effect):
                 self.assertEqual(count, 0)
 
+    def assert_transport_boundary_blocked(self, payload: dict[str, object]) -> None:
+        self.assertEqual(payload.get("transport_mode"), "DRY_RUN")
+        self.assertEqual(payload.get("transport_status"), "BLOCKED_AUDIT_ONLY")
+        self.assertFalse(payload.get("real_transport_supported"))
+        self.assertFalse(payload.get("real_command_sent"))
+        self.assertTrue(payload.get("audit_required"))
+        self.assertIn("transport_feature_disabled", payload.get("blocked_reasons", []))
+        self.assertIn("real_transport_not_allowed", payload.get("blocked_reasons", []))
+        self.assertIn("transport_dry_run_required", payload.get("blocked_reasons", []))
+
     def create(self, payload: dict[str, object]) -> dict[str, object]:
         return self.service.create_dry_run(
             payload,
@@ -80,6 +90,7 @@ class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
         self.assertEqual(first["target_printer_id"], "printer-fixture-001")
         self.assertEqual(first["command_sequence"], "A1_MINI_PLATE_CHANGE_DRY_RUN")
         self.assertEqual(first["stored"], True)
+        self.assert_transport_boundary_blocked(first)
         self.assertEqual(
             first["command_plan"],
             {
@@ -117,6 +128,8 @@ class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
         self.assertTrue(plan["requires_human_confirmation"])
         self.assertTrue(plan["requires_single_printer"])
         self.assertFalse(plan["real_execution_supported"])
+        self.assertFalse(result.get("real_command_sent"))
+        self.assert_transport_boundary_blocked(result)
         self.assertEqual(plan["hardware_approval_status"], "NOT_APPROVED_FOR_HARDWARE")
         self.assertGreaterEqual(len(plan["commands_redacted_or_symbolic"]), 3)
         rendered_plan = str(plan)
@@ -152,6 +165,7 @@ class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
         self.assertFalse(result["stored"])
         self.assertFalse(result["ready_for_real_command"])
         self.assertIn("operator_approval_required", result["blocked_reasons"])
+        self.assert_transport_boundary_blocked(result)
         self.assert_no_side_effects(result)
         self.assertEqual(self.service.status_snapshot()["dry_run_commands"], 0)
 
@@ -161,6 +175,23 @@ class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
         self.assertEqual(result["status"], PLATE_CHANGE_BLOCKED)
         self.assertFalse(result["stored"])
         self.assertIn("approval_phrase_mismatch", result["blocked_reasons"])
+        self.assert_transport_boundary_blocked(result)
+        self.assert_no_side_effects(result)
+        self.assertEqual(self.service.status_snapshot()["dry_run_commands"], 0)
+
+    def test_disabled_human_approval_gate_blocks_instead_of_bypassing_phrase(self) -> None:
+        result = self.service.create_dry_run(
+            self.request(operator_approved=False, operator_approval_phrase=None),
+            global_dry_run=True,
+            human_approval_required=False,
+            single_printer_only=True,
+            allow_real_commands=False,
+        )
+
+        self.assertEqual(result["status"], PLATE_CHANGE_BLOCKED)
+        self.assertFalse(result["stored"])
+        self.assertIn("human_approval_gate_required", result["blocked_reasons"])
+        self.assert_transport_boundary_blocked(result)
         self.assert_no_side_effects(result)
         self.assertEqual(self.service.status_snapshot()["dry_run_commands"], 0)
 
@@ -175,8 +206,22 @@ class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
         self.assertEqual(result["status"], PLATE_CHANGE_BLOCKED)
         self.assertFalse(result["stored"])
         self.assertIn("single_printer_required", result["blocked_reasons"])
+        self.assert_transport_boundary_blocked(result)
         self.assert_no_side_effects(result)
         self.assertEqual(self.service.status_snapshot()["dry_run_commands"], 0)
+
+    def test_transport_boundary_defaults_are_blocked_audit_only_and_never_send_real_commands(self) -> None:
+        result = self.create(
+            self.request(
+                idempotency_key="plate-change-transport-boundary-001",
+                command_sequence="A1_MINI_PLATE_CHANGE_CANDIDATE_V1",
+            )
+        )
+
+        self.assertEqual(result["status"], DRY_RUN_COMMANDS_READY)
+        self.assertFalse(result["command_plan"]["real_execution_supported"])
+        self.assert_transport_boundary_blocked(result)
+        self.assert_no_side_effects(result)
 
     def test_status_snapshot_exposes_allowlist_and_zero_sentinels(self) -> None:
         self.create(self.request())
@@ -188,6 +233,63 @@ class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
         self.assertEqual(status["dry_run_commands"], 1)
         for effect, count in status["sentinels"].items():
             self.assertEqual(count, 0, effect)
+
+    def test_transport_status_snapshot_reports_blocked_audit_only_defaults(self) -> None:
+        self.assertTrue(
+            hasattr(self.service, "transport_status_snapshot"),
+            "Plate-change service must expose transport_status_snapshot for audit-only defaults",
+        )
+        status = self.service.transport_status_snapshot()
+
+        self.assertFalse(status["transport_enabled"])
+        self.assertFalse(status["allow_real_transport"])
+        self.assertTrue(status["transport_dry_run"])
+        self.assertEqual(status["transport_mode"], "DRY_RUN")
+        self.assertEqual(status["transport_status"], "BLOCKED_AUDIT_ONLY")
+        self.assertFalse(status["real_transport_supported"])
+        self.assertFalse(status["real_command_sent"])
+        self.assertTrue(status["audit_required"])
+        self.assertEqual(status["allowed_command_sequences"], ALLOWED_A1_MINI_SEQUENCES)
+        self.assertIn("transport_feature_disabled", status["blocked_reasons"])
+        for effect, count in status["sentinels"].items():
+            self.assertEqual(count, 0, effect)
+
+    def test_transport_status_remains_unsupported_even_if_future_flags_are_enabled(self) -> None:
+        status = self.service.transport_status_snapshot(
+            transport_enabled=True,
+            allow_real_transport=True,
+            transport_dry_run=False,
+        )
+
+        self.assertEqual(status["transport_status"], "BLOCKED_AUDIT_ONLY")
+        self.assertFalse(status["real_transport_supported"])
+        self.assertFalse(status["real_command_sent"])
+        self.assertTrue(status["audit_required"])
+        self.assertIn("real_transport_not_implemented", status["blocked_reasons"])
+        for effect, count in status["sentinels"].items():
+            self.assertEqual(count, 0, effect)
+
+    def test_failure_path_reports_actual_transport_flag_state(self) -> None:
+        result = self.service.create_dry_run(
+            self.request(operator_approved=False, operator_approval_phrase=None),
+            global_dry_run=True,
+            human_approval_required=True,
+            single_printer_only=True,
+            allow_real_commands=False,
+            transport_enabled=True,
+            allow_real_transport=True,
+            transport_dry_run=False,
+        )
+
+        self.assertEqual(result["status"], APPROVAL_REQUIRED)
+        self.assertIn("operator_approval_required", result["blocked_reasons"])
+        self.assertIn("real_transport_not_implemented", result["blocked_reasons"])
+        self.assertNotIn("transport_feature_disabled", result["blocked_reasons"])
+        self.assertNotIn("real_transport_not_allowed", result["blocked_reasons"])
+        self.assertNotIn("transport_dry_run_required", result["blocked_reasons"])
+        self.assertFalse(result["real_transport_supported"])
+        self.assertFalse(result["real_command_sent"])
+        self.assert_no_side_effects(result)
 
 
 if __name__ == "__main__":
