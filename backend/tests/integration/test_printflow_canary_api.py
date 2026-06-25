@@ -1,9 +1,84 @@
 from __future__ import annotations
 
+import json as _json
 import unittest
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
-from httpx import ASGITransport, AsyncClient
+try:
+    from httpx import ASGITransport, AsyncClient
+except ModuleNotFoundError:
+    class ASGITransport:
+        def __init__(self, *, app):
+            self.app = app
+
+    class _FallbackResponse:
+        def __init__(self, *, status_code: int, headers: list[tuple[bytes, bytes]], body: bytes) -> None:
+            self.status_code = status_code
+            self.headers = {key.decode("latin1").lower(): value.decode("latin1") for key, value in headers}
+            self.content = body
+            self.text = body.decode("utf-8")
+
+        def json(self):
+            return _json.loads(self.text)
+
+    class AsyncClient:
+        def __init__(self, *, transport: ASGITransport, base_url: str) -> None:
+            self.transport = transport
+            self.base_url = base_url
+
+        async def aclose(self) -> None:
+            return None
+
+        async def get(self, path: str) -> _FallbackResponse:
+            return await self.request("GET", path)
+
+        async def post(self, path: str, *, json: object | None = None) -> _FallbackResponse:
+            return await self.request("POST", path, json=json)
+
+        async def request(self, method: str, path: str, *, json: object | None = None) -> _FallbackResponse:
+            parsed = urlsplit(path)
+            body = b"" if json is None else _json.dumps(json).encode("utf-8")
+            headers = [(b"host", b"test")]
+            if body:
+                headers.append((b"content-type", b"application/json"))
+
+            scope = {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": method,
+                "scheme": "http",
+                "path": parsed.path,
+                "raw_path": parsed.path.encode("ascii"),
+                "query_string": parsed.query.encode("ascii"),
+                "headers": headers,
+                "client": ("testclient", 50000),
+                "server": ("test", 80),
+            }
+            response = {"status": 500, "headers": [], "body": bytearray()}
+            request_sent = False
+
+            async def receive():
+                nonlocal request_sent
+                if not request_sent:
+                    request_sent = True
+                    return {"type": "http.request", "body": body, "more_body": False}
+                return {"type": "http.request", "body": b"", "more_body": False}
+
+            async def send(message):
+                if message["type"] == "http.response.start":
+                    response["status"] = message["status"]
+                    response["headers"] = message.get("headers", [])
+                elif message["type"] == "http.response.body":
+                    response["body"].extend(message.get("body", b""))
+
+            await self.transport.app(scope, receive, send)
+            return _FallbackResponse(
+                status_code=response["status"],
+                headers=response["headers"],
+                body=bytes(response["body"]),
+            )
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -15,6 +90,8 @@ from backend.app.models.erp_draft_write import ErpDraftWriteRecord
 from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.services.printflow_canary import READINESS_PASSED
+
+REAL_CANARY_APPROVAL_PHRASE = "CONFIRM_REAL_PRINTFLOW_CANARY printer-fixture-001 job-fixture-001"
 
 
 class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
@@ -53,6 +130,7 @@ class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
         self.previous_enabled = canary_route.settings.farm_printflow_canary_readiness_enabled
         self.previous_dry_run = canary_route.settings.farm_printflow_canary_dry_run
         self.previous_human_gate = canary_route.settings.farm_printflow_canary_human_approval_required
+        self.previous_optional_settings: dict[str, object] = {}
         canary_route.settings.farm_printflow_canary_readiness_enabled = False
         canary_route.settings.farm_printflow_canary_dry_run = True
         canary_route.settings.farm_printflow_canary_human_approval_required = True
@@ -65,6 +143,8 @@ class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
         canary_route.settings.farm_printflow_canary_readiness_enabled = self.previous_enabled
         canary_route.settings.farm_printflow_canary_dry_run = self.previous_dry_run
         canary_route.settings.farm_printflow_canary_human_approval_required = self.previous_human_gate
+        for name, value in self.previous_optional_settings.items():
+            setattr(canary_route.settings, name, value)
         canary_route.printflow_canary_service.clear()
         for patcher in reversed(self.patches):
             patcher.stop()
@@ -84,6 +164,33 @@ class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
 
     def enable_canary(self) -> None:
         canary_route.settings.farm_printflow_canary_readiness_enabled = True
+
+    def set_route_setting_if_present(self, name: str, value: object) -> None:
+        if hasattr(canary_route.settings, name):
+            self.previous_optional_settings.setdefault(name, getattr(canary_route.settings, name))
+            setattr(canary_route.settings, name, value)
+
+    def set_safe_real_canary_defaults_if_present(self) -> None:
+        for name, value in {
+            "farm_printflow_real_adapter_enabled": False,
+            "farm_printflow_canary_single_printer_only": True,
+            "farm_printflow_base_url": None,
+            "farm_printflow_api_token": None,
+        }.items():
+            self.set_route_setting_if_present(name, value)
+
+    def real_canary_payload(self, **overrides: object) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "idempotency_key": "real-canary-api-idempotency-001",
+            "job_id": "job-fixture-001",
+            "target_printer_ids": ["printer-fixture-001"],
+            "dry_run": False,
+            "audit_only": False,
+            "operator_approved": True,
+            "operator_approval_phrase": REAL_CANARY_APPROVAL_PHRASE,
+        }
+        payload.update(overrides)
+        return payload
 
     async def test_readiness_api_disabled_by_default(self) -> None:
         response = await self.client.post(
@@ -186,6 +293,51 @@ class PrintFlowCanaryApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"]["code"], "dry_run_required")
         await self.assert_no_control_rows()
+
+    async def test_real_canary_api_disabled_by_default_without_control_side_effects(self) -> None:
+        response = await self.client.post(
+            "/api/v1/printflow-canary/real-canary-runs",
+            json=self.real_canary_payload(),
+        )
+
+        await self.assert_no_control_rows()
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("real printflow canary is disabled", response.json()["detail"].lower())
+
+    async def test_enabled_readiness_with_safe_real_defaults_blocks_without_real_adapter(self) -> None:
+        self.enable_canary()
+        self.set_safe_real_canary_defaults_if_present()
+
+        with patch.object(
+            canary_route,
+            "printflow_real_canary_adapter_factory",
+            side_effect=AssertionError("real PrintFlow adapter factory must not be called for blocked defaults"),
+            create=True,
+        ) as factory:
+            response = await self.client.post(
+                "/api/v1/printflow-canary/real-canary-runs",
+                json=self.real_canary_payload(dry_run=True, audit_only=True),
+            )
+
+        await self.assert_no_control_rows()
+        factory.assert_not_called()
+        self.assertEqual(response.status_code, 202)
+        body = response.json()
+        self.assertEqual(body["status"], "REAL_CANARY_BLOCKED")
+        self.assertFalse(body["ready_for_canary"])
+        self.assertIn("real_adapter_disabled", body["blocked_reasons"])
+        self.assertIn("global_dry_run_enabled", body["blocked_reasons"])
+        self.assertIn("request_dry_run", body["blocked_reasons"])
+        self.assertIn("audit_only", body["blocked_reasons"])
+        self.assertIsNone(body["printflow_action"])
+        self.assertIsNone(body["printer_action"])
+        self.assertIsNone(body["queue_action"])
+        self.assertIsNone(body["scheduler_action"])
+        self.assertIsNone(body["erp_action"])
+        self.assertIsNone(body["obico_action"])
+        self.assertIsNone(body["bed_action"])
+        for effect, count in body["sentinels"].items():
+            self.assertEqual(count, 0, effect)
 
     async def test_status_and_metrics_do_not_expose_secret_metadata(self) -> None:
         self.enable_canary()

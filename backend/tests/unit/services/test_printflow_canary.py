@@ -22,6 +22,76 @@ FORBIDDEN_ACTION_FIELDS = (
     "bed_action",
 )
 
+REAL_CANARY_APPROVAL_PHRASE = "CONFIRM_REAL_PRINTFLOW_CANARY printer-fixture-001 job-fixture-001"
+
+
+class FakeRealPrintFlowCanaryAdapter:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def run_canary(
+        self,
+        *,
+        job_id: str,
+        target_printer_id: str,
+        idempotency_key: str,
+        dry_run: bool,
+        audit_only: bool,
+    ) -> dict[str, object]:
+        self.calls.append(
+            {
+                "job_id": job_id,
+                "target_printer_id": target_printer_id,
+                "idempotency_key": idempotency_key,
+                "dry_run": dry_run,
+                "audit_only": audit_only,
+            }
+        )
+        return {
+            "adapter_run_id": "fake-real-printflow-run-001",
+            "status": "REAL_CANARY_DISPATCHED",
+            "job_id": job_id,
+            "target_printer_id": target_printer_id,
+        }
+
+
+class FailingRealPrintFlowCanaryAdapter(FakeRealPrintFlowCanaryAdapter):
+    network_calls_made = 0
+    hardware_calls_made = 0
+
+    def run_canary(
+        self,
+        *,
+        job_id: str,
+        target_printer_id: str,
+        idempotency_key: str,
+        dry_run: bool,
+        audit_only: bool,
+    ) -> dict[str, object]:
+        self.network_calls_made += 1
+        self.hardware_calls_made += 1
+        super().run_canary(
+            job_id=job_id,
+            target_printer_id=target_printer_id,
+            idempotency_key=idempotency_key,
+            dry_run=dry_run,
+            audit_only=audit_only,
+        )
+        raise RuntimeError("simulated lost acknowledgement after request")
+
+
+class RealPrintFlowAdapterFactorySpy:
+    def __init__(self, *, adapter_cls=FakeRealPrintFlowCanaryAdapter) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.adapters: list[FakeRealPrintFlowCanaryAdapter] = []
+        self.adapter_cls = adapter_cls
+
+    def __call__(self, *, base_url: str, api_token: str) -> FakeRealPrintFlowCanaryAdapter:
+        self.calls.append({"base_url": base_url, "api_token": api_token})
+        adapter = self.adapter_cls()
+        self.adapters.append(adapter)
+        return adapter
+
 
 class PrintFlowCanaryReadinessServiceTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -147,6 +217,236 @@ class PrintFlowCanaryReadinessServiceTest(unittest.TestCase):
         self.assertIn('bambuddy_printflow_forbidden_side_effects_total{effect="printer_commands"} 0', metrics)
         for forbidden in ("access_code", "secret-token", "password", "printer_serial"):
             self.assertNotIn(forbidden, metrics.lower())
+
+
+    def real_canary_request(self, **overrides: object) -> dict[str, object]:
+        request: dict[str, object] = {
+            "idempotency_key": "real-canary-idempotency-001",
+            "job_id": "job-fixture-001",
+            "target_printer_ids": ["printer-fixture-001"],
+            "dry_run": False,
+            "audit_only": False,
+            "operator_approved": True,
+            "operator_approval_phrase": REAL_CANARY_APPROVAL_PHRASE,
+        }
+        request.update(overrides)
+        return request
+
+    def real_canary_gates(self, **overrides: object) -> dict[str, object]:
+        gates: dict[str, object] = {
+            "real_adapter_enabled": True,
+            "global_dry_run": False,
+            "human_approval_required": True,
+            "single_printer_only": True,
+            "expected_approval_phrase": REAL_CANARY_APPROVAL_PHRASE,
+            "base_url": "https://printflow.invalid",
+            "api_token": "printflow-token-fixture",
+        }
+        gates.update(overrides)
+        return gates
+
+    def test_real_canary_blocks_before_constructing_adapter_when_any_gate_is_missing(self) -> None:
+        cases = [
+            (
+                "real adapter disabled",
+                {},
+                {"real_adapter_enabled": False},
+                "real_adapter_disabled",
+            ),
+            (
+                "global dry-run true",
+                {},
+                {"global_dry_run": True},
+                "global_dry_run_enabled",
+            ),
+            (
+                "request dry-run true",
+                {"dry_run": True},
+                {},
+                "request_dry_run",
+            ),
+            (
+                "audit-only true",
+                {"audit_only": True},
+                {},
+                "audit_only",
+            ),
+            (
+                "human approval gate disabled",
+                {},
+                {"human_approval_required": False},
+                "human_approval_gate_disabled",
+            ),
+            (
+                "operator approval boolean false",
+                {"operator_approved": False},
+                {},
+                "operator_approval_required",
+            ),
+            (
+                "missing exact approval phrase",
+                {"operator_approval_phrase": None},
+                {},
+                "approval_phrase_required",
+            ),
+            (
+                "mismatched exact approval phrase",
+                {"operator_approval_phrase": "I approve a different PrintFlow action"},
+                {},
+                "approval_phrase_mismatch",
+            ),
+            (
+                "single-printer gate disabled",
+                {},
+                {"single_printer_only": False},
+                "single_printer_gate_disabled",
+            ),
+            (
+                "multiple target printers",
+                {"target_printer_ids": ["printer-fixture-001", "printer-fixture-002"]},
+                {},
+                "single_printer_required",
+            ),
+            (
+                "missing job id",
+                {"job_id": ""},
+                {},
+                "missing_job_id",
+            ),
+            (
+                "missing PrintFlow base URL",
+                {},
+                {"base_url": None},
+                "missing_printflow_base_url",
+            ),
+            (
+                "missing PrintFlow API token",
+                {},
+                {"api_token": None},
+                "missing_printflow_api_token",
+            ),
+        ]
+
+        for label, request_overrides, gate_overrides, expected_reason in cases:
+            with self.subTest(label=label):
+                factory = RealPrintFlowAdapterFactorySpy()
+
+                result = self.service.create_real_canary(
+                    self.real_canary_request(**request_overrides),
+                    adapter_factory=factory,
+                    **self.real_canary_gates(**gate_overrides),
+                )
+
+                self.assertEqual(result["status"], "REAL_CANARY_BLOCKED")
+                self.assertFalse(result["ready_for_canary"])
+                self.assertIn(expected_reason, result["blocked_reasons"])
+                self.assertEqual(factory.calls, [])
+                self.assertEqual(factory.adapters, [])
+                self.assert_no_side_effects(result)
+
+    def test_real_canary_all_gates_call_fake_once_and_replay_idempotency_key(self) -> None:
+        factory = RealPrintFlowAdapterFactorySpy()
+        request = self.real_canary_request()
+
+        first = self.service.create_real_canary(
+            request,
+            adapter_factory=factory,
+            **self.real_canary_gates(),
+        )
+        second = self.service.create_real_canary(
+            request,
+            adapter_factory=factory,
+            **self.real_canary_gates(),
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["status"], "REAL_CANARY_DISPATCHED")
+        self.assertTrue(first["ready_for_canary"])
+        self.assertEqual(
+            factory.calls,
+            [{"base_url": "https://printflow.invalid", "api_token": "printflow-token-fixture"}],
+        )
+        self.assertEqual(len(factory.adapters), 1)
+        self.assertEqual(
+            factory.adapters[0].calls,
+            [
+                {
+                    "job_id": "job-fixture-001",
+                    "target_printer_id": "printer-fixture-001",
+                    "idempotency_key": "real-canary-idempotency-001",
+                    "dry_run": False,
+                    "audit_only": False,
+                }
+            ],
+        )
+        self.assert_no_side_effects(first)
+
+    def test_real_canary_replay_rechecks_current_gates_and_payload(self) -> None:
+        factory = RealPrintFlowAdapterFactorySpy()
+        request = self.real_canary_request()
+        first = self.service.create_real_canary(
+            request,
+            adapter_factory=factory,
+            **self.real_canary_gates(),
+        )
+
+        missing_gate_replay = self.service.create_real_canary(
+            {**request, "operator_approval_phrase": None},
+            adapter_factory=factory,
+            **self.real_canary_gates(real_adapter_enabled=False),
+        )
+        changed_payload_replay = self.service.create_real_canary(
+            {
+                **request,
+                "job_id": "job-fixture-002",
+                "operator_approval_phrase": "CONFIRM_REAL_PRINTFLOW_CANARY printer-fixture-001 job-fixture-002",
+            },
+            adapter_factory=factory,
+            **self.real_canary_gates(
+                expected_approval_phrase="CONFIRM_REAL_PRINTFLOW_CANARY printer-fixture-001 job-fixture-002"
+            ),
+        )
+
+        self.assertEqual(first["status"], "REAL_CANARY_DISPATCHED")
+        self.assertEqual(missing_gate_replay["status"], "REAL_CANARY_BLOCKED")
+        self.assertFalse(missing_gate_replay["ready_for_canary"])
+        self.assertIn("real_adapter_disabled", missing_gate_replay["blocked_reasons"])
+        self.assertIn("approval_phrase_required", missing_gate_replay["blocked_reasons"])
+        self.assertEqual(changed_payload_replay["status"], "REAL_CANARY_BLOCKED")
+        self.assertFalse(changed_payload_replay["ready_for_canary"])
+        self.assertIn("idempotency_payload_mismatch", changed_payload_replay["blocked_reasons"])
+        self.assertEqual(len(factory.adapters), 1)
+        self.assertEqual(len(factory.adapters[0].calls), 1)
+        self.assert_no_side_effects(missing_gate_replay)
+        self.assert_no_side_effects(changed_payload_replay)
+
+    def test_real_canary_adapter_failure_is_manual_review_and_not_retried(self) -> None:
+        factory = RealPrintFlowAdapterFactorySpy(adapter_cls=FailingRealPrintFlowCanaryAdapter)
+        request = self.real_canary_request(idempotency_key="real-canary-failure-001")
+
+        first = self.service.create_real_canary(
+            request,
+            adapter_factory=factory,
+            **self.real_canary_gates(),
+        )
+        second = self.service.create_real_canary(
+            request,
+            adapter_factory=factory,
+            **self.real_canary_gates(),
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertFalse(first["ready_for_canary"])
+        self.assertTrue(first["manual_review_required"])
+        self.assertTrue(first["uncertain_physical_state"])
+        self.assertIn("real_adapter_exception", first["blocked_reasons"])
+        self.assertEqual(first["adapter_network_calls_made"], 1)
+        self.assertEqual(first["adapter_hardware_calls_made"], 1)
+        self.assertEqual(len(factory.adapters), 1)
+        self.assertEqual(len(factory.adapters[0].calls), 1)
+        self.assert_no_side_effects(first)
+
 
 
 if __name__ == "__main__":
