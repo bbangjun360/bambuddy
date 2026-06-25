@@ -119,6 +119,15 @@ class Settings(BaseSettings):
     farm_printflow_base_url: str | None = None
     farm_printflow_api_token: str | None = None
 
+    # WP-063 Bambuddy-native plate-change command research. Disabled by
+    # default and dry-run only. Real command execution is intentionally not
+    # implemented in this Work Package.
+    farm_plate_change_command_enabled: bool = False
+    farm_plate_change_command_dry_run: bool = True
+    farm_plate_change_human_approval_required: bool = True
+    farm_plate_change_single_printer_only: bool = True
+    farm_plate_change_allow_real_commands: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
