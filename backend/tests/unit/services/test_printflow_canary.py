@@ -239,7 +239,7 @@ class PrintFlowCanaryReadinessServiceTest(unittest.TestCase):
             "human_approval_required": True,
             "single_printer_only": True,
             "expected_approval_phrase": REAL_CANARY_APPROVAL_PHRASE,
-            "base_url": "https://printflow.invalid",
+            "base_url": "legacy-base-url-not-used",
             "api_token": "printflow-token-fixture",
         }
         gates.update(overrides)
@@ -344,7 +344,7 @@ class PrintFlowCanaryReadinessServiceTest(unittest.TestCase):
                 self.assertEqual(factory.adapters, [])
                 self.assert_no_side_effects(result)
 
-    def test_real_canary_all_gates_call_fake_once_and_replay_idempotency_key(self) -> None:
+    def test_external_adapter_pending_redesign_blocks_even_when_legacy_gates_are_set(self) -> None:
         factory = RealPrintFlowAdapterFactorySpy()
         request = self.real_canary_request()
 
@@ -360,40 +360,21 @@ class PrintFlowCanaryReadinessServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(first, second)
-        self.assertEqual(first["status"], "REAL_CANARY_DISPATCHED")
-        self.assertTrue(first["ready_for_canary"])
-        self.assertEqual(
-            factory.calls,
-            [{"base_url": "https://printflow.invalid", "api_token": "printflow-token-fixture"}],
-        )
-        self.assertEqual(len(factory.adapters), 1)
-        self.assertEqual(
-            factory.adapters[0].calls,
-            [
-                {
-                    "job_id": "job-fixture-001",
-                    "target_printer_id": "printer-fixture-001",
-                    "idempotency_key": "real-canary-idempotency-001",
-                    "dry_run": False,
-                    "audit_only": False,
-                }
-            ],
-        )
+        self.assertEqual(first["status"], "REAL_CANARY_BLOCKED")
+        self.assertFalse(first["ready_for_canary"])
+        self.assertIn("external_adapter_pending_redesign", first["blocked_reasons"])
+        self.assertEqual(factory.calls, [])
+        self.assertEqual(factory.adapters, [])
         self.assert_no_side_effects(first)
 
-    def test_real_canary_replay_rechecks_current_gates_and_payload(self) -> None:
+    def test_external_adapter_pending_redesign_is_not_stored_as_dispatch_replay(self) -> None:
         factory = RealPrintFlowAdapterFactorySpy()
         request = self.real_canary_request()
+
         first = self.service.create_real_canary(
             request,
             adapter_factory=factory,
             **self.real_canary_gates(),
-        )
-
-        missing_gate_replay = self.service.create_real_canary(
-            {**request, "operator_approval_phrase": None},
-            adapter_factory=factory,
-            **self.real_canary_gates(real_adapter_enabled=False),
         )
         changed_payload_replay = self.service.create_real_canary(
             {
@@ -407,20 +388,16 @@ class PrintFlowCanaryReadinessServiceTest(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(first["status"], "REAL_CANARY_DISPATCHED")
-        self.assertEqual(missing_gate_replay["status"], "REAL_CANARY_BLOCKED")
-        self.assertFalse(missing_gate_replay["ready_for_canary"])
-        self.assertIn("real_adapter_disabled", missing_gate_replay["blocked_reasons"])
-        self.assertIn("approval_phrase_required", missing_gate_replay["blocked_reasons"])
+        self.assertEqual(first["status"], "REAL_CANARY_BLOCKED")
         self.assertEqual(changed_payload_replay["status"], "REAL_CANARY_BLOCKED")
-        self.assertFalse(changed_payload_replay["ready_for_canary"])
-        self.assertIn("idempotency_payload_mismatch", changed_payload_replay["blocked_reasons"])
-        self.assertEqual(len(factory.adapters), 1)
-        self.assertEqual(len(factory.adapters[0].calls), 1)
-        self.assert_no_side_effects(missing_gate_replay)
+        self.assertIn("external_adapter_pending_redesign", changed_payload_replay["blocked_reasons"])
+        self.assertNotIn("idempotency_payload_mismatch", changed_payload_replay["blocked_reasons"])
+        self.assertEqual(factory.calls, [])
+        self.assertEqual(factory.adapters, [])
+        self.assert_no_side_effects(first)
         self.assert_no_side_effects(changed_payload_replay)
 
-    def test_real_canary_adapter_failure_is_manual_review_and_not_retried(self) -> None:
+    def test_external_adapter_pending_redesign_prevents_adapter_failure_path(self) -> None:
         factory = RealPrintFlowAdapterFactorySpy(adapter_cls=FailingRealPrintFlowCanaryAdapter)
         request = self.real_canary_request(idempotency_key="real-canary-failure-001")
 
@@ -436,17 +413,16 @@ class PrintFlowCanaryReadinessServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(first, second)
-        self.assertEqual(first["status"], "MANUAL_REVIEW_REQUIRED")
+        self.assertEqual(first["status"], "REAL_CANARY_BLOCKED")
         self.assertFalse(first["ready_for_canary"])
-        self.assertTrue(first["manual_review_required"])
-        self.assertTrue(first["uncertain_physical_state"])
-        self.assertIn("real_adapter_exception", first["blocked_reasons"])
-        self.assertEqual(first["adapter_network_calls_made"], 1)
-        self.assertEqual(first["adapter_hardware_calls_made"], 1)
-        self.assertEqual(len(factory.adapters), 1)
-        self.assertEqual(len(factory.adapters[0].calls), 1)
+        self.assertFalse(first["manual_review_required"])
+        self.assertFalse(first["uncertain_physical_state"])
+        self.assertIn("external_adapter_pending_redesign", first["blocked_reasons"])
+        self.assertEqual(first["adapter_network_calls_made"], 0)
+        self.assertEqual(first["adapter_hardware_calls_made"], 0)
+        self.assertEqual(factory.calls, [])
+        self.assertEqual(factory.adapters, [])
         self.assert_no_side_effects(first)
-
 
 
 if __name__ == "__main__":
