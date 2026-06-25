@@ -9,8 +9,15 @@ from typing import Any
 DRY_RUN_COMMANDS_READY = "DRY_RUN_COMMANDS_READY"
 APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
 PLATE_CHANGE_BLOCKED = "PLATE_CHANGE_BLOCKED"
+PLAN_ONLY = "PLAN_ONLY"
+DRY_RUN_PLANNED = "DRY_RUN_PLANNED"
 
-ALLOWED_COMMAND_SEQUENCES = ("supervised_plate_change_v1",)
+A1_MINI_PLATE_CHANGE_DRY_RUN = "A1_MINI_PLATE_CHANGE_DRY_RUN"
+A1_MINI_PLATE_CHANGE_CANDIDATE_V1 = "A1_MINI_PLATE_CHANGE_CANDIDATE_V1"
+ALLOWED_COMMAND_SEQUENCES = (
+    A1_MINI_PLATE_CHANGE_DRY_RUN,
+    A1_MINI_PLATE_CHANGE_CANDIDATE_V1,
+)
 
 FORBIDDEN_SIDE_EFFECTS = (
     "printer_commands",
@@ -174,6 +181,7 @@ class PlateChangeCommandDryRunService:
                     "failure_class": None,
                     "stored": True,
                     "payload_fingerprint": payload_fingerprint,
+                    "command_plan": _command_plan(command_sequence),
                 }
             )
             self._records[idempotency_key] = record
@@ -309,6 +317,60 @@ def _base_record(
     for field_name in ACTION_FIELDS:
         record[field_name] = None
     return record
+
+
+def _command_plan(command_sequence: str) -> dict[str, Any]:
+    if command_sequence == A1_MINI_PLATE_CHANGE_DRY_RUN:
+        commands = [
+            {
+                "step": 1,
+                "symbolic_command": "NO_PRINTER_COMMAND_DRY_RUN_BOUNDARY",
+                "candidate": False,
+            }
+        ]
+        plan_status = PLAN_ONLY
+    elif command_sequence == A1_MINI_PLATE_CHANGE_CANDIDATE_V1:
+        commands = [
+            {
+                "step": 1,
+                "symbolic_command": "VERIFY_A1_MINI_IDLE_AND_OPERATOR_PRESENT",
+                "candidate": True,
+            },
+            {
+                "step": 2,
+                "symbolic_command": "PARK_TOOLHEAD_FOR_PLATE_ACCESS_REVIEW_REQUIRED",
+                "candidate": True,
+            },
+            {
+                "step": 3,
+                "symbolic_command": "SET_BED_SLINGER_SAFE_CLEARANCE_REVIEW_REQUIRED",
+                "candidate": True,
+            },
+            {
+                "step": 4,
+                "symbolic_command": "WAIT_FOR_OPERATOR_PLATE_SWAP_CONFIRMATION",
+                "candidate": True,
+            },
+            {
+                "step": 5,
+                "symbolic_command": "REVERIFY_BED_READY_BEFORE_NEXT_PRINT",
+                "candidate": True,
+            },
+        ]
+        plan_status = DRY_RUN_PLANNED
+    else:
+        raise PlateChangeCommandError("unsupported_command_sequence", "command_sequence is not allowlisted")
+
+    return {
+        "sequence_id": command_sequence,
+        "printer_model_family": "A1 mini",
+        "commands_redacted_or_symbolic": commands,
+        "requires_human_confirmation": True,
+        "requires_single_printer": True,
+        "real_execution_supported": False,
+        "status": plan_status,
+        "hardware_approval_status": "NOT_APPROVED_FOR_HARDWARE",
+    }
 
 
 def _target_printer_ids(value: object) -> list[str]:

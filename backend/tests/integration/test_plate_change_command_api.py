@@ -103,6 +103,11 @@ ACTION_FIELDS = (
     "bed_action",
 )
 
+ALLOWED_A1_MINI_SEQUENCES = [
+    "A1_MINI_PLATE_CHANGE_DRY_RUN",
+    "A1_MINI_PLATE_CHANGE_CANDIDATE_V1",
+]
+
 
 class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -175,7 +180,7 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
 
     def payload(self, **overrides: object) -> dict[str, object]:
         printer_id = str(overrides.get("printer_id", "printer-fixture-001"))
-        command_sequence = str(overrides.get("command_sequence", "supervised_plate_change_v1"))
+        command_sequence = str(overrides.get("command_sequence", "A1_MINI_PLATE_CHANGE_DRY_RUN"))
         payload: dict[str, object] = {
             "idempotency_key": "plate-change-api-dry-run-001",
             "target_printer_ids": [printer_id],
@@ -225,7 +230,7 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(body["human_approval_required"])
         self.assertTrue(body["single_printer_only"])
         self.assertFalse(body["allow_real_commands"])
-        self.assertEqual(body["allowed_command_sequences"], ["supervised_plate_change_v1"])
+        self.assertEqual(body["allowed_command_sequences"], ALLOWED_A1_MINI_SEQUENCES)
 
     async def test_enabled_dry_run_requires_request_dry_run_true(self) -> None:
         self.enable_boundary()
@@ -288,7 +293,7 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
             "/api/v1/plate-change/dry-run-commands",
             json=self.payload(
                 target_printer_ids=["printer-fixture-001", "printer-fixture-002"],
-                operator_approval_phrase="CONFIRM_DRY_RUN_PLATE_CHANGE printer-fixture-001 supervised_plate_change_v1",
+                operator_approval_phrase="CONFIRM_DRY_RUN_PLATE_CHANGE printer-fixture-001 A1_MINI_PLATE_CHANGE_DRY_RUN",
             ),
         )
 
@@ -309,6 +314,44 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 422)
         await self.assert_no_control_rows()
 
+    async def test_unknown_command_sequence_is_rejected_by_schema(self) -> None:
+        self.enable_boundary()
+
+        response = await self.client.post(
+            "/api/v1/plate-change/dry-run-commands",
+            json=self.payload(command_sequence="NOT_ALLOWLISTED_FOR_A1_MINI"),
+        )
+
+        self.assertEqual(response.status_code, 422)
+        await self.assert_no_control_rows()
+
+    async def test_approved_dry_run_returns_command_plan_only(self) -> None:
+        self.enable_boundary()
+
+        response = await self.client.post("/api/v1/plate-change/dry-run-commands", json=self.payload())
+
+        self.assertEqual(response.status_code, 202)
+        body = response.json()
+        self.assertEqual(body["status"], "DRY_RUN_COMMANDS_READY")
+        self.assertFalse(body["ready_for_real_command"])
+        plan = body["command_plan"]
+        self.assertEqual(plan["sequence_id"], "A1_MINI_PLATE_CHANGE_DRY_RUN")
+        self.assertEqual(plan["printer_model_family"], "A1 mini")
+        self.assertEqual(
+            plan["commands_redacted_or_symbolic"][0]["symbolic_command"],
+            "NO_PRINTER_COMMAND_DRY_RUN_BOUNDARY",
+        )
+        self.assertTrue(plan["requires_human_confirmation"])
+        self.assertTrue(plan["requires_single_printer"])
+        self.assertFalse(plan["real_execution_supported"])
+        self.assertEqual(plan["status"], "PLAN_ONLY")
+        rendered_body = response.text
+        for raw_token in ("G28", "G1", "M400", "gcode_line"):
+            with self.subTest(raw_token=raw_token):
+                self.assertNotIn(raw_token, rendered_body)
+        self.assert_no_side_effects(body)
+        await self.assert_no_control_rows()
+
     async def test_approved_dry_run_does_not_call_printer_ftp_queue_scheduler_erp_obico_or_bed_paths(self) -> None:
         self.enable_boundary()
 
@@ -317,6 +360,26 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
                 "backend.app.services.printer_manager.printer_manager.get_client",
                 side_effect=AssertionError("printer manager must not be touched by dry-run boundary"),
             ) as get_client,
+            patch(
+                "backend.app.services.bambu_mqtt.BambuMQTTClient.start_print",
+                side_effect=AssertionError("Bambu MQTT start_print must not run"),
+            ) as mqtt_start_print,
+            patch(
+                "backend.app.services.bambu_mqtt.BambuMQTTClient.stop_print",
+                side_effect=AssertionError("Bambu MQTT stop_print must not run"),
+            ) as mqtt_stop_print,
+            patch(
+                "backend.app.services.bambu_mqtt.BambuMQTTClient.pause_print",
+                side_effect=AssertionError("Bambu MQTT pause_print must not run"),
+            ) as mqtt_pause_print,
+            patch(
+                "backend.app.services.bambu_mqtt.BambuMQTTClient.resume_print",
+                side_effect=AssertionError("Bambu MQTT resume_print must not run"),
+            ) as mqtt_resume_print,
+            patch(
+                "backend.app.services.bambu_mqtt.BambuMQTTClient.send_gcode",
+                side_effect=AssertionError("Bambu MQTT G-code emitter must not run"),
+            ) as mqtt_send_command,
             patch(
                 "backend.app.services.bambu_ftp.upload_file_async",
                 side_effect=AssertionError("FTPS upload must not run"),
@@ -346,6 +409,11 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(body["ready_for_real_command"])
         self.assert_no_side_effects(body)
         get_client.assert_not_called()
+        mqtt_start_print.assert_not_called()
+        mqtt_stop_print.assert_not_called()
+        mqtt_pause_print.assert_not_called()
+        mqtt_resume_print.assert_not_called()
+        mqtt_send_command.assert_not_called()
         upload_file.assert_not_called()
         check_queue.assert_not_called()
         dispatch_reprint.assert_not_called()

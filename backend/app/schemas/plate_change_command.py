@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class PlateChangeCommandSequence(str, Enum):
-    supervised_plate_change_v1 = "supervised_plate_change_v1"
+    A1_MINI_PLATE_CHANGE_DRY_RUN = "A1_MINI_PLATE_CHANGE_DRY_RUN"
+    A1_MINI_PLATE_CHANGE_CANDIDATE_V1 = "A1_MINI_PLATE_CHANGE_CANDIDATE_V1"
 
 
 class PlateChangeDryRunCommandRequest(BaseModel):

@@ -3,6 +3,7 @@
 ## Status
 
 Implemented as WP-063-A dry-run research boundary on 2026-06-25.
+Extended by WP-063-B with A1 mini allowlisted command sequence planning.
 This document does not authorize real printer movement or any hardware canary.
 
 ## Context
@@ -12,8 +13,9 @@ remote control servers. The direction for a later direct command path is
 Bambuddy-native and supervised: one operator, one selected printer, one reviewed
 allowlisted command sequence, and no arbitrary command input.
 
-WP-063-A implements only the dry-run API boundary and architecture evidence. It
-must not send a real printer command.
+WP-063-A implements only the dry-run API boundary and architecture evidence.
+WP-063-B adds a command-plan model for A1 mini sequences, still dry-run and
+mock-only. Neither Work Package sends a real printer command.
 
 ## Existing Command Paths Inspected
 
@@ -61,9 +63,10 @@ printer-manager method such as an allowlisted plate-change sequence executor,
 then call the existing client command transport only from that method. The route
 must continue to accept only enum sequence identifiers and human approval data.
 
-WP-063-A does not call that transport. It adds an independent dry-run service and
-route that return an auditable plan with all action fields set to `None` and all
-forbidden side-effect sentinels at zero.
+WP-063-B still does not call that transport. The independent dry-run service and
+route return an auditable plan with all action fields set to `None`,
+`real_execution_supported=false`, and all forbidden side-effect sentinels at
+zero.
 
 ## Implemented Dry-Run Boundary
 
@@ -84,7 +87,9 @@ Accepted request shape:
 
 - `idempotency_key`
 - `target_printer_ids`, which must contain exactly one sanitized printer alias
-- `command_sequence`, currently only `supervised_plate_change_v1`
+- `command_sequence`, one of:
+  - `A1_MINI_PLATE_CHANGE_DRY_RUN`
+  - `A1_MINI_PLATE_CHANGE_CANDIDATE_V1`
 - `dry_run=true`
 - `operator_approved=true`
 - `operator_approval_phrase`, exactly
@@ -92,7 +97,50 @@ Accepted request shape:
 - optional metadata, stored only as a fingerprint in the response
 
 The schema forbids extra fields, so a body field such as `gcode` is rejected by
-validation instead of being ignored.
+validation instead of being ignored. The request does not expose any editable
+command-text field.
+
+## WP-063-B Command Plan Model
+
+WP-063-B returns `command_plan` only for an approved dry-run request. The plan is
+not an execution request, not an approval record, and not a hardware procedure.
+It has this shape:
+
+- `sequence_id`: the enum value requested.
+- `printer_model_family`: `A1 mini`.
+- `commands_redacted_or_symbolic`: symbolic steps only, with no raw command text.
+- `requires_human_confirmation`: `true`.
+- `requires_single_printer`: `true`.
+- `real_execution_supported`: `false`.
+- `status`: `PLAN_ONLY` or `DRY_RUN_PLANNED`.
+- `hardware_approval_status`: `NOT_APPROVED_FOR_HARDWARE`.
+
+`A1_MINI_PLATE_CHANGE_DRY_RUN` returns a one-step `PLAN_ONLY` boundary marker
+showing that no printer command is planned. `A1_MINI_PLATE_CHANGE_CANDIDATE_V1`
+returns a `DRY_RUN_PLANNED` symbolic candidate sequence for review. The candidate
+steps cover operator presence, A1 mini idle verification, toolhead parking,
+bed-slinger clearance, manual plate swap confirmation, and bed-ready
+verification before any next print. The plan intentionally does not include raw
+printer commands and cannot be sent to hardware.
+
+## A1 Mini Command Sequence Candidate Review
+
+Before any later Work Package can implement live execution, reviewers must
+convert the symbolic candidate into reviewed firmware-specific commands outside
+arbitrary user input, then prove the exact sequence against a named canary
+printer. Required review evidence includes:
+
+- physical A1 mini idle and bed-state assumptions;
+- exact command content reviewed by a human outside this dry-run endpoint;
+- a dedicated Bambuddy printer-manager executor with no generic arbitrary
+  command route;
+- proof that the executor is disabled by default and remains one-printer only;
+- operator confirmation, emergency stop, and manual recovery gates;
+- no automatic retry after timeout, restart, lost acknowledgement, or uncertain
+  physical state.
+
+WP-063-B does not approve live execution and does not make the candidate sequence
+safe for hardware.
 
 ## Forbidden Boundaries
 
@@ -120,6 +168,7 @@ The following can be tested without hardware:
 - human approval and exact phrase gates;
 - single-printer gate;
 - enum-only command sequence validation;
+- command-plan responses for both A1 mini sequence ids;
 - schema rejection of arbitrary command body fields;
 - idempotent dry-run response storage;
 - action fields remain `None`;
@@ -148,6 +197,6 @@ produce separate evidence for:
 
 ## Rollback
 
-Rollback is a file-level revert of the WP-063-A route, schema, service, tests,
-Makefile target, docs, and ExecPlan. There is no migration and no persistent
+Rollback is a file-level revert of the WP-063 route, schema, service, tests,
+Makefile target, docs, and ExecPlans. There is no migration and no persistent
 state outside the process-local dry-run records.
