@@ -22,6 +22,11 @@ ACTION_FIELDS = (
     "bed_action",
 )
 
+ALLOWED_A1_MINI_SEQUENCES = [
+    "A1_MINI_PLATE_CHANGE_DRY_RUN",
+    "A1_MINI_PLATE_CHANGE_CANDIDATE_V1",
+]
+
 
 class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -29,7 +34,7 @@ class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
 
     def request(self, **overrides: object) -> dict[str, object]:
         printer_id = str(overrides.get("printer_id", "printer-fixture-001"))
-        command_sequence = str(overrides.get("command_sequence", "supervised_plate_change_v1"))
+        command_sequence = str(overrides.get("command_sequence", "A1_MINI_PLATE_CHANGE_DRY_RUN"))
         request: dict[str, object] = {
             "idempotency_key": "plate-change-dry-run-001",
             "target_printer_ids": [printer_id],
@@ -73,9 +78,52 @@ class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
         self.assertTrue(first["mock_only"])
         self.assertFalse(first["ready_for_real_command"])
         self.assertEqual(first["target_printer_id"], "printer-fixture-001")
-        self.assertEqual(first["command_sequence"], "supervised_plate_change_v1")
+        self.assertEqual(first["command_sequence"], "A1_MINI_PLATE_CHANGE_DRY_RUN")
         self.assertEqual(first["stored"], True)
+        self.assertEqual(
+            first["command_plan"],
+            {
+                "sequence_id": "A1_MINI_PLATE_CHANGE_DRY_RUN",
+                "printer_model_family": "A1 mini",
+                "commands_redacted_or_symbolic": [
+                    {
+                        "step": 1,
+                        "symbolic_command": "NO_PRINTER_COMMAND_DRY_RUN_BOUNDARY",
+                        "candidate": False,
+                    }
+                ],
+                "requires_human_confirmation": True,
+                "requires_single_printer": True,
+                "real_execution_supported": False,
+                "status": "PLAN_ONLY",
+                "hardware_approval_status": "NOT_APPROVED_FOR_HARDWARE",
+            },
+        )
         self.assert_no_side_effects(first)
+
+    def test_candidate_sequence_returns_symbolic_plan_without_real_execution_support(self) -> None:
+        payload = self.request(
+            idempotency_key="plate-change-candidate-001",
+            command_sequence="A1_MINI_PLATE_CHANGE_CANDIDATE_V1",
+        )
+
+        result = self.create(payload)
+
+        self.assertEqual(result["status"], DRY_RUN_COMMANDS_READY)
+        plan = result["command_plan"]
+        self.assertEqual(plan["sequence_id"], "A1_MINI_PLATE_CHANGE_CANDIDATE_V1")
+        self.assertEqual(plan["printer_model_family"], "A1 mini")
+        self.assertEqual(plan["status"], "DRY_RUN_PLANNED")
+        self.assertTrue(plan["requires_human_confirmation"])
+        self.assertTrue(plan["requires_single_printer"])
+        self.assertFalse(plan["real_execution_supported"])
+        self.assertEqual(plan["hardware_approval_status"], "NOT_APPROVED_FOR_HARDWARE")
+        self.assertGreaterEqual(len(plan["commands_redacted_or_symbolic"]), 3)
+        rendered_plan = str(plan)
+        for raw_token in ("G28", "G1", "M400", "gcode_line"):
+            with self.subTest(raw_token=raw_token):
+                self.assertNotIn(raw_token, rendered_plan)
+        self.assert_no_side_effects(result)
 
     def test_non_dry_run_request_is_rejected_without_storing_a_record(self) -> None:
         with self.assertRaises(PlateChangeCommandError) as raised:
@@ -120,7 +168,7 @@ class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
         result = self.create(
             self.request(
                 target_printer_ids=["printer-fixture-001", "printer-fixture-002"],
-                operator_approval_phrase="CONFIRM_DRY_RUN_PLATE_CHANGE printer-fixture-001 supervised_plate_change_v1",
+                operator_approval_phrase="CONFIRM_DRY_RUN_PLATE_CHANGE printer-fixture-001 A1_MINI_PLATE_CHANGE_DRY_RUN",
             )
         )
 
@@ -136,7 +184,7 @@ class PlateChangeCommandDryRunServiceTest(unittest.TestCase):
         status = self.service.status_snapshot()
 
         self.assertEqual(status["mode"], "DRY_RUN_ONLY")
-        self.assertEqual(status["allowed_command_sequences"], ["supervised_plate_change_v1"])
+        self.assertEqual(status["allowed_command_sequences"], ALLOWED_A1_MINI_SEQUENCES)
         self.assertEqual(status["dry_run_commands"], 1)
         for effect, count in status["sentinels"].items():
             self.assertEqual(count, 0, effect)

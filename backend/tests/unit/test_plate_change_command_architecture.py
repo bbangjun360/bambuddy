@@ -60,6 +60,15 @@ class PlateChangeCommandArchitectureTest(unittest.TestCase):
             with self.subTest(token=token):
                 self.assertNotIn(token, combined)
 
+    def test_wp063_schema_allowlists_only_a1_mini_sequence_ids(self) -> None:
+        schema_text = (ROOT / "app/schemas/plate_change_command.py").read_text(encoding="utf-8")
+
+        self.assertIn('A1_MINI_PLATE_CHANGE_DRY_RUN = "A1_MINI_PLATE_CHANGE_DRY_RUN"', schema_text)
+        self.assertIn('A1_MINI_PLATE_CHANGE_CANDIDATE_V1 = "A1_MINI_PLATE_CHANGE_CANDIDATE_V1"', schema_text)
+        self.assertNotIn("supervised_plate_change_v1", schema_text)
+        self.assertNotIn("command_text", schema_text)
+        self.assertNotIn("raw_command", schema_text)
+
     def test_wp063_route_exposes_only_dry_run_and_status_paths(self) -> None:
         route_text = (ROOT / "app/api/routes/plate_change_command.py").read_text(encoding="utf-8")
         main_text = (ROOT / "app/main.py").read_text(encoding="utf-8")
