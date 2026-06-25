@@ -12,6 +12,66 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 PORT = int(os.environ.get("MOCK_PORT", "9099"))
+PRINTFLOW_CANARY_READY_SCENARIO = "printflow_canary_ready"
+PRINTFLOW_CANARY_FAILURES = {
+    "printflow_canary_heartbeat_loss": {
+        "status": "blocked",
+        "failure_class": "adapter_heartbeat_loss",
+        "manual_review_required": False,
+        "uncertain_physical_state": False,
+        "bed_state": "UNKNOWN",
+    },
+    "printflow_canary_camera_unavailable": {
+        "status": "blocked",
+        "failure_class": "camera_unavailable",
+        "manual_review_required": False,
+        "uncertain_physical_state": False,
+        "bed_state": "UNKNOWN",
+    },
+    "printflow_canary_estop_active": {
+        "status": "manual_review",
+        "failure_class": "e_stop_active",
+        "manual_review_required": True,
+        "uncertain_physical_state": True,
+        "bed_state": "UNKNOWN",
+    },
+    "printflow_canary_motion_timeout": {
+        "status": "manual_review",
+        "failure_class": "motion_timeout",
+        "manual_review_required": True,
+        "uncertain_physical_state": True,
+        "bed_state": "UNKNOWN",
+    },
+    "printflow_canary_reply_lost": {
+        "status": "manual_review",
+        "failure_class": "command_reply_lost",
+        "manual_review_required": True,
+        "uncertain_physical_state": True,
+        "bed_state": "UNKNOWN",
+    },
+    "printflow_canary_object_detected": {
+        "status": "manual_review",
+        "failure_class": "object_detected",
+        "manual_review_required": True,
+        "uncertain_physical_state": True,
+        "bed_state": "OCCUPIED",
+    },
+}
+PRINTFLOW_CANARY_SCENARIOS = frozenset({
+    PRINTFLOW_CANARY_READY_SCENARIO,
+    *PRINTFLOW_CANARY_FAILURES,
+})
+PRINTFLOW_CANARY_STATUSES = ("blocked", "manual_review", "ready")
+PRINTFLOW_CANARY_FORBIDDEN_SENTINELS = (
+    "actuator_commands_sent",
+    "queue_dispatches",
+    "scheduler_dispatches",
+    "erp_submit_calls",
+    "erp_inventory_post_calls",
+    "erp_accounting_post_calls",
+    "obico_calls",
+    "bed_cycle_mutations",
+)
 ALLOWED_SCENARIOS = frozenset({
     "success",
     "http_500",
@@ -27,7 +87,7 @@ ALLOWED_SCENARIOS = frozenset({
     "erp_draft_timeout_after_create",
     "erp_draft_invalid_payload",
     "erp_draft_reconciliation_mismatch",
-})
+}) | PRINTFLOW_CANARY_SCENARIOS
 DEFAULT_SCENARIO = os.environ.get("MOCK_SCENARIO", "success")
 if DEFAULT_SCENARIO not in ALLOWED_SCENARIOS:
     DEFAULT_SCENARIO = "success"
@@ -94,6 +154,10 @@ OBICO_SHADOW_EVENTS = {
     },
 }
 
+def new_printflow_canary_sentinels() -> dict[str, int]:
+    return {key: 0 for key in PRINTFLOW_CANARY_FORBIDDEN_SENTINELS}
+
+
 LOCK = threading.Lock()
 STATE = {
     "scenario": DEFAULT_SCENARIO,
@@ -103,6 +167,9 @@ STATE = {
     "erp_inventory_post_calls": 0,
     "erp_accounting_post_calls": 0,
     "bed_cycles": {},
+    "printflow_canary_checks": {},
+    "printflow_canary_sentinels": new_printflow_canary_sentinels(),
+    "printflow_canary_status_counts": {status: 0 for status in PRINTFLOW_CANARY_STATUSES},
     "request_count": 0,
     "failure_counts": {scenario: 0 for scenario in sorted(ALLOWED_SCENARIOS)},
 }
@@ -207,11 +274,67 @@ def prometheus_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
 
+def printflow_canary_sentinels_snapshot() -> dict[str, int]:
+    return dict(STATE["printflow_canary_sentinels"])
+
+
+def printflow_canary_readiness_payload(scenario: str) -> dict:
+    payload = {
+        "adapter_id": "printflow-canary-mock",
+        "canary_device_id": "printflow-canary-fixture-001",
+        "scenario": scenario,
+        "synthetic": True,
+        "canary_enabled": False,
+        "dry_run": True,
+        "audit_only": True,
+        "status": "blocked",
+        "blocked_reasons": ["feature_disabled"],
+        "failure_class": None,
+        "manual_review_required": False,
+        "uncertain_physical_state": False,
+        "bed_state": "UNKNOWN",
+        "sentinels": printflow_canary_sentinels_snapshot(),
+    }
+    if scenario == PRINTFLOW_CANARY_READY_SCENARIO:
+        payload.update({
+            "canary_enabled": True,
+            "status": "ready",
+            "blocked_reasons": [],
+            "bed_state": "READY",
+        })
+    elif scenario in PRINTFLOW_CANARY_FAILURES:
+        failure = PRINTFLOW_CANARY_FAILURES[scenario]
+        payload.update({
+            "canary_enabled": True,
+            "status": failure["status"],
+            "blocked_reasons": [failure["failure_class"]],
+            "failure_class": failure["failure_class"],
+            "manual_review_required": failure["manual_review_required"],
+            "uncertain_physical_state": failure["uncertain_physical_state"],
+            "bed_state": failure["bed_state"],
+        })
+    return payload
+
+
+def printflow_canary_check_payload(request_payload: dict, scenario: str) -> dict:
+    readiness = printflow_canary_readiness_payload(scenario)
+    return {
+        **readiness,
+        "check_id": f"pfc-{len(STATE['printflow_canary_checks']) + 1:04d}",
+        "idempotency_key": request_payload.get("idempotency_key"),
+        "printer_id": request_payload.get("printer_id"),
+        "cycle_id": request_payload.get("cycle_id"),
+    }
+
+
 def metrics_payload() -> str:
     with LOCK:
         scenario = str(STATE["scenario"])
         request_count = int(STATE["request_count"])
         failure_counts = dict(STATE["failure_counts"])
+        printflow_canary_checks_total = len(STATE["printflow_canary_checks"])
+        printflow_canary_status_counts = dict(STATE["printflow_canary_status_counts"])
+        printflow_canary_sentinels = printflow_canary_sentinels_snapshot()
 
     lines = [
         "# HELP farm_harness_mock_up Mock service exporter availability.",
@@ -237,6 +360,28 @@ def metrics_payload() -> str:
     for candidate in sorted(ALLOWED_SCENARIOS):
         count = int(failure_counts.get(candidate, 0))
         lines.append(f'farm_harness_mock_failures_total{{scenario="{prometheus_escape(candidate)}"}} {count}')
+
+    lines.extend([
+        "",
+        "# HELP farm_harness_printflow_canary_readiness_checks_total Mock PrintFlow canary readiness checks created.",
+        "# TYPE farm_harness_printflow_canary_readiness_checks_total counter",
+        f"farm_harness_printflow_canary_readiness_checks_total {printflow_canary_checks_total}",
+        "",
+        "# HELP farm_harness_printflow_canary_status_total Mock PrintFlow canary readiness checks by status.",
+        "# TYPE farm_harness_printflow_canary_status_total counter",
+    ])
+    for status in PRINTFLOW_CANARY_STATUSES:
+        count = int(printflow_canary_status_counts.get(status, 0))
+        lines.append(f'farm_harness_printflow_canary_status_total{{status="{prometheus_escape(status)}"}} {count}')
+
+    lines.extend([
+        "",
+        "# HELP farm_harness_printflow_forbidden_side_effects_total Sentinel counters for forbidden WP-060-A side effects.",
+        "# TYPE farm_harness_printflow_forbidden_side_effects_total counter",
+    ])
+    for effect in PRINTFLOW_CANARY_FORBIDDEN_SENTINELS:
+        count = int(printflow_canary_sentinels.get(effect, 0))
+        lines.append(f'farm_harness_printflow_forbidden_side_effects_total{{effect="{prometheus_escape(effect)}"}} {count}')
 
     lines.append("")
     return "\n".join(lines)
@@ -267,6 +412,13 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 scenario = STATE["scenario"]
             response(self, HTTPStatus.OK, {"status": "ok", "scenario": scenario})
+            return
+
+        if path == "/printflow/v1/canary/readiness":
+            with LOCK:
+                scenario = STATE["scenario"]
+                payload = printflow_canary_readiness_payload(scenario)
+            response(self, HTTPStatus.OK, payload)
             return
 
         if path == "/erp/api/resource/Work Order":
@@ -365,6 +517,9 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["erp_inventory_post_calls"] = 0
                 STATE["erp_accounting_post_calls"] = 0
                 STATE["bed_cycles"].clear()
+                STATE["printflow_canary_checks"].clear()
+                STATE["printflow_canary_sentinels"] = new_printflow_canary_sentinels()
+                STATE["printflow_canary_status_counts"] = {status: 0 for status in PRINTFLOW_CANARY_STATUSES}
                 STATE["request_count"] = 0
                 STATE["failure_counts"] = {scenario: 0 for scenario in sorted(ALLOWED_SCENARIOS)}
             response(self, HTTPStatus.OK, {"status": "reset"})
@@ -488,6 +643,31 @@ class Handler(BaseHTTPRequestHandler):
                             "manual_review_required": False,
                         }
                     STATE["bed_cycles"][cycle_id] = existing
+            response(self, HTTPStatus.ACCEPTED, existing)
+            return
+
+        if path == "/printflow/v1/canary/readiness/check":
+            payload = read_json(self)
+            key = payload.get("idempotency_key")
+            if not key:
+                response(self, HTTPStatus.BAD_REQUEST, {"error": "missing idempotency_key"})
+                return
+            if payload.get("dry_run") is not True:
+                response(self, HTTPStatus.BAD_REQUEST, {"error": "dry_run_required"})
+                return
+            if payload.get("audit_only") is not True:
+                response(self, HTTPStatus.BAD_REQUEST, {"error": "audit_only_required"})
+                return
+            with LOCK:
+                existing = STATE["printflow_canary_checks"].get(key)
+                if existing is None:
+                    scenario = STATE["scenario"]
+                    existing = printflow_canary_check_payload(payload, scenario)
+                    STATE["printflow_canary_checks"][key] = existing
+                    status = existing["status"]
+                    STATE["printflow_canary_status_counts"][status] = (
+                        STATE["printflow_canary_status_counts"].get(status, 0) + 1
+                    )
             response(self, HTTPStatus.ACCEPTED, existing)
             return
 
