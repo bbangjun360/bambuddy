@@ -7,6 +7,10 @@ printer. It is not a command procedure and does not authorize real hardware
 movement. Use it to decide whether a later, separately approved physical canary
 request is ready.
 
+This PR must not execute a real PrintFlow call. Treat every item below as
+readiness evidence for a later approval record, not as permission to move
+hardware.
+
 ## Canary Identity Rules
 
 - Use sanitized aliases in repo material, such as `CANARY_PRINTER_A`.
@@ -43,6 +47,18 @@ request is ready.
 - [ ] A restart from `EXECUTING`, `VERIFYING`, or any uncertain bed state enters
       `MANUAL_REVIEW` instead of resuming automatically.
 
+## Safe Defaults
+
+- [ ] `FARM_PRINTFLOW_REAL_ADAPTER_ENABLED=false`
+- [ ] `FARM_PRINTFLOW_CANARY_DRY_RUN=true`
+- [ ] `FARM_PRINTFLOW_CANARY_HUMAN_APPROVAL_REQUIRED=true`
+- [ ] `FARM_PRINTFLOW_CANARY_SINGLE_PRINTER_ONLY=true`
+- [ ] `FARM_PRINTFLOW_BASE_URL` unset by default
+- [ ] `FARM_PRINTFLOW_API_TOKEN` unset by default
+- [ ] Stop if the real adapter is enabled unexpectedly, dry-run is disabled
+      unexpectedly, or real adapter credentials are present without a separate
+      approved physical canary record.
+
 ## Feature Flags and Modes
 
 - [ ] Bed automation remains disabled by default.
@@ -69,6 +85,30 @@ request is ready.
 - [ ] Logs and metrics include sanitized aliases and stop reasons.
 - [ ] Logs and metrics do not include secrets or real identifiers.
 
+## Real PrintFlow Approval Hold Point
+
+This PR must not ask for or use the approval phrase to execute a real PrintFlow
+call. Before any later real hardware-affecting PrintFlow call, the release owner
+must ask for this exact approval phrase and no variant:
+
+`CONFIRM_REAL_PRINTFLOW_CANARY <printer_id> <job_id>`
+
+Do not ask for that phrase until the operator confirms this checklist:
+
+- [ ] target printer is physically visible or actively monitored
+- [ ] bed is clear
+- [ ] emergency stop or power cutoff is accessible
+- [ ] correct filament is loaded
+- [ ] correct build plate is installed
+- [ ] no production/customer job is involved
+- [ ] job is a low-risk canary job
+- [ ] operator is ready to stop the printer manually
+- [ ] logs/telemetry are being captured
+- [ ] rollback path is known
+
+The approval phrase must match exactly one printer and one job. Missing,
+mismatched, stale, or partial approval is a stop condition.
+
 ## Physical Readiness Hold Point
 
 The following checks are required before a separate physical canary request can
@@ -79,12 +119,16 @@ be considered. They still do not authorize motion.
 - [ ] The bed is visually inspected by a human.
 - [ ] The PrintFlow test device is visually inspected by a human.
 - [ ] The safety observer can reach the emergency stop path.
+- [ ] Emergency stop or power cutoff is accessible before any real
+      hardware-affecting request is considered.
 - [ ] The operator has a manual recovery path for uncertain bed state.
 - [ ] Non-production material and a non-customer test artifact are selected in
       private operator records.
 - [ ] No production credentials or customer data are needed for the canary.
 - [ ] Network access is restricted to the approved local test environment.
 - [ ] A rollback path is documented without deleting volumes or audit evidence.
+- [ ] The rollback owner knows how to disable the real adapter, restore dry-run,
+      preserve logs, and leave the affected printer in manual review.
 
 ## Observation Rules for Any Later Approved Canary
 

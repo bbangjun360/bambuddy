@@ -20,8 +20,12 @@ class PrintFlowCanaryArchitectureTest(unittest.TestCase):
         text = CONFIG_FILE.read_text(encoding="utf-8")
 
         self.assertIn("farm_printflow_canary_readiness_enabled: bool = False", text)
+        self.assertIn("farm_printflow_real_adapter_enabled: bool = False", text)
         self.assertIn("farm_printflow_canary_dry_run: bool = True", text)
         self.assertIn("farm_printflow_canary_human_approval_required: bool = True", text)
+        self.assertIn("farm_printflow_canary_single_printer_only: bool = True", text)
+        self.assertIn("farm_printflow_base_url: str | None = None", text)
+        self.assertIn("farm_printflow_api_token: str | None = None", text)
 
     def test_wp060_files_have_no_real_control_plane_or_external_client_imports(self) -> None:
         combined = self._combined_implementation_text()

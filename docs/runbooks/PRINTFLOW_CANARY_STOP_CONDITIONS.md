@@ -3,18 +3,37 @@
 ## Purpose
 
 These stop conditions apply to WP-060 canary readiness, mock harness dry-runs,
-and any later separately approved physical canary. When a stop condition is met,
-halt canary preparation or rollout, preserve evidence, and move the affected
-printer or bed-cycle record to manual review where applicable.
+and any later separately approved physical canary. This PR must not execute a
+real PrintFlow call. When a stop condition is met, halt canary preparation or
+rollout, preserve evidence, and move the affected printer or bed-cycle record to
+manual review where applicable.
 
 ## Immediate Stop Conditions
 
 Stop immediately if any of the following occur:
 
+- The exact approval phrase `CONFIRM_REAL_PRINTFLOW_CANARY <printer_id> <job_id>`
+  is missing, mismatched, stale, partial, or refers to the wrong printer or job.
+- More than one printer appears in a canary request, allow-list, approval
+  record, operator note, log, or downstream request.
+- A real adapter enabled unexpectedly condition is observed, including when
+  `FARM_PRINTFLOW_REAL_ADAPTER_ENABLED` is true.
+- A dry-run disabled unexpectedly condition is observed, including when
+  `FARM_PRINTFLOW_CANARY_DRY_RUN` is false.
+- A PrintFlow request is attempted before safe defaults, single-printer scope,
+  human approval, operator readiness, emergency stop, and rollback gates are
+  confirmed.
+- Queue, scheduler, ERP, Obico, or bed side effects occur during readiness or
+  dry-run evidence collection.
+- A leaked secret, token, access code, serial number, production URL, real
+  network address, printer identifier, or customer datum appears in logs,
+  fixtures, checklists, commits, or PR text.
 - A real printer, PrintFlow device, ERPNext instance, Obico instance, Bambu MQTT
   service, FTPS service, or hardware interface receives an unexpected command.
 - A non-dry-run path is enabled without explicit approval.
 - A feature flag that should be default-off is enabled unexpectedly.
+- `FARM_PRINTFLOW_BASE_URL` or `FARM_PRINTFLOW_API_TOKEN` is set without a
+  separate approved physical canary record.
 - Any log, fixture, checklist, commit, or PR text contains a secret, access
   code, serial number, production URL, real network address, or customer data.
 - Any external module attempts to control a printer or connect directly to Bambu
@@ -60,6 +79,17 @@ Stop if downstream systems cross their allowed boundary:
 - ERP writes are not Draft-only during readiness work.
 - Obico attempts to control the printer instead of notify-only behavior.
 - Any downstream failure causes automatic printer or bed action.
+
+## Emergency Stop and Rollback Requirements
+
+For any later approved physical canary, stop before the request if the operator
+cannot reach an emergency stop or power cutoff. Stop before the request if the
+rollback path is unknown, unassigned, or would delete logs, metrics, screenshots,
+harness artifacts, or audit evidence.
+
+Rollback must disable the real adapter, restore dry-run, preserve evidence, and
+leave any uncertain printer or bed state in manual review until a human resolves
+it.
 
 ## Required Stop Response
 

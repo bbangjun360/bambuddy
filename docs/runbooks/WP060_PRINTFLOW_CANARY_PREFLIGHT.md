@@ -2,9 +2,13 @@
 
 ## Purpose
 
-This runbook prepares WP-060-A PrintFlow canary readiness without authorizing
+This runbook prepares WP-060-B supervised PrintFlow canary adapter work without authorizing
 real device movement. It is a documentation and evidence gate for a later,
 separately approved physical canary.
+
+This PR must not execute a real PrintFlow call. Any real hardware-affecting
+PrintFlow call belongs to a later, separately approved canary record and must be
+blocked unless all human gates below are complete.
 
 The only acceptable preflight evidence comes from the local mock harness,
 dry-run behavior, sanitized logs, and human review. Simulation success is not
@@ -13,6 +17,7 @@ evidence that the physical system is safe.
 ## Non-Goals
 
 - Do not start, pause, resume, cancel, or dispatch a real printer job.
+- Do not execute a real PrintFlow call in this PR.
 - Do not send a real PrintFlow, ERPNext, Obico, MQTT, FTPS, GPIO, serial, USB,
   BLE, or G-code command.
 - Do not use production printer credentials, ERP tokens, customer data, serial
@@ -35,7 +40,7 @@ Use sanitized aliases in repo evidence, for example `CANARY_PRINTER_A` and
 Record the following before any canary discussion:
 
 - Branch name and commit under review.
-- Work Package identifier: `WP-060-A PrintFlow Canary Readiness`.
+- Work Package identifier: `WP-060-B Supervised Real PrintFlow Canary Adapter`.
 - Feature flags and dry-run settings.
 - Harness scenario names used.
 - Test commands and exit status.
@@ -44,6 +49,21 @@ Record the following before any canary discussion:
 
 Do not paste secrets, real endpoints, printer identifiers, access codes, or
 customer data into the evidence package.
+
+## Safe Defaults
+
+Confirm these defaults before accepting any WP-060 evidence:
+
+- `FARM_PRINTFLOW_REAL_ADAPTER_ENABLED=false`
+- `FARM_PRINTFLOW_CANARY_DRY_RUN=true`
+- `FARM_PRINTFLOW_CANARY_HUMAN_APPROVAL_REQUIRED=true`
+- `FARM_PRINTFLOW_CANARY_SINGLE_PRINTER_ONLY=true`
+- `FARM_PRINTFLOW_BASE_URL` unset by default
+- `FARM_PRINTFLOW_API_TOKEN` unset by default
+
+Stop if the real adapter is enabled unexpectedly, dry-run is disabled
+unexpectedly, or a real base URL or API token is present without a separate
+approved physical canary record.
 
 ## Boundary Review
 
@@ -58,6 +78,38 @@ Confirm these boundaries before running any mock or dry-run check:
 - Any uncertain physical bed state after restart becomes `MANUAL_REVIEW`.
 - ERP inventory and accounting writes remain idempotent and Draft-only.
 - No general arbitrary G-code endpoint is introduced.
+
+## Live Canary Approval Boundary
+
+Before any later real hardware-affecting PrintFlow call, the release owner must
+ask for this exact approval phrase and no variant:
+
+`CONFIRM_REAL_PRINTFLOW_CANARY <printer_id> <job_id>`
+
+Do not ask for that phrase until the operator confirms all of the following:
+
+- target printer is physically visible or actively monitored
+- bed is clear
+- emergency stop or power cutoff is accessible
+- correct filament is loaded
+- correct build plate is installed
+- no production/customer job is involved
+- job is a low-risk canary job
+- operator is ready to stop the printer manually
+- logs/telemetry are being captured
+- rollback path is known
+
+The phrase must match the intended single canary printer and job. A missing,
+mismatched, stale, or partial phrase is a stop condition. Keep real identifiers
+out of this repository; use placeholders or sanitized aliases in committed
+evidence.
+
+## Single-Printer Restriction
+
+WP-060 canary preparation is limited to one canary printer and one canary job at
+a time. Do not prepare, approve, or execute a multi-printer PrintFlow request.
+Multiple printers in the request, allow-list, logs, operator notes, or approval
+record are a stop condition until the scope is reduced to one.
 
 ## Dry-Run Readiness Checklist
 
@@ -88,6 +140,10 @@ Before any later physical canary is requested, the release owner must confirm:
       operator.
 - [ ] A physical E-stop or equivalent emergency stop path is known to the human
       team.
+- [ ] Emergency stop or power cutoff is accessible to the operator before any
+      real hardware-affecting request is considered.
+- [ ] Rollback is documented before any real hardware-affecting request is
+      considered and does not delete logs, metrics, or audit evidence.
 - [ ] A separate approval record exists for any real hardware action.
 - [ ] The exact real canary identifiers remain outside the repository.
 
@@ -98,8 +154,8 @@ this document and must not be represented by committed commands or fixture data.
 
 The parent integration should receive:
 
-- `git status --short` showing only expected documentation paths for this
-  subtask.
+- `git status --short` showing only expected WP-060 adapter, test, workpack,
+  and runbook paths for this subtask.
 - `git diff --check` output.
 - Fresh validation output selected by the parent, at minimum `make verify-fast`
   if the parent is running full WP validation.
