@@ -21,6 +21,8 @@ SYMBOLIC_PLATE_CHANGE_BLOCK = (
 )
 SYNTHETIC_INSERTION_POINT = "; BAMBUDDY_SYNTHETIC_PLATE_CHANGE_INSERTION_POINT"
 TARGET_GCODE_PATH = "Metadata/plate_1.gcode"
+REAL_SAMPLE_TARGET_GCODE_PATH = "Metadata/plate_real_sample.gcode"
+REVIEW_MANIFEST_PATH = "Metadata/bambuddy_real_sample_output_review.json"
 
 
 def _write_3mf(path: Path, entries: dict[str, bytes]) -> None:
@@ -67,6 +69,20 @@ def _unsupported_3mf_entries() -> dict[str, bytes]:
     return entries
 
 
+def _real_sample_review_entries() -> dict[str, bytes]:
+    return {
+        "3D/3dmodel.model": b"<model unit='millimeter'/>",
+        "Metadata/project_settings.config": json.dumps({"printer_model": "Bambu Lab A1 Mini"}).encode("utf-8"),
+        REAL_SAMPLE_TARGET_GCODE_PATH: (
+            b"; synthetic local review fixture\n"
+            b"; private operator note must not be returned\n"
+            b";LAYER_CHANGE\n"
+            b"; stop printing object\n"
+            b";END gcode for filament\n"
+        ),
+    }
+
+
 class PlateChange3mfPostprocessServiceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="wp064-3mf-postprocess-"))
@@ -92,6 +108,8 @@ class PlateChange3mfPostprocessServiceTest(unittest.TestCase):
         self.assertFalse(payload["printer_upload_supported"])
         self.assertFalse(payload["printer_start_supported"])
         self.assertFalse(payload["real_execution_supported"])
+        self.assertTrue(payload["human_review_required"])
+        self.assertTrue(payload["not_approved_for_printing"])
         self.assertFalse(payload["output_artifact_created"])
         sentinels = payload["sentinels"]
         self.assertIsInstance(sentinels, dict)
@@ -306,6 +324,205 @@ class PlateChange3mfPostprocessServiceTest(unittest.TestCase):
         with zipfile.ZipFile(outputs[0], "r") as zf:
             self.assertNotIn("Metadata/bambuddy_plate_change_postprocess_plan.json", zf.namelist())
             self.assertEqual(sorted(zf.namelist()), sorted(_synthetic_3mf_entries()))
+
+
+    def test_real_sample_output_review_blocked_by_default_config(self) -> None:
+        sample_root = self.tmp / "sample-root"
+        output_root = self.tmp / "output-root"
+        source = sample_root / "inputs" / "private-local-sample.gcode.3mf"
+        _write_3mf(source, _real_sample_review_entries())
+
+        with self.assertRaises(PlateChange3mfPostprocessError) as raised:
+            self.create_plan(
+                source_path=source,
+                allow_output_artifact=True,
+                create_output_artifact=True,
+                real_sample_output_review=True,
+                real_sample_roots=[sample_root],
+                output_roots=[output_root],
+                output_dir=output_root,
+            )
+
+        self.assertEqual(raised.exception.code, "real_sample_output_not_allowed")
+        self.assertFalse(output_root.exists())
+
+    def test_real_sample_output_review_requires_all_explicit_flags(self) -> None:
+        sample_root = self.tmp / "sample-root"
+        output_root = self.tmp / "output-root"
+        source = sample_root / "inputs" / "private-local-sample.gcode.3mf"
+        _write_3mf(source, _real_sample_review_entries())
+
+        base_kwargs = {
+            "source_path": source,
+            "allow_output_artifact": True,
+            "allow_real_sample_output": True,
+            "real_sample_output_review": True,
+            "real_sample_roots": [sample_root],
+            "output_roots": [output_root],
+            "output_dir": output_root,
+        }
+
+        with self.assertRaises(PlateChange3mfPostprocessError) as missing_output_request:
+            self.create_plan(**{**base_kwargs, "create_output_artifact": False})
+        self.assertEqual(missing_output_request.exception.code, "output_artifact_required")
+
+        with self.assertRaises(PlateChange3mfPostprocessError) as missing_output_config:
+            self.create_plan(**{**base_kwargs, "allow_output_artifact": False, "create_output_artifact": True})
+        self.assertEqual(missing_output_config.exception.code, "output_artifact_not_allowed")
+
+        with self.assertRaises(PlateChange3mfPostprocessError) as missing_real_sample_config:
+            self.create_plan(**{**base_kwargs, "allow_real_sample_output": False, "create_output_artifact": True})
+        self.assertEqual(missing_real_sample_config.exception.code, "real_sample_output_not_allowed")
+
+        with self.assertRaises(PlateChange3mfPostprocessError) as missing_request_flag:
+            self.create_plan(
+                source_path=source,
+                allow_output_artifact=True,
+                allow_real_sample_output=True,
+                create_output_artifact=True,
+                real_sample_output_review=False,
+                real_sample_roots=[sample_root],
+                output_roots=[output_root],
+                output_dir=output_root,
+            )
+        self.assertEqual(missing_request_flag.exception.code, "real_sample_output_review_required")
+
+    def test_real_sample_input_must_be_under_sample_root(self) -> None:
+        sample_root = self.tmp / "sample-root"
+        output_root = self.tmp / "output-root"
+        outside_source = self.tmp / "outside" / "private-local-sample.gcode.3mf"
+        _write_3mf(outside_source, _real_sample_review_entries())
+
+        with self.assertRaises(PlateChange3mfPostprocessError) as raised:
+            self.create_plan(
+                source_path=outside_source,
+                allow_output_artifact=True,
+                allow_real_sample_output=True,
+                create_output_artifact=True,
+                real_sample_output_review=True,
+                real_sample_roots=[sample_root],
+                output_roots=[output_root],
+                output_dir=output_root,
+            )
+
+        self.assertEqual(raised.exception.code, "source_path_not_allowed")
+
+    def test_real_sample_output_must_be_under_output_root(self) -> None:
+        sample_root = self.tmp / "sample-root"
+        output_root = self.tmp / "output-root"
+        outside_output = self.tmp / "outside-output"
+        source = sample_root / "inputs" / "private-local-sample.gcode.3mf"
+        _write_3mf(source, _real_sample_review_entries())
+
+        with self.assertRaises(PlateChange3mfPostprocessError) as raised:
+            self.create_plan(
+                source_path=source,
+                allow_output_artifact=True,
+                allow_real_sample_output=True,
+                create_output_artifact=True,
+                real_sample_output_review=True,
+                real_sample_roots=[sample_root],
+                output_roots=[output_root],
+                output_dir=outside_output,
+            )
+
+        self.assertEqual(raised.exception.code, "output_path_not_allowed")
+        self.assertFalse(outside_output.exists())
+
+    def test_real_sample_output_blocks_repo_path_output(self) -> None:
+        repo_root = Path(__file__).resolve().parents[4]
+        sample_root = self.tmp / "sample-root"
+        source = sample_root / "inputs" / "private-local-sample.gcode.3mf"
+        _write_3mf(source, _real_sample_review_entries())
+
+        with self.assertRaises(PlateChange3mfPostprocessError) as raised:
+            self.create_plan(
+                source_path=source,
+                allow_output_artifact=True,
+                allow_real_sample_output=True,
+                create_output_artifact=True,
+                real_sample_output_review=True,
+                real_sample_roots=[sample_root],
+                output_roots=[repo_root],
+                output_dir=repo_root / "tmp-review-output",
+            )
+
+        self.assertEqual(raised.exception.code, "repo_output_path_not_allowed")
+
+    def test_real_sample_output_review_manifest_only_returns_required_metadata(self) -> None:
+        sample_root = self.tmp / "sample-root"
+        output_root = self.tmp / "output-root"
+        source = sample_root / "inputs" / "private-local-sample.gcode.3mf"
+        entries = _real_sample_review_entries()
+        _write_3mf(source, entries)
+
+        result = self.create_plan(
+            source_path=source,
+            allow_output_artifact=True,
+            allow_real_sample_output=True,
+            create_output_artifact=True,
+            real_sample_output_review=True,
+            real_sample_roots=[sample_root],
+            output_roots=[output_root],
+            output_dir=output_root / "reviews",
+        )
+
+        self.assertEqual(result["status"], "POSTPROCESS_PLAN_READY")
+        self.assertTrue(result["output_artifact_created"])
+        self.assertFalse(result["insertion_performed"])
+        self.assertIsNone(result["inserted_block_kind"])
+        self.assertEqual(result["source_file_name_redacted"], "redacted-gcode-3mf")
+        self.assertEqual(result["output_artifact_root_redacted"], "configured-real-sample-output")
+        self.assertEqual(result["output_file_name_redacted"], result["output_artifact_file_name_redacted"])
+        self.assertRegex(result["source_sha256"], r"^[a-f0-9]{64}$")
+        self.assertRegex(result["output_sha256"], r"^[a-f0-9]{64}$")
+        self.assertNotEqual(result["source_sha256"], result["output_sha256"])
+        self.assertEqual(result["internal_gcode_paths"], [REAL_SAMPLE_TARGET_GCODE_PATH])
+        self.assertEqual(result["modified_internal_paths"], [REVIEW_MANIFEST_PATH])
+        self.assertEqual(result["modified_member_paths"], [REVIEW_MANIFEST_PATH])
+        self.assertEqual(result["preserved_member_count"], len(entries))
+        self.assertTrue(result["human_review_required"])
+        self.assertTrue(result["not_approved_for_printing"])
+        self.assertFalse(result["real_gcode_inserted"])
+        self.assertFalse(result["printer_upload_supported"])
+        self.assertFalse(result["printer_start_supported"])
+        self.assertFalse(result["real_execution_supported"])
+        self.assertEqual(
+            result["deterministic_diff_summary"],
+            {
+                "summary": "Added deterministic review manifest only; no internal G-code was modified",
+                "target_internal_gcode_path": None,
+                "added_internal_paths": [REVIEW_MANIFEST_PATH],
+                "modified_internal_paths": [REVIEW_MANIFEST_PATH],
+                "inserted_block_count": 0,
+                "modified_member_count": 0,
+                "added_member_count": 1,
+                "preserved_member_count": len(entries),
+                "zip_member_count_before": len(entries),
+                "zip_member_count_after": len(entries) + 1,
+                "raw_gcode_included": False,
+                "human_review_required": True,
+                "not_approved_for_printing": True,
+            },
+        )
+
+        rendered = json.dumps(result, sort_keys=True)
+        self.assertNotIn("private-local-sample", rendered)
+        self.assertNotIn("private operator note", rendered)
+        self.assertNotIn("synthetic local review fixture", rendered)
+
+        outputs = list((output_root / "reviews").glob("*.3mf"))
+        self.assertEqual(len(outputs), 1)
+        output_entries = _read_3mf(outputs[0])
+        self.assertEqual(sorted(output_entries), sorted([*entries.keys(), REVIEW_MANIFEST_PATH]))
+        for name, payload in entries.items():
+            with self.subTest(name=name):
+                self.assertEqual(output_entries[name], payload)
+        manifest = json.loads(output_entries[REVIEW_MANIFEST_PATH].decode("utf-8"))
+        self.assertEqual(manifest["mode"], "REAL_SAMPLE_OUTPUT_REVIEW_ONLY")
+        self.assertTrue(manifest["human_review_required"])
+        self.assertTrue(manifest["not_approved_for_printing"])
+        self.assertFalse(manifest["raw_gcode_included"])
 
 
 if __name__ == "__main__":
