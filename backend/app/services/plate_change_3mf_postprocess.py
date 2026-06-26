@@ -46,6 +46,7 @@ SAFETY_NOTES = (
     "3MF post-processing output requires human diff review before any future use",
     "Output artifacts are disabled by default and remain prototype evidence only",
     "Printer upload/start remains out of scope for WP-064-C",
+    "WP-064-D physical canary upload/start requires explicit flags and separate human confirmations",
 )
 
 
@@ -266,6 +267,239 @@ class PlateChange3mfPostprocessService:
             "sentinels": _new_sentinels(),
         }
 
+
+
+CANARY_UPLOAD_RECORDED = "CANARY_UPLOAD_RECORDED"
+CANARY_START_ATTEMPTED = "CANARY_START_ATTEMPTED"
+CANARY_REQUIRED_CHECKLIST_FIELDS = (
+    "operator_present",
+    "printer_visible",
+    "emergency_stop_ready",
+    "power_cutoff_ready",
+    "bed_clear_confirmed",
+    "correct_plate_confirmed",
+    "no_other_job_running",
+    "fire_risk_area_clear",
+)
+
+
+class PlateChange3mfPhysicalCanaryService:
+    def __init__(self) -> None:
+        self._upload_record: dict[str, Any] | None = None
+        self._start_attempts_used = 0
+
+    def reset_for_tests(self) -> None:
+        self._upload_record = None
+        self._start_attempts_used = 0
+
+    def canary_status(
+        self,
+        *,
+        physical_canary_enabled: bool = False,
+        allow_printer_upload: bool = False,
+        allow_print_start: bool = False,
+        single_printer_only: bool = True,
+        require_human_confirmation: bool = True,
+        disable_auto_retry: bool = True,
+        max_starts: int = 1,
+        output_roots: Iterable[str | Path] | None = None,
+    ) -> dict[str, Any]:
+        all_runtime_gates_enabled = _physical_canary_runtime_gates_enabled(
+            physical_canary_enabled=physical_canary_enabled,
+            allow_printer_upload=allow_printer_upload,
+            allow_print_start=allow_print_start,
+            single_printer_only=single_printer_only,
+            require_human_confirmation=require_human_confirmation,
+            disable_auto_retry=disable_auto_retry,
+            max_starts=max_starts,
+        )
+        return {
+            "mode": "SUPERVISED_PHYSICAL_CANARY",
+            "physical_canary_enabled": physical_canary_enabled,
+            "allow_printer_upload": allow_printer_upload,
+            "allow_print_start": allow_print_start,
+            "single_printer_only": single_printer_only,
+            "require_human_confirmation": require_human_confirmation,
+            "disable_auto_retry": disable_auto_retry,
+            "max_starts": max_starts,
+            "output_root_configured": bool(_resolved_optional_roots(output_roots)),
+            "upload_recorded": self._upload_record is not None,
+            "canary_printer_id": self._upload_record.get("printer_id") if self._upload_record else None,
+            "artifact_sha256": self._upload_record.get("artifact_sha256") if self._upload_record else None,
+            "start_attempts_used": self._start_attempts_used,
+            "printer_upload_supported": all_runtime_gates_enabled,
+            "printer_start_supported": all_runtime_gates_enabled and self._upload_record is not None,
+            "real_execution_supported": all_runtime_gates_enabled,
+            "queue_supported": False,
+            "scheduler_supported": False,
+            "batch_supported": False,
+            "multi_printer_supported": False,
+            "auto_retry_supported": False,
+            "arbitrary_gcode_supported": False,
+            "human_review_required": True,
+            "human_supervision_required": True,
+            "sentinels": _new_sentinels(),
+        }
+
+    async def canary_upload(
+        self,
+        request: dict[str, Any],
+        *,
+        printer_ops: Any,
+        physical_canary_enabled: bool,
+        allow_printer_upload: bool,
+        allow_print_start: bool,
+        single_printer_only: bool,
+        require_human_confirmation: bool,
+        disable_auto_retry: bool,
+        max_starts: int,
+        output_roots: Iterable[str | Path],
+    ) -> dict[str, Any]:
+        _require_physical_canary_gates(
+            physical_canary_enabled=physical_canary_enabled,
+            allow_printer_upload=allow_printer_upload,
+            allow_print_start=allow_print_start,
+            single_printer_only=single_printer_only,
+            require_human_confirmation=require_human_confirmation,
+            disable_auto_retry=disable_auto_retry,
+            max_starts=max_starts,
+        )
+        printer_id = _single_canary_printer_id(request, single_printer_only=single_printer_only)
+        artifact_path = _resolve_canary_artifact_path(request.get("artifact_path"), output_roots)
+        artifact_sha256 = _validated_artifact_sha256(request.get("artifact_sha256"), artifact_path)
+        _require_confirmation_phrase(
+            request.get("operator_confirmation_phrase"),
+            expected=f"CONFIRM_UPLOAD_REVIEWED_3MF {printer_id} {artifact_sha256}",
+        )
+        if self._upload_record is not None:
+            raise PlateChange3mfPostprocessError(
+                "single_artifact_required",
+                "The supervised physical canary already has one uploaded artifact recorded",
+            )
+
+        try:
+            remote_path = await printer_ops.upload_artifact(printer_id, artifact_path)
+        except PlateChange3mfPostprocessError:
+            raise
+        except Exception as exc:
+            raise PlateChange3mfPostprocessError("printer_upload_failed", "Canary printer upload failed") from exc
+        if not remote_path:
+            raise PlateChange3mfPostprocessError("printer_upload_failed", "Canary printer upload failed")
+
+        self._upload_record = {
+            "printer_id": printer_id,
+            "artifact_sha256": artifact_sha256,
+            "artifact_path": str(artifact_path),
+            "artifact_name": artifact_path.name,
+            "remote_path": str(remote_path),
+        }
+        self._start_attempts_used = 0
+        return {
+            "status": CANARY_UPLOAD_RECORDED,
+            "mode": "SUPERVISED_PHYSICAL_CANARY",
+            "printer_id": printer_id,
+            "artifact_sha256": artifact_sha256,
+            "artifact_file_name_redacted": _redacted_artifact_name(artifact_path),
+            "remote_path_redacted": "redacted-printer-path",
+            "upload_recorded": True,
+            "start_attempts_used": self._start_attempts_used,
+            "printer_upload_supported": True,
+            "printer_start_supported": allow_print_start,
+            "real_execution_supported": True,
+            "queue_supported": False,
+            "scheduler_supported": False,
+            "batch_supported": False,
+            "multi_printer_supported": False,
+            "auto_retry_supported": False,
+            "arbitrary_gcode_supported": False,
+            "human_supervision_required": True,
+            "sentinels": _new_sentinels(),
+        }
+
+    async def canary_start(
+        self,
+        request: dict[str, Any],
+        *,
+        printer_ops: Any,
+        printer_state: Any,
+        physical_canary_enabled: bool,
+        allow_printer_upload: bool,
+        allow_print_start: bool,
+        single_printer_only: bool,
+        require_human_confirmation: bool,
+        disable_auto_retry: bool,
+        max_starts: int,
+        output_roots: Iterable[str | Path],
+    ) -> dict[str, Any]:
+        _require_physical_canary_gates(
+            physical_canary_enabled=physical_canary_enabled,
+            allow_printer_upload=allow_printer_upload,
+            allow_print_start=allow_print_start,
+            single_printer_only=single_printer_only,
+            require_human_confirmation=require_human_confirmation,
+            disable_auto_retry=disable_auto_retry,
+            max_starts=max_starts,
+        )
+        if self._upload_record is None:
+            raise PlateChange3mfPostprocessError(
+                "prior_upload_required",
+                "Print start requires a prior successful supervised canary upload record",
+            )
+        printer_id = _single_canary_printer_id(request, single_printer_only=single_printer_only)
+        artifact_path = _resolve_canary_artifact_path(request.get("artifact_path"), output_roots)
+        artifact_sha256 = _validated_artifact_sha256(request.get("artifact_sha256"), artifact_path)
+        if (
+            self._upload_record.get("printer_id") != printer_id
+            or self._upload_record.get("artifact_sha256") != artifact_sha256
+            or self._upload_record.get("artifact_path") != str(artifact_path)
+        ):
+            raise PlateChange3mfPostprocessError(
+                "prior_upload_required",
+                "Print start request must match the prior successful supervised canary upload record",
+            )
+        _require_confirmation_phrase(
+            request.get("operator_confirmation_phrase"),
+            expected=f"CONFIRM_START_REVIEWED_3MF {printer_id} {artifact_sha256}",
+        )
+        _require_canary_checklist(request.get("checklist"))
+        if self._start_attempts_used >= max_starts:
+            raise PlateChange3mfPostprocessError(
+                "max_start_attempts_reached",
+                "The supervised physical canary start attempt has already been used",
+            )
+        _require_known_idle_printer_state(printer_state)
+
+        self._start_attempts_used += 1
+        try:
+            started = await printer_ops.start_print(printer_id, str(self._upload_record["remote_path"]))
+        except PlateChange3mfPostprocessError:
+            raise
+        except Exception as exc:
+            raise PlateChange3mfPostprocessError("printer_start_failed", "Canary print start failed") from exc
+        if not started:
+            raise PlateChange3mfPostprocessError("printer_start_failed", "Canary print start failed")
+
+        return {
+            "status": CANARY_START_ATTEMPTED,
+            "mode": "SUPERVISED_PHYSICAL_CANARY",
+            "printer_id": printer_id,
+            "artifact_sha256": artifact_sha256,
+            "artifact_file_name_redacted": _redacted_artifact_name(artifact_path),
+            "remote_path_redacted": "redacted-printer-path",
+            "start_attempts_used": self._start_attempts_used,
+            "max_starts": max_starts,
+            "printer_upload_supported": True,
+            "printer_start_supported": True,
+            "real_execution_supported": True,
+            "queue_supported": False,
+            "scheduler_supported": False,
+            "batch_supported": False,
+            "multi_printer_supported": False,
+            "auto_retry_supported": False,
+            "arbitrary_gcode_supported": False,
+            "human_supervision_required": True,
+            "sentinels": _new_sentinels(),
+        }
 
 
 def default_controlled_roots(base_dir: str | Path | None = None) -> list[Path]:
@@ -719,6 +953,169 @@ def _new_sentinels() -> dict[str, int]:
     return {effect: 0 for effect in FORBIDDEN_SIDE_EFFECTS}
 
 
+
+def _physical_canary_runtime_gates_enabled(
+    *,
+    physical_canary_enabled: bool,
+    allow_printer_upload: bool,
+    allow_print_start: bool,
+    single_printer_only: bool,
+    require_human_confirmation: bool,
+    disable_auto_retry: bool,
+    max_starts: int,
+) -> bool:
+    return all(
+        (
+            physical_canary_enabled,
+            allow_printer_upload,
+            allow_print_start,
+            single_printer_only,
+            require_human_confirmation,
+            disable_auto_retry,
+            max_starts == 1,
+        )
+    )
+
+
+def _require_physical_canary_gates(
+    *,
+    physical_canary_enabled: bool,
+    allow_printer_upload: bool,
+    allow_print_start: bool,
+    single_printer_only: bool,
+    require_human_confirmation: bool,
+    disable_auto_retry: bool,
+    max_starts: int,
+) -> None:
+    if not physical_canary_enabled:
+        raise PlateChange3mfPostprocessError(
+            "physical_canary_disabled",
+            "Supervised physical canary is disabled",
+        )
+    if not allow_printer_upload:
+        raise PlateChange3mfPostprocessError(
+            "printer_upload_not_allowed",
+            "Supervised physical canary printer upload is disabled",
+        )
+    if not allow_print_start:
+        raise PlateChange3mfPostprocessError(
+            "print_start_not_allowed",
+            "Supervised physical canary print start is disabled",
+        )
+    if not single_printer_only:
+        raise PlateChange3mfPostprocessError(
+            "single_printer_gate_required",
+            "Supervised physical canary requires the single-printer gate",
+        )
+    if not require_human_confirmation:
+        raise PlateChange3mfPostprocessError(
+            "human_confirmation_gate_required",
+            "Supervised physical canary requires human confirmation",
+        )
+    if not disable_auto_retry:
+        raise PlateChange3mfPostprocessError(
+            "auto_retry_disabled_required",
+            "Supervised physical canary requires automatic retry to be disabled",
+        )
+    if max_starts != 1:
+        raise PlateChange3mfPostprocessError(
+            "single_start_required",
+            "Supervised physical canary allows exactly one start attempt",
+        )
+
+
+def _single_canary_printer_id(request: dict[str, Any], *, single_printer_only: bool) -> str:
+    printer_ids = request.get("target_printer_ids")
+    if not isinstance(printer_ids, list) or not printer_ids:
+        raise PlateChange3mfPostprocessError("single_printer_required", "Exactly one canary printer is required")
+    normalized = [str(value) for value in printer_ids]
+    if single_printer_only and len(normalized) != 1:
+        raise PlateChange3mfPostprocessError("single_printer_required", "Exactly one canary printer is required")
+    return normalized[0]
+
+
+def _resolve_canary_artifact_path(artifact_path: object, output_roots: Iterable[str | Path]) -> Path:
+    if not isinstance(artifact_path, str) or not artifact_path.strip():
+        raise PlateChange3mfPostprocessError("artifact_path_required", "A reviewed 3MF artifact path is required")
+    candidate = Path(artifact_path).expanduser().resolve()
+    if _path_is_repo_relative(candidate):
+        raise PlateChange3mfPostprocessError(
+            "repo_artifact_path_not_allowed",
+            "Supervised physical canary artifact must not be inside the repository",
+        )
+    if not candidate.name.lower().endswith(".3mf"):
+        raise PlateChange3mfPostprocessError(
+            "unsupported_artifact_file",
+            "Supervised physical canary accepts only reviewed .3mf or .gcode.3mf artifacts",
+        )
+    roots = _resolved_roots(output_roots)
+    if not any(candidate.is_relative_to(root) for root in roots):
+        raise PlateChange3mfPostprocessError(
+            "artifact_path_not_allowed",
+            "Supervised physical canary artifact path must be inside the configured output root",
+        )
+    if not candidate.is_file():
+        raise PlateChange3mfPostprocessError("artifact_not_found", "Reviewed 3MF artifact was not found")
+    return candidate
+
+
+def _validated_artifact_sha256(artifact_sha256: object, artifact_path: Path) -> str:
+    if not isinstance(artifact_sha256, str) or len(artifact_sha256) != 64:
+        raise PlateChange3mfPostprocessError("artifact_sha256_required", "Reviewed artifact SHA-256 is required")
+    normalized = artifact_sha256.lower()
+    if any(char not in "0123456789abcdef" for char in normalized):
+        raise PlateChange3mfPostprocessError("artifact_sha256_required", "Reviewed artifact SHA-256 is required")
+    actual = _sha256_bytes(artifact_path.read_bytes())
+    if normalized != actual:
+        raise PlateChange3mfPostprocessError(
+            "artifact_sha256_mismatch",
+            "Reviewed artifact SHA-256 does not match the artifact bytes",
+        )
+    return normalized
+
+
+def _require_confirmation_phrase(actual: object, *, expected: str) -> None:
+    if actual != expected:
+        raise PlateChange3mfPostprocessError(
+            "confirmation_phrase_mismatch",
+            "Human confirmation phrase did not match the reviewed artifact and printer",
+        )
+
+
+def _require_canary_checklist(checklist: object) -> None:
+    if hasattr(checklist, "model_dump"):
+        values = checklist.model_dump()
+    elif isinstance(checklist, dict):
+        values = checklist
+    else:
+        values = {}
+    missing = [field for field in CANARY_REQUIRED_CHECKLIST_FIELDS if values.get(field) is not True]
+    if missing:
+        raise PlateChange3mfPostprocessError(
+            "canary_checklist_incomplete",
+            "Every supervised physical canary checklist field must be true before print start",
+        )
+
+
+def _require_known_idle_printer_state(printer_state: Any) -> None:
+    if printer_state is None:
+        raise PlateChange3mfPostprocessError(
+            "printer_state_uncertain",
+            "Printer state is uncertain; supervised physical canary start is blocked",
+        )
+    if isinstance(printer_state, dict):
+        state_value = printer_state.get("state")
+        active_file = printer_state.get("gcode_file")
+    else:
+        state_value = getattr(printer_state, "state", None)
+        active_file = getattr(printer_state, "gcode_file", None)
+    if not isinstance(state_value, str) or state_value.upper() != "IDLE" or active_file:
+        raise PlateChange3mfPostprocessError(
+            "printer_state_uncertain",
+            "Printer must report a known idle state before supervised physical canary start",
+        )
+
+
 def _short_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
@@ -728,3 +1125,4 @@ def _sha256_bytes(value: bytes) -> str:
 
 
 plate_change_3mf_postprocess_service = PlateChange3mfPostprocessService()
+plate_change_3mf_physical_canary_service = PlateChange3mfPhysicalCanaryService()

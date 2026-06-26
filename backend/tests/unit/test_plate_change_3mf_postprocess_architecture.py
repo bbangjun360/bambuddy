@@ -34,25 +34,20 @@ class PlateChange3mfPostprocessArchitectureTest(unittest.TestCase):
         forbidden = [
             "BambuMQTTClient",
             "from backend.app.services.bambu_mqtt",
-            "from backend.app.services.bambu_ftp",
-            "from backend.app.services.printer_manager",
             "from backend.app.services.print_scheduler",
             "from backend.app.services.background_dispatch",
             "from backend.app.models.print_queue",
             "from backend.app.models.bed_automation",
             "from backend.app.services.erp_draft_write",
             "from backend.app.services.obico_shadow",
-            "printer_manager.",
             "background_dispatch.",
             "print_scheduler.",
             "BedAutomationCycle",
             "ErpDraftWriteRecord",
             "send_gcode",
-            "start_print",
             "stop_print",
             "pause_print",
             "resume_print",
-            "upload_file_async",
             "download_file_async",
             "delete_file_async",
             "HTTPConnection",
@@ -78,6 +73,9 @@ class PlateChange3mfPostprocessArchitectureTest(unittest.TestCase):
         self.assertIn('APIRouter(prefix="/plate-change-3mf"', route_text)
         self.assertIn('@router.post("/postprocess-plans"', route_text)
         self.assertIn('@router.get("/status"', route_text)
+        self.assertIn('@router.get("/canary-status"', route_text)
+        self.assertIn('@router.post("/canary-upload"', route_text)
+        self.assertIn('@router.post("/canary-start"', route_text)
         self.assertIn("real_sample_output_review", schema_text)
         self.assertIn("output_dir", schema_text)
         self.assertIn("plate_change_3mf_postprocess", main_text)
@@ -97,8 +95,11 @@ class PlateChange3mfPostprocessArchitectureTest(unittest.TestCase):
             "/live-run",
             "/send",
             "/raw",
-            "/upload",
-            "/start",
+            "raw-command",
+            "send-gcode",
+            "execute-gcode",
+            "bulk-start",
+            "auto-run",
             "/command",
         )
         for token in forbidden_route_tokens:
