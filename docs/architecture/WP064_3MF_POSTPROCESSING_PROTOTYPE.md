@@ -190,7 +190,8 @@ not a general printer-control path. It permits only:
 - one prior successful upload record;
 - one start attempt;
 - all start checklist fields set to true;
-- a known idle printer state at start time.
+- a known idle printer state at start time (`IDLE`, or terminal `FINISH`
+  with no active `gcode_file` on A1/A1 Mini style firmware).
 
 The required phrases are:
 

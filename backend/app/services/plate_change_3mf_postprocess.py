@@ -1109,7 +1109,8 @@ def _require_known_idle_printer_state(printer_state: Any) -> None:
     else:
         state_value = getattr(printer_state, "state", None)
         active_file = getattr(printer_state, "gcode_file", None)
-    if not isinstance(state_value, str) or state_value.upper() != "IDLE" or active_file:
+    known_idle_states = {"IDLE", "FINISH"}
+    if not isinstance(state_value, str) or state_value.upper() not in known_idle_states or active_file:
         raise PlateChange3mfPostprocessError(
             "printer_state_uncertain",
             "Printer must report a known idle state before supervised physical canary start",
