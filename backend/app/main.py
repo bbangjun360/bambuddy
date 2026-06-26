@@ -51,6 +51,7 @@ from backend.app.api.routes import (
     obico_shadow,
     orca_cloud,
     pending_uploads,
+    plate_change_3mf_postprocess,
     plate_change_command,
     printflow_canary,
     print_log,
@@ -6235,6 +6236,7 @@ app.include_router(discovery.router, prefix=app_settings.api_prefix)
 app.include_router(erp_draft_write.router, prefix=app_settings.api_prefix)
 app.include_router(erp_readonly.router, prefix=app_settings.api_prefix)
 app.include_router(pending_uploads.router, prefix=app_settings.api_prefix)
+app.include_router(plate_change_3mf_postprocess.router, prefix=app_settings.api_prefix)
 app.include_router(plate_change_command.router, prefix=app_settings.api_prefix)
 app.include_router(printflow_canary.router, prefix=app_settings.api_prefix)
 app.include_router(firmware.router, prefix=app_settings.api_prefix)
