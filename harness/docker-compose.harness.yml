@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:?Set a pinned POSTGRES_IMAGE in .env.harness}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bambuddy}
+      POSTGRES_USER: ${POSTGRES_USER:-bambuddy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bambuddy} -d ${POSTGRES_DB:-bambuddy}"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    volumes:
+      - harness_pgdata:/var/lib/postgresql/data
+    networks:
+      harness:
+        aliases:
+          - postgres
+
+  mock-services:
+    build:
+      context: ..
+      dockerfile: harness/Dockerfile.mock
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:?Set a pinned PYTHON_IMAGE in .env.harness}
+    environment:
+      MOCK_PORT: "9099"
+      MOCK_SCENARIO: success
+    ports:
+      - "${MOCK_PORT:-19099}:9099"
+    healthcheck:
+      test:
+        ["CMD", "python", "-c",
+         "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9099/health', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    networks:
+      harness:
+        aliases:
+          - mock-services
+
+  bambuddy:
+    build:
+      context: ..
+      args:
+        GIT_BRANCH: ${GIT_BRANCH:-main}
+    environment:
+      TZ: Asia/Seoul
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-bambuddy}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-bambuddy}
+      PORT: "8000"
+      SLICER_API_URL: http://orca-slicer-api:3000
+      FARM_BED_AUTOMATION_ENABLED: ${FARM_BED_AUTOMATION_ENABLED:-false}
+      FARM_BED_AUTOMATION_DRY_RUN: ${FARM_BED_AUTOMATION_DRY_RUN:-true}
+      FARM_OBICO_SHADOW_ENABLED: ${FARM_OBICO_SHADOW_ENABLED:-false}
+      # No real printer, ERP, slicer, or actuator credentials are present in the harness.
+    ports:
+      - "${BAMBUDDY_PORT:-18000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-services:
+        condition: service_healthy
+    volumes:
+      - harness_bambuddy_data:/app/data
+      - harness_bambuddy_logs:/app/logs
+    networks:
+      harness:
+        aliases:
+          - bambuddy
+
+  orca-slicer-api:
+    profiles: ["slicer"]
+    image: ${ORCA_IMAGE:?Set a pinned ORCA_IMAGE in .env.harness}
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:${ORCA_API_PORT:-13003}:3000"
+    volumes:
+      - harness_orca_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      harness:
+        aliases:
+          - orca-slicer-api
+
+networks:
+  harness:
+    internal: false
+
+volumes:
+  harness_pgdata:
+  harness_bambuddy_data:
+  harness_bambuddy_logs:
+  harness_orca_data:

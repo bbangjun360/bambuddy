@@ -1,0 +1,9 @@
+ARG PYTHON_IMAGE
+FROM ${PYTHON_IMAGE}
+
+WORKDIR /app
+COPY harness/mock_services.py /app/mock_services.py
+
+USER 65532:65532
+EXPOSE 9099
+CMD ["python", "/app/mock_services.py"]

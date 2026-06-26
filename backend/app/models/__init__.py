@@ -3,7 +3,10 @@ from backend.app.models.ams_label import AmsLabel
 from backend.app.models.api_key import APIKey
 from backend.app.models.archive import PrintArchive
 from backend.app.models.auth_ephemeral import AuthEphemeralToken, AuthRateLimitEvent
+from backend.app.models.bed_automation import BedAutomationCycle
 from backend.app.models.color_catalog import ColorCatalogEntry
+from backend.app.models.erp_draft_write import ErpDraftWriteRecord
+from backend.app.models.erp_readonly import ErpProductionRequest
 from backend.app.models.filament import Filament
 from backend.app.models.github_backup import GitHubBackupConfig, GitHubBackupLog
 from backend.app.models.group import Group, user_groups
@@ -38,6 +41,8 @@ __all__ = [
     "Printer",
     "PrintArchive",
     "Filament",
+    "ErpDraftWriteRecord",
+    "ErpProductionRequest",
     "Settings",
     "SmartPlug",
     "SmartPlugEnergySnapshot",
@@ -76,5 +81,6 @@ __all__ = [
     "UserTOTP",
     "AuthEphemeralToken",
     "AuthRateLimitEvent",
+    "BedAutomationCycle",
     "LongLivedToken",
 ]

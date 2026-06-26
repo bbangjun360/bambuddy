@@ -27,6 +27,8 @@ from backend.app.api.routes import (
     camera,
     cloud,
     discovery,
+    erp_draft_write,
+    erp_readonly,
     external_links,
     filaments,
     firmware,
@@ -46,8 +48,11 @@ from backend.app.api.routes import (
     notification_templates,
     notifications,
     obico,
+    obico_shadow,
     orca_cloud,
     pending_uploads,
+    plate_change_command,
+    printflow_canary,
     print_log,
     print_queue,
     printers,
@@ -6227,11 +6232,16 @@ app.include_router(system.router, prefix=app_settings.api_prefix)
 app.include_router(support.router, prefix=app_settings.api_prefix)
 app.include_router(websocket.router, prefix=app_settings.api_prefix)
 app.include_router(discovery.router, prefix=app_settings.api_prefix)
+app.include_router(erp_draft_write.router, prefix=app_settings.api_prefix)
+app.include_router(erp_readonly.router, prefix=app_settings.api_prefix)
 app.include_router(pending_uploads.router, prefix=app_settings.api_prefix)
+app.include_router(plate_change_command.router, prefix=app_settings.api_prefix)
+app.include_router(printflow_canary.router, prefix=app_settings.api_prefix)
 app.include_router(firmware.router, prefix=app_settings.api_prefix)
 app.include_router(github_backup.router, prefix=app_settings.api_prefix)
 app.include_router(local_backup.router, prefix=app_settings.api_prefix)
 app.include_router(obico.router, prefix=app_settings.api_prefix)
+app.include_router(obico_shadow.router, prefix=app_settings.api_prefix)
 app.include_router(metrics.router, prefix=app_settings.api_prefix)
 app.include_router(virtual_printers.router, prefix=app_settings.api_prefix)
 app.include_router(spoolbuddy.router, prefix=app_settings.api_prefix)

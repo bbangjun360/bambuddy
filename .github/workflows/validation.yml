@@ -1,0 +1,91 @@
+name: Validation
+
+on:
+  pull_request:
+    branches: [farm-main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validation:
+    name: validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      COMPOSE_PROJECT_NAME: farm_ci
+      GIT_BRANCH: ${{ github.head_ref || github.ref_name }}
+      HARNESS_COMPOSE: harness/docker-compose.harness.yml
+      HARNESS_ENV: .env.harness
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHON_VERSION: "3.13"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Prepare synthetic harness environment
+        run: |
+          cat > "$HARNESS_ENV" <<'EOF'
+          COMPOSE_PROJECT_NAME=farm_ci
+          POSTGRES_IMAGE=postgres:17-alpine@sha256:dc17045ccfd343b49600570ea734b9c4991cf1c3f3302e67df51e3b402dd55c4
+          PYTHON_IMAGE=python:3.13-slim@sha256:2b7445fb71ca9cb15e9aab053fe8cb3162796f8e1d92ada12a49c766a811bc1e
+          ORCA_IMAGE=ghcr.io/bbangjun360/orca-slicer-api:headless-cli-qualified-20260624@sha256:1c3e3e6f2ff193d4202bc7284af5d5a8c868e6185a26eeeacf878fe51387f518
+          POSTGRES_DB=bambuddy
+          POSTGRES_USER=bambuddy
+          POSTGRES_PASSWORD=ci-harness-only
+          BAMBUDDY_PORT=18000
+          MOCK_PORT=19099
+          ORCA_API_PORT=13003
+          BAMBUDDY_HEALTH_URL=http://127.0.0.1:18000/
+          MOCK_HEALTH_URL=http://127.0.0.1:19099/health
+          EOF
+
+      - name: Check harness compose configuration
+        run: make harness-config
+
+      - name: Build Bambuddy validation image
+        run: docker compose --env-file "$HARNESS_ENV" -f "$HARNESS_COMPOSE" build bambuddy
+
+      - name: Run fast validation
+        run: make verify-fast
+
+      - name: Run observability tests
+        run: make test-observability
+
+      - name: Run ERP read-only tests
+        run: make test-erp-readonly
+
+      - name: Run bed automation tests
+        run: make test-bed-automation
+
+      - name: Run Obico shadow tests
+        run: make test-obico-shadow
+
+      - name: Stop harness services
+        if: always()
+        run: |
+          if [ -f "$HARNESS_ENV" ]; then
+            make harness-down
+          fi

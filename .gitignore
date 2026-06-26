@@ -35,6 +35,10 @@ npm-debug.log*
 # Archive files (user data)
 archive/
 
+# Harness source docs intentionally keep the archived v1.1 specification here.
+!docs/archive/
+!docs/archive/**
+
 # Firmware cache (downloaded firmware files)
 firmware/
 
@@ -92,3 +96,12 @@ gitleaks-report.json
 scripts/pip-audit.sh
 
 security/
+
+# Harness local environment
+# WP-000 keeps .env.harness tracked with synthetic local-only defaults.
+!.env.harness
+harness/artifacts/*
+!harness/artifacts/.gitignore
+
+# Harness local environment
+.env.harness

@@ -1,0 +1,25 @@
+{
+  "profile_set_id": "p1p-pla-fixture-v1",
+  "valid_model": "fixture-cube-v1.stl",
+  "valid_model_sha256": "235784093ac09f0c0390309d8bc8092161a7100c11e1667334887be29f6c7c0e",
+  "invalid_model": "invalid-model-v1.stl",
+  "invalid_model_sha256": "bccbbad292ab44b6d22cb339643833e69cef3c660c45246fc36d65469187c0e6",
+  "profile_set_sha256": "bc84ff64720c274b6ed7c959e3ac28a4c2aff03caceb08f6ffb0e7250784627c",
+  "profiles": {
+    "printer": {
+      "name": "Bambu Lab P1P 0.4 nozzle",
+      "path": "profiles/p1p-printer.json",
+      "sha256": "aa99c3b54c3b101c614185b67dc0049086d95ae5caa13d5aae29c2f5675caade"
+    },
+    "process": {
+      "name": "0.20mm Standard @BBL P1P",
+      "path": "profiles/p1p-pla-process.json",
+      "sha256": "eb93e7d484b07b2a4b104786d3bee4b9abb02cd027245106b3936ee1671a7e48"
+    },
+    "filament": {
+      "name": "Generic PLA High Speed @BBL P1P",
+      "path": "profiles/p1p-pla-filament.json",
+      "sha256": "df86ae82538383f80f1592de687a1f50b4f969d8797d12f582acb93f15271316"
+    }
+  }
+}

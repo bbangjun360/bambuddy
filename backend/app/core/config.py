@@ -89,6 +89,48 @@ class Settings(BaseSettings):
     slicer_api_url: str = "http://localhost:3003"
     bambu_studio_api_url: str = "http://localhost:3001"
 
+    # WP-030 ERP read-only import. Disabled by default; tests and harness
+    # scenarios opt in explicitly. This integration reads Work Orders only.
+    farm_erp_import_enabled: bool = False
+    farm_erp_base_url: str = "http://mock-services:9099"
+    farm_erp_api_token: str | None = None
+    farm_erp_timeout_seconds: float = 5.0
+
+    # WP-040 ERP draft write. Disabled by default; creates Draft-only
+    # synthetic ERP output documents through the mock/sandbox adapter.
+    farm_erp_draft_posting_enabled: bool = False
+
+    # WP-050 bed automation simulator. Disabled by default and dry-run only.
+    farm_bed_automation_enabled: bool = False
+    farm_bed_automation_dry_run: bool = True
+
+    # WP-070 Obico Shadow Mode. Disabled by default and records observations only.
+    farm_obico_shadow_enabled: bool = False
+
+    # WP-060 PrintFlow canary readiness. Disabled by default; dry-run,
+    # human-gated, mock-readiness checks only. The previous server-adapter
+    # model is deprecated/pending redesign because PrintFlow/SwapMod are 3MF
+    # post-processing workflows, not remote control servers for live operation.
+    farm_printflow_canary_readiness_enabled: bool = False
+    farm_printflow_real_adapter_enabled: bool = False
+    farm_printflow_canary_dry_run: bool = True
+    farm_printflow_canary_human_approval_required: bool = True
+    farm_printflow_canary_single_printer_only: bool = True
+    farm_printflow_base_url: str | None = None
+    farm_printflow_api_token: str | None = None
+
+    # WP-063 Bambuddy-native plate-change command research. Disabled by
+    # default and dry-run only. Real command execution is intentionally not
+    # implemented in this Work Package.
+    farm_plate_change_command_enabled: bool = False
+    farm_plate_change_command_dry_run: bool = True
+    farm_plate_change_human_approval_required: bool = True
+    farm_plate_change_single_printer_only: bool = True
+    farm_plate_change_allow_real_commands: bool = False
+    farm_plate_change_transport_enabled: bool = False
+    farm_plate_change_allow_real_transport: bool = False
+    farm_plate_change_transport_dry_run: bool = True
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

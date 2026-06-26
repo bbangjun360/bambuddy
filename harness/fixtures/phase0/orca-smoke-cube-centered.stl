@@ -1,0 +1,86 @@
+solid orca_smoke_cube_centered
+  facet normal 0 0 -1
+    outer loop
+      vertex 100 100 0
+      vertex 120 110 0
+      vertex 120 100 0
+    endloop
+  endfacet
+  facet normal 0 0 -1
+    outer loop
+      vertex 100 100 0
+      vertex 100 110 0
+      vertex 120 110 0
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex 100 100 10
+      vertex 120 100 10
+      vertex 120 110 10
+    endloop
+  endfacet
+  facet normal 0 0 1
+    outer loop
+      vertex 100 100 10
+      vertex 120 110 10
+      vertex 100 110 10
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex 100 100 0
+      vertex 120 100 0
+      vertex 120 100 10
+    endloop
+  endfacet
+  facet normal 0 -1 0
+    outer loop
+      vertex 100 100 0
+      vertex 120 100 10
+      vertex 100 100 10
+    endloop
+  endfacet
+  facet normal 1 0 0
+    outer loop
+      vertex 120 100 0
+      vertex 120 110 0
+      vertex 120 110 10
+    endloop
+  endfacet
+  facet normal 1 0 0
+    outer loop
+      vertex 120 100 0
+      vertex 120 110 10
+      vertex 120 100 10
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex 120 110 0
+      vertex 100 110 0
+      vertex 100 110 10
+    endloop
+  endfacet
+  facet normal 0 1 0
+    outer loop
+      vertex 120 110 0
+      vertex 100 110 10
+      vertex 120 110 10
+    endloop
+  endfacet
+  facet normal -1 0 0
+    outer loop
+      vertex 100 110 0
+      vertex 100 100 0
+      vertex 100 100 10
+    endloop
+  endfacet
+  facet normal -1 0 0
+    outer loop
+      vertex 100 110 0
+      vertex 100 100 10
+      vertex 100 110 10
+    endloop
+  endfacet
+endsolid orca_smoke_cube_centered
