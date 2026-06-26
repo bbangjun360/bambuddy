@@ -2,8 +2,11 @@
 
 This file summarizes model and policy ideas from Print Farm OS. It does not
 define Bambuddy runtime behavior.
+Bambuddy targets are planning anchors, not accepted schema or API changes.
 
 ## Source Files
+
+Source snapshot: `2d8f108` (Restructure MVP UI into flow modes).
 
 - `print-farm-os/print_farm_os/core/production.py`
 - `print-farm-os/print_farm_os/core/quality.py`
