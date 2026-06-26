@@ -54,6 +54,9 @@ async def create_dry_run_commands(
             human_approval_required=settings.farm_plate_change_human_approval_required,
             single_printer_only=settings.farm_plate_change_single_printer_only,
             allow_real_commands=settings.farm_plate_change_allow_real_commands,
+            transport_enabled=settings.farm_plate_change_transport_enabled,
+            allow_real_transport=settings.farm_plate_change_allow_real_transport,
+            transport_dry_run=settings.farm_plate_change_transport_dry_run,
         )
     except PlateChangeCommandError as exc:
         raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
@@ -69,4 +72,18 @@ async def get_plate_change_status(
         human_approval_required=settings.farm_plate_change_human_approval_required,
         single_printer_only=settings.farm_plate_change_single_printer_only,
         allow_real_commands=settings.farm_plate_change_allow_real_commands,
+        transport_enabled=settings.farm_plate_change_transport_enabled,
+        allow_real_transport=settings.farm_plate_change_allow_real_transport,
+        transport_dry_run=settings.farm_plate_change_transport_dry_run,
+    )
+
+
+@router.get("/transport-status")
+async def get_plate_change_transport_status(
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+):
+    return plate_change_command_service.transport_status_snapshot(
+        transport_enabled=settings.farm_plate_change_transport_enabled,
+        allow_real_transport=settings.farm_plate_change_allow_real_transport,
+        transport_dry_run=settings.farm_plate_change_transport_dry_run,
     )

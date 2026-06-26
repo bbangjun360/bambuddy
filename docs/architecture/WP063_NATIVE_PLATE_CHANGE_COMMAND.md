@@ -4,6 +4,8 @@
 
 Implemented as WP-063-A dry-run research boundary on 2026-06-25.
 Extended by WP-063-B with A1 mini allowlisted command sequence planning.
+Extended by WP-063-C with a local, blocked, audit-only transport interface
+boundary for future reviewed execution.
 This document does not authorize real printer movement or any hardware canary.
 
 ## Context
@@ -15,7 +17,9 @@ allowlisted command sequence, and no arbitrary command input.
 
 WP-063-A implements only the dry-run API boundary and architecture evidence.
 WP-063-B adds a command-plan model for A1 mini sequences, still dry-run and
-mock-only. Neither Work Package sends a real printer command.
+mock-only. WP-063-C adds a Bambuddy-native transport interface shape, still
+dry-run and blocked. No WP-063 Work Package through WP-063-C sends a real
+printer command.
 
 ## Existing Command Paths Inspected
 
@@ -63,8 +67,8 @@ printer-manager method such as an allowlisted plate-change sequence executor,
 then call the existing client command transport only from that method. The route
 must continue to accept only enum sequence identifiers and human approval data.
 
-WP-063-B still does not call that transport. The independent dry-run service and
-route return an auditable plan with all action fields set to `None`,
+WP-063-C still does not call live printer transport. The independent dry-run
+service and route return an auditable plan with all action fields set to `None`,
 `real_execution_supported=false`, and all forbidden side-effect sentinels at
 zero.
 
@@ -74,6 +78,7 @@ Routes:
 
 - `POST /api/v1/plate-change/dry-run-commands`
 - `GET /api/v1/plate-change/status`
+- `GET /api/v1/plate-change/transport-status`
 
 Config flags:
 
@@ -82,6 +87,9 @@ Config flags:
 - `FARM_PLATE_CHANGE_HUMAN_APPROVAL_REQUIRED=true`
 - `FARM_PLATE_CHANGE_SINGLE_PRINTER_ONLY=true`
 - `FARM_PLATE_CHANGE_ALLOW_REAL_COMMANDS=false`
+- `FARM_PLATE_CHANGE_TRANSPORT_ENABLED=false`
+- `FARM_PLATE_CHANGE_ALLOW_REAL_TRANSPORT=false`
+- `FARM_PLATE_CHANGE_TRANSPORT_DRY_RUN=true`
 
 Accepted request shape:
 
@@ -99,6 +107,43 @@ Accepted request shape:
 The schema forbids extra fields, so a body field such as `gcode` is rejected by
 validation instead of being ignored. The request does not expose any editable
 command-text field.
+
+## WP-063-C Transport Boundary
+
+WP-063-C adds only a local service interface boundary in
+`backend/app/services/plate_change_command.py`:
+
+- `PlateChangeCommandTransport`
+- `DryRunPlateChangeCommandTransport`
+- `BlockedRealPlateChangeCommandTransport`
+
+The dry-run and status responses expose the blocked transport state:
+
+- `transport_mode=DRY_RUN`
+- `transport_status=BLOCKED_AUDIT_ONLY`
+- `real_transport_supported=false`
+- `real_command_sent=false`
+- `audit_required=true`
+- `blocked_reasons` includes `real_transport_not_implemented` plus the default
+  blockers.
+
+`GET /api/v1/plate-change/transport-status` is read-only status. WP-063-C does
+not add execute, live, send, raw, or general command endpoints. The safe planner
+remains `POST /api/v1/plate-change/dry-run-commands`.
+
+The WP-063-C implementation does not import or call Bambu MQTT,
+`printer_manager`, FTPS helpers, queue or scheduler paths, ERP, Obico, or
+`BedAutomationCycle` mutation paths. It adds no direct MQTT, FTPS, or raw G-code
+path. Arbitrary G-code remains impossible through the schema and route design
+because requests accept enum sequence identifiers only and reject extra command
+body fields.
+
+`command_plan.real_execution_supported` remains `false`. Exact phrase,
+single-printer, and allowlist gates remain mandatory. Disabling human approval
+now blocks the dry-run request instead of bypassing phrase checks.
+
+WP-063-C does not approve hardware execution. No real printer command was sent
+by WP-063-C.
 
 ## WP-063-B Command Plan Model
 
@@ -144,7 +189,7 @@ safe for hardware.
 
 ## Forbidden Boundaries
 
-The WP-063-A implementation must not:
+The WP-063 implementation through WP-063-C must not:
 
 - call Bambu MQTT command methods;
 - call FTPS upload, download, or delete helpers;
@@ -180,18 +225,23 @@ The following can be tested without hardware:
 
 ## Human-Supervised Canary Later
 
-A later Work Package is required before real execution. That Work Package must
+WP-063-D is required before real execution. That Work Package must
 produce separate evidence for:
 
 - exact reviewed command sequence content;
+- reviewed firmware/G-code command content, versioned outside arbitrary user
+  input;
 - a dedicated printer-manager execution method;
 - audit storage with operator, printer alias, sequence id, phrase, timestamp,
   and result;
 - physical idle-state verification;
 - emergency stop and power cutoff availability;
 - one named canary printer, represented only by a sanitized alias in repo files;
+- physical monitoring throughout the canary;
+- explicit human confirmation immediately before any command;
 - no retry after timeout, restart, lost acknowledgement, manual interruption, or
   uncertain state;
+- manual recovery for any interrupted or uncertain physical action;
 - no next print until the bed state is verified `READY`;
 - human checklist completion and stop-condition review.
 

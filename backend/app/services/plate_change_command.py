@@ -11,6 +11,9 @@ APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
 PLATE_CHANGE_BLOCKED = "PLATE_CHANGE_BLOCKED"
 PLAN_ONLY = "PLAN_ONLY"
 DRY_RUN_PLANNED = "DRY_RUN_PLANNED"
+TRANSPORT_MODE_DRY_RUN = "DRY_RUN"
+TRANSPORT_STATUS_BLOCKED_AUDIT_ONLY = "BLOCKED_AUDIT_ONLY"
+
 
 A1_MINI_PLATE_CHANGE_DRY_RUN = "A1_MINI_PLATE_CHANGE_DRY_RUN"
 A1_MINI_PLATE_CHANGE_CANDIDATE_V1 = "A1_MINI_PLATE_CHANGE_CANDIDATE_V1"
@@ -21,6 +24,7 @@ ALLOWED_COMMAND_SEQUENCES = (
 
 FORBIDDEN_SIDE_EFFECTS = (
     "printer_commands",
+    "printer_manager_calls",
     "bambu_mqtt_commands",
     "ftps_calls",
     "queue_dispatches",
@@ -50,6 +54,50 @@ class PlateChangeCommandError(Exception):
         self.message = message
 
 
+class PlateChangeCommandTransport:
+    def audit_result(
+        self,
+        *,
+        transport_enabled: bool,
+        allow_real_transport: bool,
+        transport_dry_run: bool,
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+
+class DryRunPlateChangeCommandTransport(PlateChangeCommandTransport):
+    def audit_result(
+        self,
+        *,
+        transport_enabled: bool,
+        allow_real_transport: bool,
+        transport_dry_run: bool,
+    ) -> dict[str, Any]:
+        return _blocked_transport_audit_result(
+            transport_enabled=transport_enabled,
+            allow_real_transport=allow_real_transport,
+            transport_dry_run=transport_dry_run,
+        )
+
+
+class BlockedRealPlateChangeCommandTransport(PlateChangeCommandTransport):
+    def audit_result(
+        self,
+        *,
+        transport_enabled: bool,
+        allow_real_transport: bool,
+        transport_dry_run: bool,
+    ) -> dict[str, Any]:
+        return _blocked_transport_audit_result(
+            transport_enabled=transport_enabled,
+            allow_real_transport=allow_real_transport,
+            transport_dry_run=transport_dry_run,
+        )
+
+
+plate_change_command_transport: PlateChangeCommandTransport = DryRunPlateChangeCommandTransport()
+
+
 class PlateChangeCommandDryRunService:
     def __init__(self) -> None:
         self._lock = RLock()
@@ -69,6 +117,9 @@ class PlateChangeCommandDryRunService:
         human_approval_required: bool,
         single_printer_only: bool,
         allow_real_commands: bool,
+        transport_enabled: bool = False,
+        allow_real_transport: bool = False,
+        transport_dry_run: bool = True,
     ) -> dict[str, Any]:
         idempotency_key = _nonempty(payload.get("idempotency_key"))
         if idempotency_key is None:
@@ -92,6 +143,8 @@ class PlateChangeCommandDryRunService:
         blockers: list[str] = []
         if not single_printer_only:
             blockers.append("single_printer_gate_disabled")
+        if not human_approval_required:
+            blockers.append("human_approval_gate_required")
         if len(target_printer_ids) != 1:
             blockers.append("single_printer_required")
 
@@ -115,6 +168,9 @@ class PlateChangeCommandDryRunService:
                     failure_class="operator_approval_required",
                     human_approval_required=human_approval_required,
                     single_printer_only=single_printer_only,
+                    transport_enabled=transport_enabled,
+                    allow_real_transport=allow_real_transport,
+                    transport_dry_run=transport_dry_run,
                 )
             if submitted_phrase is None:
                 return _approval_required_record(
@@ -127,6 +183,9 @@ class PlateChangeCommandDryRunService:
                     failure_class="approval_phrase_required",
                     human_approval_required=human_approval_required,
                     single_printer_only=single_printer_only,
+                    transport_enabled=transport_enabled,
+                    allow_real_transport=allow_real_transport,
+                    transport_dry_run=transport_dry_run,
                 )
             if required_phrase is not None and submitted_phrase != required_phrase:
                 blockers.append("approval_phrase_mismatch")
@@ -142,6 +201,9 @@ class PlateChangeCommandDryRunService:
                 human_approval_required=human_approval_required,
                 single_printer_only=single_printer_only,
                 operator_approved=operator_approved,
+                transport_enabled=transport_enabled,
+                allow_real_transport=allow_real_transport,
+                transport_dry_run=transport_dry_run,
             )
 
         payload_fingerprint = _fingerprint(payload)
@@ -159,8 +221,16 @@ class PlateChangeCommandDryRunService:
                         human_approval_required=human_approval_required,
                         single_printer_only=single_printer_only,
                         operator_approved=operator_approved,
+                        transport_enabled=transport_enabled,
+                        allow_real_transport=allow_real_transport,
+                        transport_dry_run=transport_dry_run,
                     )
-                return dict(existing)
+                return _public(
+                    existing,
+                    transport_enabled=transport_enabled,
+                    allow_real_transport=allow_real_transport,
+                    transport_dry_run=transport_dry_run,
+                )
 
             record = _base_record(
                 idempotency_key,
@@ -186,7 +256,12 @@ class PlateChangeCommandDryRunService:
             )
             self._records[idempotency_key] = record
             self._status_counts[DRY_RUN_COMMANDS_READY] += 1
-            return dict(record)
+            return _public(
+                record,
+                transport_enabled=transport_enabled,
+                allow_real_transport=allow_real_transport,
+                transport_dry_run=transport_dry_run,
+            )
 
     def status_snapshot(
         self,
@@ -196,10 +271,13 @@ class PlateChangeCommandDryRunService:
         human_approval_required: bool = True,
         single_printer_only: bool = True,
         allow_real_commands: bool = False,
+        transport_enabled: bool = False,
+        allow_real_transport: bool = False,
+        transport_dry_run: bool = True,
     ) -> dict[str, Any]:
         with self._lock:
             recent = list(self._records.values())[-10:]
-            return {
+            snapshot = {
                 "mode": "DRY_RUN_ONLY",
                 "enabled": enabled,
                 "dry_run": dry_run,
@@ -210,8 +288,48 @@ class PlateChangeCommandDryRunService:
                 "dry_run_commands": len(self._records),
                 "status_counts": dict(sorted(self._status_counts.items())),
                 "sentinels": dict(self._sentinels),
-                "recent_dry_runs": [_public(record) for record in recent],
+                "recent_dry_runs": [
+                    _public(
+                        record,
+                        transport_enabled=transport_enabled,
+                        allow_real_transport=allow_real_transport,
+                        transport_dry_run=transport_dry_run,
+                    )
+                    for record in recent
+                ],
             }
+            snapshot.update(
+                _transport_audit_fields(
+                    transport_enabled=transport_enabled,
+                    allow_real_transport=allow_real_transport,
+                    transport_dry_run=transport_dry_run,
+                )
+            )
+            return snapshot
+
+    def transport_status_snapshot(
+        self,
+        *,
+        transport_enabled: bool = False,
+        allow_real_transport: bool = False,
+        transport_dry_run: bool = True,
+    ) -> dict[str, Any]:
+        with self._lock:
+            snapshot = {
+                "transport_enabled": transport_enabled,
+                "allow_real_transport": allow_real_transport,
+                "transport_dry_run": transport_dry_run,
+                "allowed_command_sequences": list(ALLOWED_COMMAND_SEQUENCES),
+                "sentinels": dict(self._sentinels),
+            }
+            snapshot.update(
+                _transport_audit_fields(
+                    transport_enabled=transport_enabled,
+                    allow_real_transport=allow_real_transport,
+                    transport_dry_run=transport_dry_run,
+                )
+            )
+            return snapshot
 
 
 def required_plate_change_approval_phrase(target_printer_id: str, command_sequence: str) -> str:
@@ -229,6 +347,9 @@ def _approval_required_record(
     failure_class: str,
     human_approval_required: bool,
     single_printer_only: bool,
+    transport_enabled: bool = False,
+    allow_real_transport: bool = False,
+    transport_dry_run: bool = True,
 ) -> dict[str, Any]:
     record = _base_record(
         idempotency_key,
@@ -249,7 +370,12 @@ def _approval_required_record(
             "payload_fingerprint": _fingerprint(payload),
         }
     )
-    return _public(record)
+    return _public(
+        record,
+        transport_enabled=transport_enabled,
+        allow_real_transport=allow_real_transport,
+        transport_dry_run=transport_dry_run,
+    )
 
 
 def _blocked_record(
@@ -263,6 +389,9 @@ def _blocked_record(
     human_approval_required: bool,
     single_printer_only: bool,
     operator_approved: bool,
+    transport_enabled: bool = False,
+    allow_real_transport: bool = False,
+    transport_dry_run: bool = True,
 ) -> dict[str, Any]:
     record = _base_record(
         idempotency_key,
@@ -283,7 +412,12 @@ def _blocked_record(
             "payload_fingerprint": _fingerprint(payload),
         }
     )
-    return _public(record)
+    return _public(
+        record,
+        transport_enabled=transport_enabled,
+        allow_real_transport=allow_real_transport,
+        transport_dry_run=transport_dry_run,
+    )
 
 
 def _base_record(
@@ -386,6 +520,55 @@ def _new_sentinels() -> dict[str, int]:
     return {effect: 0 for effect in FORBIDDEN_SIDE_EFFECTS}
 
 
+def _transport_blocked_reasons(
+    *,
+    transport_enabled: bool = False,
+    allow_real_transport: bool = False,
+    transport_dry_run: bool = True,
+) -> list[str]:
+    reasons: list[str] = ["real_transport_not_implemented"]
+    if not transport_enabled:
+        reasons.append("transport_feature_disabled")
+    if not allow_real_transport:
+        reasons.append("real_transport_not_allowed")
+    if transport_dry_run:
+        reasons.append("transport_dry_run_required")
+    return reasons
+
+
+def _blocked_transport_audit_result(
+    *,
+    transport_enabled: bool = False,
+    allow_real_transport: bool = False,
+    transport_dry_run: bool = True,
+) -> dict[str, Any]:
+    return {
+        "transport_mode": TRANSPORT_MODE_DRY_RUN,
+        "transport_status": TRANSPORT_STATUS_BLOCKED_AUDIT_ONLY,
+        "real_transport_supported": False,
+        "real_command_sent": False,
+        "audit_required": True,
+        "blocked_reasons": _transport_blocked_reasons(
+            transport_enabled=transport_enabled,
+            allow_real_transport=allow_real_transport,
+            transport_dry_run=transport_dry_run,
+        ),
+    }
+
+
+def _transport_audit_fields(
+    *,
+    transport_enabled: bool = False,
+    allow_real_transport: bool = False,
+    transport_dry_run: bool = True,
+) -> dict[str, Any]:
+    return plate_change_command_transport.audit_result(
+        transport_enabled=transport_enabled,
+        allow_real_transport=allow_real_transport,
+        transport_dry_run=transport_dry_run,
+    )
+
+
 def _dry_run_id(idempotency_key: str) -> str:
     return f"pcd:{hashlib.sha256(idempotency_key.encode('utf-8')).hexdigest()[:16]}"
 
@@ -414,8 +597,26 @@ def _nonempty(value: object) -> str | None:
     return text or None
 
 
-def _public(record: dict[str, Any]) -> dict[str, Any]:
-    return dict(record)
+def _public(
+    record: dict[str, Any],
+    *,
+    transport_enabled: bool = False,
+    allow_real_transport: bool = False,
+    transport_dry_run: bool = True,
+) -> dict[str, Any]:
+    public = dict(record)
+    audit_fields = _transport_audit_fields(
+        transport_enabled=transport_enabled,
+        allow_real_transport=allow_real_transport,
+        transport_dry_run=transport_dry_run,
+    )
+    blocked_reasons = list(public.get("blocked_reasons") or [])
+    for reason in audit_fields.pop("blocked_reasons"):
+        if reason not in blocked_reasons:
+            blocked_reasons.append(reason)
+    public.update(audit_fields)
+    public["blocked_reasons"] = blocked_reasons
+    return public
 
 
 plate_change_command_service = PlateChangeCommandDryRunService()

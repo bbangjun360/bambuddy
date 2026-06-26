@@ -24,6 +24,9 @@ class PlateChangeCommandArchitectureTest(unittest.TestCase):
         self.assertIn("farm_plate_change_human_approval_required: bool = True", text)
         self.assertIn("farm_plate_change_single_printer_only: bool = True", text)
         self.assertIn("farm_plate_change_allow_real_commands: bool = False", text)
+        self.assertIn("farm_plate_change_transport_enabled: bool = False", text)
+        self.assertIn("farm_plate_change_allow_real_transport: bool = False", text)
+        self.assertIn("farm_plate_change_transport_dry_run: bool = True", text)
 
     def test_wp063_implementation_imports_no_printer_command_queue_or_downstream_mutation_modules(self) -> None:
         combined = self._combined_implementation_text()
@@ -76,9 +79,10 @@ class PlateChangeCommandArchitectureTest(unittest.TestCase):
         self.assertIn('APIRouter(prefix="/plate-change"', route_text)
         self.assertIn('@router.post("/dry-run-commands"', route_text)
         self.assertIn('@router.get("/status"', route_text)
+        self.assertIn('@router.get("/transport-status"', route_text)
         self.assertIn("plate_change_command", main_text)
         self.assertIn("app.include_router(plate_change_command.router", main_text)
-        forbidden_route_tokens = ("/queue", "/scheduler", "/dispatch")
+        forbidden_route_tokens = ("/queue", "/scheduler", "/dispatch", "/execute", "/live", "/send", "/raw")
         for token in forbidden_route_tokens:
             with self.subTest(token=token):
                 self.assertNotIn(token, route_text)
