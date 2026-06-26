@@ -34,17 +34,18 @@ In scope:
 - Copy safe static fixtures into `harness/fixtures/phase0/`.
 - Summarize model and policy ideas that map cleanly to Bambuddy.
 - List feature candidates with Bambuddy integration points and risk level.
-- Record skipped or redacted source artifacts with reasons.
+- Record excluded actual secret values or files with reasons.
 
 Out of scope:
 
 - No Bambuddy backend, frontend, database, or scheduler behavior changes.
 - No direct import of Print Farm OS runtime Python/TypeScript code.
 - No new migrations.
-- No real printer credentials, serials, access codes, tokens, customer data, or
-  environment-specific local paths.
-- No raw hardware-control capture copied verbatim when it may expose local lab
-  details.
+- No real printer credentials, access codes, API tokens, passwords, private
+  keys, customer data, or personal data.
+- Lab evidence such as printer serials, private IP addresses, timestamps, and
+  local file paths may be copied when it helps preserve the original test
+  result context.
 
 ## Source Material
 
@@ -77,7 +78,7 @@ docs/reference/print-farm-os/
     validation-checkpoints.md
   models-and-policies.md
   feature-candidates.md
-  skipped-or-redacted.md
+  excluded-sensitive-values.md
 
 harness/fixtures/phase0/
   phase0-inventory.example.json
@@ -91,20 +92,21 @@ harness/fixtures/phase0/
 ## Evidence Import Rule
 
 All relevant test and validation results should be represented in the reference
-pack, but not all raw files should be copied byte-for-byte.
+pack. Preserve raw or near-raw evidence when it helps future debugging, including
+local lab context such as IP addresses, printer serials, local paths, and
+timestamps.
 
 Use this classification:
 
 - Copy: generic docs, example configs, safe fixtures, static test names, and
-  sanitized result summaries.
-- Summarize: validation checkpoints, runtime closeouts, execution ledgers, and
-  capture indexes that may include local state.
-- Redact or skip raw copy: files with IP addresses, serial numbers, access-code
-  status tied to a real lab, local Windows paths, generated capture logs, or
-  hardware-control details that are not needed for Bambuddy planning.
+  evidence documents that do not contain actual secrets.
+- Summarize: very large generated logs and capture folders where a concise index
+  is more useful than copying every byte.
+- Exclude or redact only actual secret values: printer access codes, API tokens,
+  passwords, private keys, customer data, and personal data.
 
-Every skipped or redacted source must be listed in
-`docs/reference/print-farm-os/skipped-or-redacted.md` with a short reason.
+Every excluded or secret-redacted source must be listed in
+`docs/reference/print-farm-os/excluded-sensitive-values.md` with a short reason.
 
 ## Test Evidence Index
 
@@ -124,7 +126,7 @@ Each row should include:
 - status when available,
 - date when available,
 - Bambuddy relevance,
-- import action: copied, summarized, redacted, or skipped.
+- import action: copied, summarized, copied with lab context, or excluded.
 
 ## Model And Policy Summary
 
@@ -167,10 +169,10 @@ risks, and recommended first test.
 
 If a source file cannot be copied safely:
 
-- do not copy it,
-- summarize only the useful public/non-sensitive outcome,
-- list it in `skipped-or-redacted.md`,
-- prefer source path references over embedding sensitive raw output.
+- do not copy actual secret values,
+- copy or summarize the useful non-secret outcome,
+- list the excluded source or field in `excluded-sensitive-values.md`,
+- prefer source path references over embedding credentials or personal data.
 
 If a fixture format is unclear or potentially executable against real hardware:
 
@@ -185,8 +187,8 @@ Before claiming completion:
 - Check that every intended destination file exists.
 - Check that copied fixture names and sizes match the source.
 - Search the imported docs for obvious secrets and local-only values:
-  `access_code`, `token`, `password`, `serial`, private IP-looking strings, and
-  local Windows user paths.
+  `access_code`, `token`, `password`, `private key`, customer names, and
+  personal data.
 - Run the narrowest relevant repository checks:
   `git status --short` and a documentation/fixture inventory command.
 
