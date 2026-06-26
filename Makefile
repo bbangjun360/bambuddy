@@ -1,9 +1,9 @@
 .PHONY: harness-config harness-up harness-up-slicer harness-up-observability harness-down harness-reset harness-health \
         harness-persistence harness-backup harness-restore harness-orca-health harness-orca-slice \
         harness-observability-health harness-bed-automation harness-erp-draft-write harness-obico-shadow \
-        harness-printflow-canary harness-plate-change-command harness-plate-change-transport \
+        harness-printflow-canary harness-plate-change-command harness-plate-change-transport harness-plate-change-3mf-postprocess \
         test-unit test-characterization test-contract test-integration test-scenario test-observability \
-        test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary test-plate-change-command test-plate-change-transport \
+        test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary test-plate-change-command test-plate-change-transport test-plate-change-3mf-postprocess \
         verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
@@ -58,6 +58,9 @@ harness-plate-change-command:
 
 harness-plate-change-transport:
 	python3 -m unittest harness.tests.test_plate_change_command_mock
+
+harness-plate-change-3mf-postprocess:
+	python3 -m unittest harness.tests.test_plate_change_3mf_postprocess_mock
 
 harness-bed-automation:
 	python3 -m unittest harness.tests.test_bed_automation_mock
@@ -126,6 +129,10 @@ test-plate-change-command: harness-plate-change-command
 test-plate-change-transport: harness-plate-change-transport
 	python3 -m unittest backend.tests.unit.services.test_plate_change_command backend.tests.unit.test_plate_change_command_architecture
 	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-wp063-transport-tests -e LOG_DIR=/tmp/bambuddy-wp063-transport-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.integration.test_plate_change_command_api
+
+test-plate-change-3mf-postprocess: harness-plate-change-3mf-postprocess
+	python3 -m unittest backend.tests.unit.services.test_plate_change_3mf_postprocess backend.tests.unit.test_plate_change_3mf_postprocess_architecture
+	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-wp064-tests -e LOG_DIR=/tmp/bambuddy-wp064-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.integration.test_plate_change_3mf_postprocess_api
 
 verify-fast: context-check workpack-check hooks-check test-contract test-unit test-characterization
 	@echo "Fast deterministic gate passed."

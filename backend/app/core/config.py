@@ -131,6 +131,12 @@ class Settings(BaseSettings):
     farm_plate_change_allow_real_transport: bool = False
     farm_plate_change_transport_dry_run: bool = True
 
+    # WP-064-A 3MF post-processing prototype. Disabled by default, dry-run
+    # only, and local/temp output artifact creation blocked by default.
+    farm_plate_change_3mf_postprocess_enabled: bool = False
+    farm_plate_change_3mf_postprocess_dry_run: bool = True
+    farm_plate_change_3mf_allow_output_artifact: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
