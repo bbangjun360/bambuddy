@@ -6,10 +6,13 @@ WP-064-A introduced a disabled-by-default, dry-run-only 3MF post-processing
 planner. WP-064-B extends that prototype with deterministic synthetic insertion
 behavior for tests only. WP-064-C adds a local-only real-sample output review
 mode that writes review artifacts only under an explicit local output root.
+WP-064-D adds a supervised, default-off physical canary boundary for one
+reviewed 3MF artifact, one printer, one upload, and one start attempt.
 
-The prototype does not authorize hardware execution, printer upload, printer
-start, MQTT, FTPS, queue dispatch, scheduler dispatch, ERP writes, Obico
-mutation, or bed automation mutation.
+Outside the WP-064-D supervised canary endpoints, the prototype does not
+authorize hardware execution, printer upload, printer start, MQTT, FTPS, queue
+dispatch, scheduler dispatch, ERP writes, Obico mutation, or bed automation
+mutation.
 
 ## Context
 
@@ -38,6 +41,9 @@ Routes:
 
 - `POST /api/v1/plate-change-3mf/postprocess-plans`
 - `GET /api/v1/plate-change-3mf/status`
+- `GET /api/v1/plate-change-3mf/canary-status`
+- `POST /api/v1/plate-change-3mf/canary-upload`
+- `POST /api/v1/plate-change-3mf/canary-start`
 
 Config flags:
 
@@ -47,6 +53,13 @@ Config flags:
 - `FARM_PLATE_CHANGE_3MF_REAL_SAMPLE_ROOT` unset; default is `~/workspace/plate-change-samples`
 - `FARM_PLATE_CHANGE_3MF_OUTPUT_ROOT` unset; default is `~/workspace/plate-change-outputs`
 - `FARM_PLATE_CHANGE_3MF_ALLOW_REAL_SAMPLE_OUTPUT=false`
+- `FARM_PLATE_CHANGE_3MF_PHYSICAL_CANARY_ENABLED=false`
+- `FARM_PLATE_CHANGE_3MF_ALLOW_PRINTER_UPLOAD=false`
+- `FARM_PLATE_CHANGE_3MF_ALLOW_PRINT_START=false`
+- `FARM_PLATE_CHANGE_3MF_CANARY_SINGLE_PRINTER_ONLY=true`
+- `FARM_PLATE_CHANGE_3MF_CANARY_REQUIRE_HUMAN_CONFIRMATION=true`
+- `FARM_PLATE_CHANGE_3MF_CANARY_DISABLE_AUTO_RETRY=true`
+- `FARM_PLATE_CHANGE_3MF_CANARY_MAX_STARTS=1`
 
 The request accepts a local `source_path`, `dry_run=true`, optional
 `create_output_artifact=false`, optional `real_sample_output_review=false`,
@@ -163,6 +176,42 @@ The response includes redacted source and output names, `source_sha256`,
 `printer_upload_supported=false`, `printer_start_supported=false`, and
 `real_execution_supported=false`.
 
+
+## WP-064-D Supervised Physical Canary
+
+WP-064-D is the first bounded physical canary for reviewed 3MF output. It is
+not a general printer-control path. It permits only:
+
+- one reviewed artifact path under `FARM_PLATE_CHANGE_3MF_OUTPUT_ROOT`;
+- one exact artifact SHA-256 match;
+- one target printer id;
+- one upload confirmation phrase;
+- one separate start confirmation phrase;
+- one prior successful upload record;
+- one start attempt;
+- all start checklist fields set to true;
+- a known idle printer state at start time.
+
+The required phrases are:
+
+```text
+CONFIRM_UPLOAD_REVIEWED_3MF <printer_id> <artifact_sha256>
+CONFIRM_START_REVIEWED_3MF <printer_id> <artifact_sha256>
+```
+
+The upload phrase does not authorize start. Start requires a separate phrase.
+The route adapter uses Bambuddy's existing printer upload/start abstractions only
+after every feature flag, path, hash, printer, phrase, checklist, and state gate
+passes. Tests patch the adapter and do not contact hardware.
+
+The boundary explicitly does not provide queue, scheduler, batch,
+multi-printer, automatic retry, arbitrary raw G-code, or raw command behavior.
+Canary state is process-local and is not resumed after restart.
+
+The `/canary-status`, `/canary-upload`, and `/canary-start` responses are
+redacted: they do not include printer IPs, access codes, serial numbers, tokens,
+raw full G-code, or local artifact paths.
+
 ## Optional Output Artifact
 
 Output artifact creation is blocked unless both are true:
@@ -180,11 +229,11 @@ customer data must not be committed.
 
 ## Forbidden Boundaries
 
-WP-064-B must not:
+WP-064 outside the supervised WP-064-D canary must not:
 
 - send real printer commands;
-- upload files to a printer;
-- start prints;
+- upload files to a printer outside the supervised WP-064-D canary;
+- start prints outside the supervised WP-064-D canary;
 - connect to direct Bambu MQTT;
 - use FTPS helpers;
 - expose arbitrary G-code or raw command endpoints;
@@ -217,6 +266,18 @@ Focused coverage includes:
 - invalid ZIP rejection;
 - unsupported synthetic structures returning safe blocked results;
 - output artifact blocking by default;
+- physical canary status safe defaults;
+- physical canary upload/start blocked by default;
+- physical canary upload/start requiring every feature flag;
+- exact upload and start confirmation phrases;
+- upload phrase not authorizing start;
+- artifact output-root and repository-path guards;
+- artifact SHA-256 mismatch blocking;
+- one-printer and one-artifact enforcement;
+- one start attempt with no retry;
+- start requiring prior successful upload, checklist, and known idle printer state;
+- no queue, scheduler, batch, multi-printer, raw-command, or raw G-code path;
+- no secrets or local artifact path in canary responses;
 - temp-root-only output artifact creation when explicitly enabled;
 - real-sample output review blocked by default;
 - real-sample output review requiring both config and request flags;
@@ -225,17 +286,15 @@ Focused coverage includes:
 - manifest-only real-sample review artifact generation;
 - response redaction with no raw full G-code;
 - zero side-effect sentinels;
-- architecture checks for no live-control imports or execution routes;
+- architecture checks for no unauthorized live-control imports or execution routes;
 - tracked and worktree-file checks proving no raw `.3mf`, `.gcode.3mf`, or
   `.gcode` sample/output files are committed;
-- harness checks proving no external mock post-processing execution server is
-  exposed.
+- harness checks proving no external mock post-processing or physical-canary
+  execution server is exposed.
 
 ## Future Work
 
-Future Work Packages may define how reviewed artifacts become approved for
-printing. WP-064-C artifacts remain local review evidence only and are marked
-`not_approved_for_printing=true`.
-
-Printer upload and print start remain out of scope until a separate approved
-Work Package adds and tests a Bambuddy-owned execution boundary.
+WP-064-D defines only the first supervised physical canary for one reviewed
+artifact, one printer, one upload, and one start attempt. Broader print-farm
+dispatch, queue integration, scheduler integration, retries, multi-printer
+operation, and arbitrary command execution remain out of scope for WP-064.

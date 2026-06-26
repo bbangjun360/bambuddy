@@ -139,6 +139,13 @@ class Settings(BaseSettings):
     farm_plate_change_3mf_real_sample_root: str | None = None
     farm_plate_change_3mf_output_root: str | None = None
     farm_plate_change_3mf_allow_real_sample_output: bool = False
+    farm_plate_change_3mf_physical_canary_enabled: bool = False
+    farm_plate_change_3mf_allow_printer_upload: bool = False
+    farm_plate_change_3mf_allow_print_start: bool = False
+    farm_plate_change_3mf_canary_single_printer_only: bool = True
+    farm_plate_change_3mf_canary_require_human_confirmation: bool = True
+    farm_plate_change_3mf_canary_disable_auto_retry: bool = True
+    farm_plate_change_3mf_canary_max_starts: int = 1
 
     class Config:
         env_file = ".env"
