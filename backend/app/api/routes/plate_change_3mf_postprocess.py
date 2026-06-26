@@ -10,6 +10,8 @@ from backend.app.schemas.plate_change_3mf_postprocess import PlateChange3mfPostp
 from backend.app.services.plate_change_3mf_postprocess import (
     PlateChange3mfPostprocessError,
     default_controlled_roots,
+    default_real_sample_output_root,
+    default_real_sample_root,
     plate_change_3mf_postprocess_service,
 )
 
@@ -50,8 +52,13 @@ async def create_postprocess_plan(
             dry_run=settings.farm_plate_change_3mf_postprocess_dry_run,
             request_dry_run=body.dry_run,
             allow_output_artifact=settings.farm_plate_change_3mf_allow_output_artifact,
+            allow_real_sample_output=settings.farm_plate_change_3mf_allow_real_sample_output,
             create_output_artifact=body.create_output_artifact,
+            real_sample_output_review=body.real_sample_output_review,
+            output_dir=body.output_dir,
             allowed_roots=default_controlled_roots(settings.base_dir),
+            real_sample_roots=[settings.farm_plate_change_3mf_real_sample_root or default_real_sample_root()],
+            output_roots=[settings.farm_plate_change_3mf_output_root or default_real_sample_output_root()],
         )
     except PlateChange3mfPostprocessError as exc:
         raise HTTPException(status_code=400, detail=_error_detail(exc)) from exc
@@ -65,4 +72,5 @@ async def get_postprocess_status(
         enabled=settings.farm_plate_change_3mf_postprocess_enabled,
         dry_run=settings.farm_plate_change_3mf_postprocess_dry_run,
         allow_output_artifact=settings.farm_plate_change_3mf_allow_output_artifact,
+        allow_real_sample_output=settings.farm_plate_change_3mf_allow_real_sample_output,
     )

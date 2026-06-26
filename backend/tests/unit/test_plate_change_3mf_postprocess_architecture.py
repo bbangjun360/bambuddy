@@ -25,6 +25,9 @@ class PlateChange3mfPostprocessArchitectureTest(unittest.TestCase):
         self.assertIn("farm_plate_change_3mf_postprocess_enabled: bool = False", text)
         self.assertIn("farm_plate_change_3mf_postprocess_dry_run: bool = True", text)
         self.assertIn("farm_plate_change_3mf_allow_output_artifact: bool = False", text)
+        self.assertIn("farm_plate_change_3mf_real_sample_root: str | None = None", text)
+        self.assertIn("farm_plate_change_3mf_output_root: str | None = None", text)
+        self.assertIn("farm_plate_change_3mf_allow_real_sample_output: bool = False", text)
 
     def test_wp064_implementation_imports_no_live_control_or_downstream_mutation_modules(self) -> None:
         combined = self._combined_implementation_text()
@@ -75,6 +78,8 @@ class PlateChange3mfPostprocessArchitectureTest(unittest.TestCase):
         self.assertIn('APIRouter(prefix="/plate-change-3mf"', route_text)
         self.assertIn('@router.post("/postprocess-plans"', route_text)
         self.assertIn('@router.get("/status"', route_text)
+        self.assertIn("real_sample_output_review", schema_text)
+        self.assertIn("output_dir", schema_text)
         self.assertIn("plate_change_3mf_postprocess", main_text)
         self.assertIn("app.include_router(plate_change_3mf_postprocess.router", main_text)
 

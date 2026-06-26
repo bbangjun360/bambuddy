@@ -38,6 +38,7 @@ class PlateChange3mfPostprocessHarnessContractTest(unittest.TestCase):
             enabled=False,
             dry_run=True,
             allow_output_artifact=False,
+            allow_real_sample_output=False,
         )
 
         self.assertFalse(body["printer_upload_supported"])
@@ -45,6 +46,9 @@ class PlateChange3mfPostprocessHarnessContractTest(unittest.TestCase):
         self.assertFalse(body["real_execution_supported"])
         self.assertFalse(body["real_gcode_inserted"])
         self.assertFalse(body["output_artifact_created"])
+        self.assertFalse(body["allow_real_sample_output"])
+        self.assertTrue(body["human_review_required"])
+        self.assertTrue(body["not_approved_for_printing"])
         sentinels = body["sentinels"]
         self.assertIsInstance(sentinels, dict)
         self.assertGreater(len(sentinels), 0)
@@ -61,7 +65,10 @@ class PlateChange3mfPostprocessHarnessContractTest(unittest.TestCase):
         for path in checked_files:
             with self.subTest(path=path.relative_to(ROOT)):
                 sample_dir_token = "plate-change" + "-samples"
-                self.assertNotIn(sample_dir_token, path.read_text(encoding="utf-8"))
+                output_dir_token = "plate-change" + "-outputs"
+                body = path.read_text(encoding="utf-8")
+                self.assertNotIn(sample_dir_token, body)
+                self.assertNotIn(output_dir_token, body)
 
     def test_no_tracked_or_worktree_generated_3mf_or_gcode_artifacts(self) -> None:
         tracked = subprocess.run(

@@ -104,6 +104,8 @@ SYMBOLIC_PLATE_CHANGE_BLOCK = (
 )
 SYNTHETIC_INSERTION_POINT = "; BAMBUDDY_SYNTHETIC_PLATE_CHANGE_INSERTION_POINT"
 TARGET_GCODE_PATH = "Metadata/plate_1.gcode"
+REAL_SAMPLE_TARGET_GCODE_PATH = "Metadata/plate_real_sample.gcode"
+REVIEW_MANIFEST_PATH = "Metadata/bambuddy_real_sample_output_review.json"
 
 
 def _write_3mf(path: Path) -> None:
@@ -117,6 +119,20 @@ def _write_3mf(path: Path) -> None:
             b";LAYER_CHANGE\n"
             b"; symbolic travel placeholder redacted\n"
             b"; BAMBUDDY_SYNTHETIC_PLATE_CHANGE_INSERTION_POINT\n"
+            b";END gcode for filament\n",
+        )
+
+
+def _write_real_sample_review_3mf(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("3D/3dmodel.model", b"<model/>")
+        zf.writestr("Metadata/project_settings.config", b'{"printer_model": "Bambu Lab A1 Mini"}')
+        zf.writestr(
+            REAL_SAMPLE_TARGET_GCODE_PATH,
+            b"; synthetic local review API fixture\n"
+            b"; raw private API line must not be returned\n"
+            b";LAYER_CHANGE\n"
             b";END gcode for filament\n",
         )
 
@@ -164,10 +180,20 @@ class PlateChange3mfPostprocessApiTest(unittest.IsolatedAsyncioTestCase):
             "farm_plate_change_3mf_allow_output_artifact": (
                 postprocess_route.settings.farm_plate_change_3mf_allow_output_artifact
             ),
+            "farm_plate_change_3mf_real_sample_root": (
+                postprocess_route.settings.farm_plate_change_3mf_real_sample_root
+            ),
+            "farm_plate_change_3mf_output_root": (
+                postprocess_route.settings.farm_plate_change_3mf_output_root
+            ),
+            "farm_plate_change_3mf_allow_real_sample_output": (
+                postprocess_route.settings.farm_plate_change_3mf_allow_real_sample_output
+            ),
         }
         postprocess_route.settings.farm_plate_change_3mf_postprocess_enabled = False
         postprocess_route.settings.farm_plate_change_3mf_postprocess_dry_run = True
         postprocess_route.settings.farm_plate_change_3mf_allow_output_artifact = False
+        postprocess_route.settings.farm_plate_change_3mf_allow_real_sample_output = False
 
         self.controlled_root = (
             Path(tempfile.gettempdir())
@@ -176,6 +202,12 @@ class PlateChange3mfPostprocessApiTest(unittest.IsolatedAsyncioTestCase):
         )
         self.source = self.controlled_root / "inputs" / "api-secret-name.gcode.3mf"
         _write_3mf(self.source)
+        self.real_sample_root = self.controlled_root / "real-sample-root"
+        self.real_output_root = self.controlled_root / "real-output-root"
+        self.real_source = self.real_sample_root / "inputs" / "api-private-local-sample.gcode.3mf"
+        _write_real_sample_review_3mf(self.real_source)
+        postprocess_route.settings.farm_plate_change_3mf_real_sample_root = str(self.real_sample_root)
+        postprocess_route.settings.farm_plate_change_3mf_output_root = str(self.real_output_root)
 
         self.client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
@@ -209,6 +241,8 @@ class PlateChange3mfPostprocessApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(body["printer_start_supported"])
         self.assertFalse(body["real_execution_supported"])
         self.assertFalse(body["real_gcode_inserted"])
+        self.assertTrue(body["human_review_required"])
+        self.assertTrue(body["not_approved_for_printing"])
         sentinels = body["sentinels"]
         self.assertIsInstance(sentinels, dict)
         for effect, count in sentinels.items():
@@ -233,6 +267,9 @@ class PlateChange3mfPostprocessApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(body["enabled"])
         self.assertTrue(body["dry_run"])
         self.assertFalse(body["allow_output_artifact"])
+        self.assertFalse(body["allow_real_sample_output"])
+        self.assertTrue(body["human_review_required"])
+        self.assertTrue(body["not_approved_for_printing"])
         self.assertFalse(body["printer_upload_supported"])
         self.assertFalse(body["printer_start_supported"])
         self.assertFalse(body["real_execution_supported"])
@@ -336,6 +373,107 @@ class PlateChange3mfPostprocessApiTest(unittest.IsolatedAsyncioTestCase):
             modified = zf.read(TARGET_GCODE_PATH).decode("utf-8")
             self.assertEqual(modified.count("; BAMBUDDY_PLATE_CHANGE_BLOCK_START"), 1)
             self.assertIn(SYMBOLIC_PLATE_CHANGE_BLOCK + SYNTHETIC_INSERTION_POINT, modified)
+        await self.assert_no_control_rows()
+
+
+    async def test_real_sample_output_review_requires_config_and_request_flags(self) -> None:
+        self.enable_boundary()
+        output_dir = self.real_output_root / "reviews"
+
+        blocked_output = await self.client.post(
+            "/api/v1/plate-change-3mf/postprocess-plans",
+            json={
+                "source_path": str(self.real_source),
+                "dry_run": True,
+                "create_output_artifact": True,
+                "real_sample_output_review": True,
+                "output_dir": str(output_dir),
+            },
+        )
+        self.assertEqual(blocked_output.status_code, 400)
+        self.assertEqual(blocked_output.json()["detail"]["code"], "output_artifact_not_allowed")
+
+        postprocess_route.settings.farm_plate_change_3mf_allow_output_artifact = True
+        blocked_real_sample = await self.client.post(
+            "/api/v1/plate-change-3mf/postprocess-plans",
+            json={
+                "source_path": str(self.real_source),
+                "dry_run": True,
+                "create_output_artifact": True,
+                "real_sample_output_review": True,
+                "output_dir": str(output_dir),
+            },
+        )
+        self.assertEqual(blocked_real_sample.status_code, 400)
+        self.assertEqual(blocked_real_sample.json()["detail"]["code"], "real_sample_output_not_allowed")
+
+        postprocess_route.settings.farm_plate_change_3mf_allow_real_sample_output = True
+        missing_request_flag = await self.client.post(
+            "/api/v1/plate-change-3mf/postprocess-plans",
+            json={
+                "source_path": str(self.real_source),
+                "dry_run": True,
+                "create_output_artifact": True,
+                "output_dir": str(output_dir),
+            },
+        )
+        self.assertEqual(missing_request_flag.status_code, 400)
+        self.assertEqual(missing_request_flag.json()["detail"]["code"], "real_sample_output_review_required")
+
+        response = await self.client.post(
+            "/api/v1/plate-change-3mf/postprocess-plans",
+            json={
+                "source_path": str(self.real_source),
+                "dry_run": True,
+                "create_output_artifact": True,
+                "real_sample_output_review": True,
+                "output_dir": str(output_dir),
+            },
+        )
+
+        self.assertEqual(response.status_code, 202, response.text)
+        body = response.json()
+        self.assertTrue(body["output_artifact_created"])
+        self.assertFalse(body["insertion_performed"])
+        self.assertEqual(body["internal_gcode_paths"], [REAL_SAMPLE_TARGET_GCODE_PATH])
+        self.assertEqual(body["modified_internal_paths"], [REVIEW_MANIFEST_PATH])
+        self.assertRegex(body["source_sha256"], r"^[a-f0-9]{64}$")
+        self.assertRegex(body["output_sha256"], r"^[a-f0-9]{64}$")
+        self.assertTrue(body["human_review_required"])
+        self.assertTrue(body["not_approved_for_printing"])
+        self.assert_no_side_effects(body)
+        rendered = json.dumps(body, sort_keys=True)
+        self.assertNotIn("api-private-local-sample", rendered)
+        self.assertNotIn("raw private API line", rendered)
+        self.assertNotIn("synthetic local review API fixture", rendered)
+
+        outputs = list(output_dir.glob("*.3mf"))
+        self.assertEqual(len(outputs), 1)
+        self.assertTrue(outputs[0].resolve().is_relative_to(self.real_output_root.resolve()))
+        with zipfile.ZipFile(outputs[0], "r") as zf:
+            self.assertIn(REVIEW_MANIFEST_PATH, zf.namelist())
+            self.assertEqual(zf.read(REAL_SAMPLE_TARGET_GCODE_PATH).count(b"raw private API line"), 1)
+        await self.assert_no_control_rows()
+
+    async def test_real_sample_output_review_rejects_output_dir_outside_configured_root(self) -> None:
+        self.enable_boundary()
+        postprocess_route.settings.farm_plate_change_3mf_allow_output_artifact = True
+        postprocess_route.settings.farm_plate_change_3mf_allow_real_sample_output = True
+
+        response = await self.client.post(
+            "/api/v1/plate-change-3mf/postprocess-plans",
+            json={
+                "source_path": str(self.real_source),
+                "dry_run": True,
+                "create_output_artifact": True,
+                "real_sample_output_review": True,
+                "output_dir": str(self.controlled_root / "outside-review-output"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"]["code"], "output_path_not_allowed")
+        self.assertFalse((self.controlled_root / "outside-review-output").exists())
         await self.assert_no_control_rows()
 
 
