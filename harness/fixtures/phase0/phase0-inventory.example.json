@@ -1,0 +1,107 @@
+{
+  "site": {
+    "name": "lab-01",
+    "network_cidr": "192.168.10.0/24",
+    "storage_target": "local-pc",
+    "printer_family_defaults": {
+      "bambu_a_series": {
+        "default_bed_temperature_c": 65,
+        "applies_to_models": ["A1", "A1 mini"],
+        "source": "operator_policy",
+        "notes": "Unless explicitly overridden per job/material, future A-series slicing/profile generation should target a 65 C bed."
+      }
+    }
+  },
+  "printers": [
+    {
+      "id": "a1-01",
+      "model": "A1",
+      "role": "phase0-primary",
+      "firmware_version": "01.04.00.00",
+      "ip_address": "192.168.10.41",
+      "serial_present": true,
+      "access_code_status": "available",
+      "secret_ref": "local-only:a1-01-access-code",
+      "lan_only_mode": true,
+      "developer_mode": true,
+      "ftps": {
+        "upload_dir": "/",
+        "path_mode": "cwd_relative",
+        "upload_timeout_policy": "verify_size_then_delete"
+      },
+      "camera": {
+        "available": true,
+        "type": "built_in"
+      },
+      "ams": {
+        "type": "ams_lite",
+        "slots": 4
+      },
+      "test_readiness": "ready",
+      "notes": "Phase 0 smoke-test printer"
+    },
+    {
+      "id": "a1-mini-01",
+      "model": "A1 mini",
+      "role": "phase0-a-series-external-spool",
+      "firmware_version": "unknown",
+      "ip_address": "unknown",
+      "serial_present": false,
+      "access_code_status": "unknown",
+      "secret_ref": "local-only:a1-mini-01-access-code",
+      "lan_only_mode": "unknown",
+      "developer_mode": "unknown",
+      "ftps": {
+        "upload_dir": "/model",
+        "path_mode": "cwd_relative",
+        "upload_timeout_policy": "verify_size_then_delete"
+      },
+      "camera": {
+        "available": true,
+        "type": "built_in"
+      },
+      "ams": {
+        "type": "external_spool",
+        "slots": 0,
+        "require_ams_for_phase0": false
+      },
+      "test_readiness": "needs-info",
+      "notes": "Use for A1 mini without AMS. Store access code outside this file."
+    },
+    {
+      "id": "p1s-01",
+      "model": "P1S",
+      "role": "phase0-secondary",
+      "firmware_version": "unknown",
+      "ip_address": "unknown",
+      "serial_present": false,
+      "access_code_status": "unknown",
+      "secret_ref": "",
+      "lan_only_mode": false,
+      "developer_mode": false,
+      "ftps": {
+        "upload_dir": "/",
+        "path_mode": "cwd_relative",
+        "upload_timeout_policy": "verify_size_then_delete"
+      },
+      "camera": {
+        "available": true,
+        "type": "built_in"
+      },
+      "ams": {
+        "type": "ams",
+        "slots": 4
+      },
+      "test_readiness": "needs-info",
+      "notes": "Replace with real non-secret values before Phase 0"
+    }
+  ],
+  "label_printers": [
+    {
+      "id": "label-01",
+      "model": "NIIMBOT candidate",
+      "connection": "usb",
+      "test_readiness": "candidate"
+    }
+  ]
+}
