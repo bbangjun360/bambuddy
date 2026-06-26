@@ -864,10 +864,11 @@ passwords, printer credentials, private keys, customer data, or personal data.
 | `PRINT_FARM_A1_MINI_01_ACCESS_CODE` | README, runtime quick check, tests | Yes | `<set locally>` | A1 mini credential key name and placeholder only. |
 | `PRINT_FARM_P1S_01_ACCESS_CODE` | README, Phase 0 auth docs, runtime quick check, tests, captures | Yes | `<set locally>` | P1S credential key name and placeholder only. |
 | `PRINT_FARM_A1_01_PRINTER_CREDENTIAL` | Legacy validation docs | Yes | `<set locally>` | Legacy printer credential key spelling to preserve for searchability. |
+| `PRINT_FARM_A1_MINI_01_PRINTER_CREDENTIAL` | Legacy credential pattern and source evidence variant | Yes | `<set locally>` | Uppercase A1 mini printer credential key name and placeholder only. |
 | `PRINT_FARM_P1S_01_PRINTER_CREDENTIAL` | Legacy validation docs | Yes | `<set locally>` | Legacy printer credential key spelling to preserve for searchability. |
-| `PRINT_FARM_A1_01_printer_credential` | Tests and redacted support-bundle examples | Yes | `<set locally>` | Mixed-case legacy/test spelling to preserve for searchability. |
-| `PRINT_FARM_A1_MINI_01_printer_credential` | Tests and redacted support-bundle examples | Yes | `<set locally>` | Mixed-case legacy/test spelling to preserve for searchability. |
-| `PRINT_FARM_P1S_01_printer_credential` | Tests and redacted support-bundle examples | Yes | `<set locally>` | Mixed-case legacy/test spelling to preserve for searchability. |
+| `PRINT_FARM_A1_01_printer_credential` | Tests and redacted support-bundle examples | Yes | `<set locally>` | Source evidence variant; mixed-case spelling is not the canonical environment variable exactness. |
+| `PRINT_FARM_A1_MINI_01_printer_credential` | Tests and redacted support-bundle examples | Yes | `<set locally>` | Source evidence variant; mixed-case spelling is not the canonical environment variable exactness. |
+| `PRINT_FARM_P1S_01_printer_credential` | Tests and redacted support-bundle examples | Yes | `<set locally>` | Source evidence variant; mixed-case spelling is not the canonical environment variable exactness. |
 | `PRINT_FARM_PHASE0_GENERATED_ARTIFACT` | Runtime quick check and validation docs | No | `<local .gcode.3mf path>` | Generic generated artifact path reference. |
 | `PRINT_FARM_PHASE0_GENERATED_ARTIFACT_A1_01` | Runtime quick check and validation docs | No | `<local .gcode.3mf path>` | A1-specific generated artifact path reference. |
 | `PRINT_FARM_PHASE0_GENERATED_ARTIFACT_A1_MINI_01` | Runtime quick check | No | `<local .gcode.3mf path>` | A1 mini-specific generated artifact path reference. |
@@ -976,6 +977,7 @@ for needle in \
   "PRINT_FARM_A1_01_ACCESS_CODE" \
   "PRINT_FARM_A1_MINI_01_ACCESS_CODE" \
   "PRINT_FARM_A1_01_PRINTER_CREDENTIAL" \
+  "PRINT_FARM_A1_MINI_01_PRINTER_CREDENTIAL" \
   "PRINT_FARM_P1S_01_ACCESS_CODE" \
   "PRINT_FARM_P1S_01_PRINTER_CREDENTIAL" \
   "PRINT_FARM_OPERATOR_WRITE_TOKENS_JSON" \
