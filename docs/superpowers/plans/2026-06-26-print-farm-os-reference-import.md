@@ -796,8 +796,8 @@ Expected: commit succeeds.
 Run:
 
 ```bash
-find /tmp/print-farm-os/print-farm-os -maxdepth 4 -type f \( -name '*.env.example' -o -name 'env.example' -o -name '*.yml' -o -name '*.yaml' -o -name '*.md' -o -name '*.json' \) -print | sort
-find /tmp/print-farm-os -path '*/.git' -prune -o -type f \( -name '*.env.example' -o -name 'env.example' -o -name '*.md' -o -name '*.py' -o -name '*.ts' -o -name '*.tsx' -o -name '*.json' -o -name '*.yml' -o -name '*.yaml' \) -print0 | xargs -0 rg -n "DATABASE_URL|POSTGRES_PASSWORD|PRINT_FARM_[A-Za-z0-9_]+|STITCH_API_KEY"
+find /tmp/print-farm-os/print-farm-os -maxdepth 4 -type f \( -name '*.env.example' -o -name 'env.example' -o -name '*.yml' -o -name '*.yaml' -o -name '*.md' -o -name '*.json' -o -name '*.mjs' -o -name 'Dockerfile' \) -print | sort
+find /tmp/print-farm-os -path '*/.git' -prune -o -type f \( -name '*.env.example' -o -name 'env.example' -o -name '*.md' -o -name '*.py' -o -name '*.ts' -o -name '*.tsx' -o -name '*.json' -o -name '*.yml' -o -name '*.yaml' -o -name '*.mjs' -o -name 'Dockerfile' \) -print0 | xargs -0 rg -n "DATABASE_URL|POSTGRES_PASSWORD|PRINT_FARM_[A-Za-z0-9_]+|STITCH_API_KEY"
 ```
 
 Expected: commands print the example config files, env example files, compose
@@ -864,7 +864,7 @@ passwords, printer credentials, private keys, customer data, or personal data.
 | `PRINT_FARM_A1_MINI_01_ACCESS_CODE` | README, runtime quick check, tests | Yes | `<set locally>` | A1 mini credential key name and placeholder only. |
 | `PRINT_FARM_P1S_01_ACCESS_CODE` | README, Phase 0 auth docs, runtime quick check, tests, captures | Yes | `<set locally>` | P1S credential key name and placeholder only. |
 | `PRINT_FARM_A1_01_PRINTER_CREDENTIAL` | Legacy validation docs | Yes | `<set locally>` | Legacy printer credential key spelling to preserve for searchability. |
-| `PRINT_FARM_A1_MINI_01_PRINTER_CREDENTIAL` | Legacy credential pattern and source evidence variant | Yes | `<set locally>` | Uppercase A1 mini printer credential key name and placeholder only. |
+| `PRINT_FARM_A1_MINI_01_PRINTER_CREDENTIAL` | Required catalog key normalized from the printer credential pattern | Yes | `<set locally>` | Canonical uppercase A1 mini credential-key candidate; source evidence also contains the mixed-case variant below. |
 | `PRINT_FARM_P1S_01_PRINTER_CREDENTIAL` | Legacy validation docs | Yes | `<set locally>` | Legacy printer credential key spelling to preserve for searchability. |
 | `PRINT_FARM_A1_01_printer_credential` | Tests and redacted support-bundle examples | Yes | `<set locally>` | Source evidence variant; mixed-case spelling is not the canonical environment variable exactness. |
 | `PRINT_FARM_A1_MINI_01_printer_credential` | Tests and redacted support-bundle examples | Yes | `<set locally>` | Source evidence variant; mixed-case spelling is not the canonical environment variable exactness. |
