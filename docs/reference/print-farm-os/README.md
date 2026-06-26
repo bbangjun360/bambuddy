@@ -14,6 +14,8 @@ Work Packages.
 
 ## Contents
 
+This list names the intended reference-pack contents; later import tasks create the files that are not present yet.
+
 - `test-evidence/INDEX.md` - master index of imported test and validation evidence.
 - `test-evidence/phase0-results.md` - Phase 0 safety and protocol evidence.
 - `test-evidence/mvp-runtime-results.md` - MVP runtime and compose evidence.

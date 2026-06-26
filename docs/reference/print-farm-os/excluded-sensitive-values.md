@@ -17,3 +17,5 @@ personal data were intentionally imported.
 ```bash
 rg -n "access_code|api[_-]?token|password|private key|BEGIN .*PRIVATE KEY|customer|email" docs/reference/print-farm-os
 ```
+
+Matches in policy text and this ledger are expected; any additional matches should be inspected as possible sensitive-value leaks.
