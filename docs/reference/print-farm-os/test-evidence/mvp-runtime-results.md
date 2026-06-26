@@ -2,6 +2,7 @@
 
 ## Source Files
 
+- Source snapshot: `2d8f108` (Restructure MVP UI into flow modes).
 - `docs/3d-printing-automation/10-mvp-current-status-20260616T0330KST.md`
 - `docs/3d-printing-automation/11-m2-implementation-scaffold.md`
 - `docs/3d-printing-automation/11-mvp-runtime-closeout-20260616T1248KST.md`

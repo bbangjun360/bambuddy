@@ -2,6 +2,7 @@
 
 ## Source Files
 
+- Source snapshot: `2d8f108` (Restructure MVP UI into flow modes).
 - `docs/3d-printing-automation/02-phase0-protocol-validation.md`
 - `docs/3d-printing-automation/02a-a1-ams-lite-preflight-gate.md`
 - `docs/3d-printing-automation/02b-orcaslicer-bambu-print-flow.md`
@@ -9,7 +10,16 @@
 - `docs/3d-printing-automation/phase0-run-2026-06-08.md`
 - `docs/3d-printing-automation/10-a1-unattended-cell-hazard-checklist.md`
 - `docs/3d-printing-automation/12-a1-unattended-pilot-protocol.md`
-- `print-farm-os/tests/test_phase0_*.py`
+- Key concrete Phase 0 test modules:
+  - `print-farm-os/tests/test_phase0_artifact_gate.py`
+  - `print-farm-os/tests/test_phase0_upload_eligibility.py`
+  - `print-farm-os/tests/test_phase0_print_start.py`
+  - `print-farm-os/tests/test_phase0_motion_clearance.py`
+  - `print-farm-os/tests/test_phase0_operator_status_confirmation.py`
+  - `print-farm-os/tests/test_phase0_a1_mini_start_review.py`
+  - `print-farm-os/tests/test_phase0_a1_mini_live_approval.py`
+  - `print-farm-os/tests/test_phase0_ams_preflight.py`
+- Broader context: `print-farm-os/tests/test_phase0_*.py`
 
 ## Imported Result Themes
 

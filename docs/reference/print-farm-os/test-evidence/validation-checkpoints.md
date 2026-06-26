@@ -2,18 +2,23 @@
 
 ## Source Files
 
+- Source snapshot: `2d8f108` (Restructure MVP UI into flow modes).
 - `docs/3d-printing-automation/09-execution-progress-ledger.md`
 - `docs/3d-printing-automation/13-validation-checkpoint-2026-06-09-1100.md`
 - `docs/3d-printing-automation/10-mvp-current-status-20260616T0330KST.md`
 - `docs/3d-printing-automation/11-mvp-runtime-closeout-20260616T1248KST.md`
 - `docs/3d-printing-automation/captures/session-handoff-*.md`
 - `docs/3d-printing-automation/captures/validation-checkpoint-*.md`
+- Representative latest capture files:
+  - `docs/3d-printing-automation/captures/session-handoff-2026-06-10-1412.md`
+  - `docs/3d-printing-automation/captures/validation-checkpoint-2026-06-10-1412.md`
+- Matching capture sets in source snapshot `2d8f108` were reviewed as a group through `session-handoff-2026-06-10-1412.md` and `validation-checkpoint-2026-06-10-1412.md`.
 
 ## Imported Result Themes
 
 - Progress ledgers distinguish current baseline, active safety rules, latest verification summary, open blockers, ready work, and next action lanes.
 - Validation checkpoints make safe next commands explicit and state when not to advance.
-- Session handoff captures runtime quick checks, setup blockers, credential capture session status, evidence timeline, and resume commands.
+- Session handoff captures runtime quick checks, setup blockers, credential setup status without credential values, evidence timeline, and resume commands.
 
 ## Bambuddy Mapping
 
