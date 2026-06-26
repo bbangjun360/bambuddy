@@ -96,13 +96,29 @@ from backend.app.models.erp_draft_write import ErpDraftWriteRecord
 from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.print_queue import PrintQueueItem
 
+SYMBOLIC_PLATE_CHANGE_BLOCK = (
+    "; BAMBUDDY_PLATE_CHANGE_BLOCK_START\n"
+    "; symbolic_step: PLATE_CHANGE_REVIEW_REQUIRED\n"
+    "; symbolic_step: NO_REAL_GCODE_IN_WP_064_B\n"
+    "; BAMBUDDY_PLATE_CHANGE_BLOCK_END\n"
+)
+SYNTHETIC_INSERTION_POINT = "; BAMBUDDY_SYNTHETIC_PLATE_CHANGE_INSERTION_POINT"
+TARGET_GCODE_PATH = "Metadata/plate_1.gcode"
+
 
 def _write_3mf(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("3D/3dmodel.model", b"<model/>")
         zf.writestr("Metadata/project_settings.config", b'{"printer_model": "Bambu Lab A1 Mini"}')
-        zf.writestr("Metadata/plate_1.gcode", b";LAYER_CHANGE\nG1 X1 Y1\nM400\n")
+        zf.writestr(
+            TARGET_GCODE_PATH,
+            b"; synthetic API fixture\n"
+            b";LAYER_CHANGE\n"
+            b"; symbolic travel placeholder redacted\n"
+            b"; BAMBUDDY_SYNTHETIC_PLATE_CHANGE_INSERTION_POINT\n"
+            b";END gcode for filament\n",
+        )
 
 
 class PlateChange3mfPostprocessApiTest(unittest.IsolatedAsyncioTestCase):
@@ -192,6 +208,7 @@ class PlateChange3mfPostprocessApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(body["printer_upload_supported"])
         self.assertFalse(body["printer_start_supported"])
         self.assertFalse(body["real_execution_supported"])
+        self.assertFalse(body["real_gcode_inserted"])
         sentinels = body["sentinels"]
         self.assertIsInstance(sentinels, dict)
         for effect, count in sentinels.items():
@@ -219,6 +236,7 @@ class PlateChange3mfPostprocessApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(body["printer_upload_supported"])
         self.assertFalse(body["printer_start_supported"])
         self.assertFalse(body["real_execution_supported"])
+        self.assertFalse(body["real_gcode_inserted"])
 
     async def test_enabled_plan_returns_redacted_dry_run_only_response(self) -> None:
         self.enable_boundary()
@@ -231,29 +249,37 @@ class PlateChange3mfPostprocessApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 202, response.text)
         body = response.json()
         self.assertEqual(body["status"], "POSTPROCESS_PLAN_READY")
-        self.assertEqual(body["internal_gcode_paths"], ["Metadata/plate_1.gcode"])
+        self.assertEqual(body["internal_gcode_paths"], [TARGET_GCODE_PATH])
         self.assertEqual(body["detected_printer_model_family"], "A1 Mini")
         self.assertFalse(body["output_artifact_created"])
+        self.assertFalse(body["insertion_performed"])
+        self.assertTrue(body["insertion_marker_present"])
+        self.assertIsNone(body["inserted_block_kind"])
+        self.assertIsNone(body["output_sha256"])
+        self.assertEqual(body["modified_member_paths"], [])
         self.assert_no_side_effects(body)
         rendered = json.dumps(body, sort_keys=True)
         self.assertNotIn("api-secret-name", rendered)
-        self.assertNotIn("G1 X1", rendered)
-        self.assertNotIn("M400", rendered)
+        self.assertNotIn("synthetic API fixture", rendered)
+        self.assertNotIn(SYNTHETIC_INSERTION_POINT, rendered)
+        self.assertNotIn(SYMBOLIC_PLATE_CHANGE_BLOCK, rendered)
         await self.assert_no_control_rows()
 
-    async def test_raw_gcode_body_field_is_rejected_by_schema(self) -> None:
+    async def test_arbitrary_gcode_body_command_fields_are_rejected_by_schema(self) -> None:
         self.enable_boundary()
 
-        response = await self.client.post(
-            "/api/v1/plate-change-3mf/postprocess-plans",
-            json={
-                "source_path": str(self.source),
-                "dry_run": True,
-                "raw_gcode": "G1 X1 Y1",
-            },
-        )
+        for field in ("raw_gcode", "gcode_text", "command_text", "raw_command", "body"):
+            with self.subTest(field=field):
+                response = await self.client.post(
+                    "/api/v1/plate-change-3mf/postprocess-plans",
+                    json={
+                        "source_path": str(self.source),
+                        "dry_run": True,
+                        field: "; not accepted",
+                    },
+                )
 
-        self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.status_code, 422)
         await self.assert_no_control_rows()
 
     async def test_runtime_must_remain_dry_run(self) -> None:
@@ -290,9 +316,26 @@ class PlateChange3mfPostprocessApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 202, response.text)
         body = response.json()
         self.assertTrue(body["output_artifact_created"])
+        self.assertTrue(body["insertion_performed"])
+        self.assertTrue(body["insertion_marker_present"])
+        self.assertEqual(body["inserted_block_kind"], "SYMBOLIC_PLATE_CHANGE_REVIEW_ONLY")
+        self.assertEqual(body["modified_member_paths"], [TARGET_GCODE_PATH])
+        self.assertIsInstance(body["source_sha256"], str)
+        self.assertIsInstance(body["output_sha256"], str)
+        self.assertNotEqual(body["source_sha256"], body["output_sha256"])
+        self.assert_no_side_effects(body)
+        rendered = json.dumps(body, sort_keys=True)
+        self.assertNotIn("synthetic API fixture", rendered)
+        self.assertNotIn(SYNTHETIC_INSERTION_POINT, rendered)
+        self.assertNotIn(SYMBOLIC_PLATE_CHANGE_BLOCK, rendered)
+
         outputs = list((self.controlled_root / "inputs" / "postprocess-output").glob("*.3mf"))
         self.assertEqual(len(outputs), 1)
         self.assertTrue(outputs[0].resolve().is_relative_to(self.controlled_root.resolve()))
+        with zipfile.ZipFile(outputs[0], "r") as zf:
+            modified = zf.read(TARGET_GCODE_PATH).decode("utf-8")
+            self.assertEqual(modified.count("; BAMBUDDY_PLATE_CHANGE_BLOCK_START"), 1)
+            self.assertIn(SYMBOLIC_PLATE_CHANGE_BLOCK + SYNTHETIC_INSERTION_POINT, modified)
         await self.assert_no_control_rows()
 
 

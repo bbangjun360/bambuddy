@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -38,6 +39,11 @@ class PlateChange3mfPostprocessArchitectureTest(unittest.TestCase):
             "from backend.app.models.bed_automation",
             "from backend.app.services.erp_draft_write",
             "from backend.app.services.obico_shadow",
+            "printer_manager.",
+            "background_dispatch.",
+            "print_scheduler.",
+            "BedAutomationCycle",
+            "ErpDraftWriteRecord",
             "send_gcode",
             "start_print",
             "stop_print",
@@ -72,15 +78,42 @@ class PlateChange3mfPostprocessArchitectureTest(unittest.TestCase):
         self.assertIn("plate_change_3mf_postprocess", main_text)
         self.assertIn("app.include_router(plate_change_3mf_postprocess.router", main_text)
 
-        forbidden_schema_tokens = ("raw_gcode", "gcode_text", "command_text", "raw_command")
+        forbidden_schema_tokens = ("raw_gcode", "gcode_text", "command_text", "raw_command", "body")
         for token in forbidden_schema_tokens:
             with self.subTest(token=token):
                 self.assertNotIn(token, schema_text)
 
-        forbidden_route_tokens = ("/queue", "/scheduler", "/dispatch", "/execute", "/live", "/send", "/raw", "/upload", "/start")
+        forbidden_route_tokens = (
+            "/queue",
+            "/scheduler",
+            "/dispatch",
+            "/execute",
+            "/live",
+            "/live-run",
+            "/send",
+            "/raw",
+            "/upload",
+            "/start",
+            "/command",
+        )
         for token in forbidden_route_tokens:
             with self.subTest(token=token):
                 self.assertNotIn(token, route_text)
+
+    def test_symbolic_inserted_block_contains_no_real_executable_gcode(self) -> None:
+        service_text = (ROOT / "app/services/plate_change_3mf_postprocess.py").read_text(encoding="utf-8")
+
+        self.assertIn("; BAMBUDDY_PLATE_CHANGE_BLOCK_START", service_text)
+        self.assertIn("; symbolic_step: PLATE_CHANGE_REVIEW_REQUIRED", service_text)
+        self.assertIn("; symbolic_step: NO_REAL_GCODE_IN_WP_064_B", service_text)
+        self.assertIn("; BAMBUDDY_PLATE_CHANGE_BLOCK_END", service_text)
+        block_match = re.search(
+            r'PLATE_CHANGE_SYMBOLIC_BLOCK = \(\n(?P<block>.*?)\n\)',
+            service_text,
+            flags=re.DOTALL,
+        )
+        self.assertIsNotNone(block_match)
+        self.assertNotRegex(block_match.group("block"), re.compile(r"(?m)^\s*[GMT]\d+"))
 
     def test_no_raw_3mf_or_gcode_sample_files_are_tracked(self) -> None:
         result = subprocess.run(
