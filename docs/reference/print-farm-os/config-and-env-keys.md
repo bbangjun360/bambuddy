@@ -19,6 +19,7 @@ passwords, printer credentials, private keys, customer data, or personal data.
 - `print-farm-os/backend/src/print_farm_api/app.py`
 - `print-farm-os/frontend/vite.config.ts`
 - `print-farm-os/scripts/local_api_launcher.mjs`
+- `print-farm-os/scripts/verify_ui_expect.mjs`
 - `print-farm-os/print_farm_os/core/migrations.py`
 - `print-farm-os/print_farm_os/core/runtime_quick_check.py`
 - `print-farm-os/print_farm_os/mvp/health.py`
@@ -28,9 +29,15 @@ passwords, printer credentials, private keys, customer data, or personal data.
 
 ## Environment Variables
 
+Rows marked as derived canonical keys are preserved for normalized searchability
+and should not be treated as exact source-observed env vars unless a future Work
+Package implements them.
+
 | Key | Source context | Sensitive by name | Placeholder or example shape | Bambuddy use or follow-up |
 | --- | --- | --- | --- | --- |
 | `DATABASE_URL` | Compose backend environment, migration fallback, health checks, tests | Yes | `<postgresql-url>` | Database connection fallback reference only. |
+| `EXPECT_CLI_BIN` | UI Expect verification helper script | No | `<expect-cli-path>` | UI verification helper override reference. |
+| `EXPECT_NPM_CACHE` | UI Expect verification helper script | No | `<npm-cache-path>` | UI verification npm cache override reference. |
 | `POSTGRES_PASSWORD` | Compose Postgres service | Yes | `<local-postgres-password>` | Local service password key name; do not import a value. |
 | `PRINT_FARM_DATABASE_URL` | README, env examples, compose, health checks, migrations, tests | Yes | `<postgresql-url>` | Preferred database URL key for reference import docs. |
 | `PRINT_FARM_DB_CONNECT_ATTEMPTS` | Migration CLI/runtime | No | `<integer>` | Migration retry tuning reference. |
@@ -47,12 +54,13 @@ passwords, printer credentials, private keys, customer data, or personal data.
 | `PRINT_FARM_MIGRATIONS_DIR` | Backend Dockerfile, compose, migrations, tests | No | `/app/backend/migrations` | Migration directory override reference. |
 | `PRINT_FARM_OS_PYTHON` | Local API launcher script | No | `<python-executable>` | Local launcher interpreter override reference. |
 | `PRINT_FARM_OPERATOR_WRITE_TOKENS_JSON` | Env examples, operator auth runbook, runtime checks, tests | Yes | `{"operator-001":"<set locally>"}` or `{"operator-001":"<replace-with-local-write-token>"}` | Operator write-token key name and placeholder only. |
+| `PYTHON` | Local API launcher fallback when `PRINT_FARM_OS_PYTHON` is unset | No | `<python-executable>` | Generic interpreter fallback reference. |
 | `STITCH_API_KEY` | Stitch MCP setup notes | Yes | `<set locally>` | External UI generation API key name; do not import a value. |
 | `PRINT_FARM_A1_01_ACCESS_CODE` | README, Phase 0 auth docs, runtime quick check, tests, captures | Yes | `<set locally>` | A1 credential key name and placeholder only. |
 | `PRINT_FARM_A1_MINI_01_ACCESS_CODE` | README, runtime quick check, tests | Yes | `<set locally>` | A1 mini credential key name and placeholder only. |
 | `PRINT_FARM_P1S_01_ACCESS_CODE` | README, Phase 0 auth docs, runtime quick check, tests, captures | Yes | `<set locally>` | P1S credential key name and placeholder only. |
 | `PRINT_FARM_A1_01_PRINTER_CREDENTIAL` | Legacy validation docs | Yes | `<set locally>` | Legacy printer credential key spelling to preserve for searchability. |
-| `PRINT_FARM_A1_MINI_01_PRINTER_CREDENTIAL` | Required catalog key normalized from the printer credential pattern | Yes | `<set locally>` | Canonical uppercase A1 mini credential-key candidate; source evidence also contains the mixed-case variant below. |
+| `PRINT_FARM_A1_MINI_01_PRINTER_CREDENTIAL` | Derived canonical uppercase key from the dynamic printer credential pattern; not observed as an exact source key | Yes | `<set locally>` | Preserve for normalized searchability. Source evidence includes the mixed-case variant below. |
 | `PRINT_FARM_P1S_01_PRINTER_CREDENTIAL` | Legacy validation docs | Yes | `<set locally>` | Legacy printer credential key spelling to preserve for searchability. |
 | `PRINT_FARM_A1_01_printer_credential` | Tests and redacted support-bundle examples | Yes | `<set locally>` | Source evidence variant; mixed-case spelling is not the canonical environment variable exactness. |
 | `PRINT_FARM_A1_MINI_01_printer_credential` | Tests and redacted support-bundle examples | Yes | `<set locally>` | Source evidence variant; mixed-case spelling is not the canonical environment variable exactness. |
