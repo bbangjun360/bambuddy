@@ -3,7 +3,7 @@
         harness-observability-health harness-bed-automation harness-erp-draft-write harness-obico-shadow \
         harness-printflow-canary harness-plate-change-command harness-plate-change-transport harness-plate-change-3mf-postprocess \
         test-unit test-characterization test-contract test-integration test-scenario test-observability \
-        test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary test-plate-change-command test-plate-change-transport test-plate-change-3mf-postprocess \
+        test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary test-plate-change-command test-plate-change-transport test-plate-change-3mf-postprocess test-plate-change-3mf-insertion \
         verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
@@ -133,6 +133,13 @@ test-plate-change-transport: harness-plate-change-transport
 test-plate-change-3mf-postprocess: harness-plate-change-3mf-postprocess
 	python3 -m unittest backend.tests.unit.services.test_plate_change_3mf_postprocess backend.tests.unit.test_plate_change_3mf_postprocess_architecture
 	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-wp064-tests -e LOG_DIR=/tmp/bambuddy-wp064-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.integration.test_plate_change_3mf_postprocess_api
+
+test-plate-change-3mf-insertion:
+	python3 -m unittest \
+		backend.tests.unit.services.test_plate_change_3mf_postprocess.PlateChange3mfPostprocessServiceTest.test_deterministic_insertion_produces_same_output_hash_for_same_input \
+		backend.tests.unit.services.test_plate_change_3mf_postprocess.PlateChange3mfPostprocessServiceTest.test_insertion_marker_appears_exactly_once \
+		backend.tests.unit.services.test_plate_change_3mf_postprocess.PlateChange3mfPostprocessServiceTest.test_only_target_internal_gcode_member_changes_and_others_are_byte_preserved \
+		backend.tests.unit.services.test_plate_change_3mf_postprocess.PlateChange3mfPostprocessServiceTest.test_unknown_or_unsupported_3mf_structure_returns_safe_blocked_result
 
 verify-fast: context-check workpack-check hooks-check test-contract test-unit test-characterization
 	@echo "Fast deterministic gate passed."

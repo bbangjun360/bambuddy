@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import tempfile
 import zipfile
 from pathlib import Path
@@ -10,8 +9,16 @@ from typing import Any, Iterable
 from backend.app.services.slicer_3mf_convert import extract_source_printer_model
 
 POSTPROCESS_PLAN_READY = "POSTPROCESS_PLAN_READY"
+POSTPROCESS_UNSUPPORTED = "POSTPROCESS_UNSUPPORTED"
 POSTPROCESS_MODE_DRY_RUN = "DRY_RUN_ONLY"
-PLAN_MANIFEST_PATH = "Metadata/bambuddy_plate_change_postprocess_plan.json"
+INSERTED_BLOCK_KIND = "SYMBOLIC_PLATE_CHANGE_REVIEW_ONLY"
+SYNTHETIC_INSERTION_POINT = "; BAMBUDDY_SYNTHETIC_PLATE_CHANGE_INSERTION_POINT"
+PLATE_CHANGE_SYMBOLIC_BLOCK = (
+    "; BAMBUDDY_PLATE_CHANGE_BLOCK_START\n"
+    "; symbolic_step: PLATE_CHANGE_REVIEW_REQUIRED\n"
+    "; symbolic_step: NO_REAL_GCODE_IN_WP_064_B\n"
+    "; BAMBUDDY_PLATE_CHANGE_BLOCK_END\n"
+)
 
 FORBIDDEN_SIDE_EFFECTS = (
     "printer_uploads",
@@ -30,9 +37,10 @@ FORBIDDEN_SIDE_EFFECTS = (
 
 SAFETY_NOTES = (
     "WP-064-A does not upload, start, send MQTT, use FTPS, or execute G-code",
+    "WP-064-B inserts only a symbolic synthetic marker block for deterministic tests",
     "3MF post-processing output requires human diff review before any future use",
     "Output artifacts are disabled by default and remain prototype evidence only",
-    "Printer upload/start remains out of scope for WP-064-A",
+    "Printer upload/start remains out of scope for WP-064-B",
 )
 
 
@@ -76,27 +84,56 @@ class PlateChange3mfPostprocessService:
         source = _resolve_allowed_source_path(source_path, roots)
         internal_listing, gcode_paths = _read_3mf_listing(source)
         source_bytes = source.read_bytes()
+        source_sha256 = _sha256_bytes(source_bytes)
         detected_printer_model_family = extract_source_printer_model(source_bytes)
         candidate_blocks, insertion_points = _build_candidate_plan(source, gcode_paths)
+        insertion_target, insertion_marker_present = _find_synthetic_insertion_target(source, gcode_paths)
 
+        status = POSTPROCESS_PLAN_READY
         output_artifact_created = False
         output_artifact_root_redacted = None
+        output_file_name_redacted = None
+        output_sha256 = None
+        insertion_performed = False
+        inserted_block_kind = None
+        preserved_member_count = len(internal_listing)
+        modified_member_paths: list[str] = []
+        deterministic_diff_summary = _deterministic_diff_summary_no_output(
+            member_count=len(internal_listing),
+            marker_present=insertion_marker_present,
+        )
+
         if create_output_artifact:
-            artifact_dir = _resolve_allowed_output_dir(output_dir, source, roots)
-            artifact_path = _write_output_artifact(
-                source=source,
-                output_dir=artifact_dir,
-                internal_gcode_paths=gcode_paths,
-                detected_printer_model_family=detected_printer_model_family,
-            )
-            output_artifact_created = True
-            output_artifact_root_redacted = "controlled-temp-output"
-            output_file_name_redacted = _redacted_artifact_name(artifact_path)
-        else:
-            output_file_name_redacted = None
+            if insertion_target is None:
+                status = POSTPROCESS_UNSUPPORTED
+                deterministic_diff_summary = _deterministic_diff_summary_unsupported(
+                    member_count=len(internal_listing),
+                    marker_present=insertion_marker_present,
+                )
+            else:
+                artifact_dir = _resolve_allowed_output_dir(output_dir, source, roots)
+                artifact_path = _write_output_artifact(
+                    source=source,
+                    output_dir=artifact_dir,
+                    source_sha256=source_sha256,
+                    target_internal_gcode_path=insertion_target,
+                )
+                output_artifact_created = True
+                output_artifact_root_redacted = "controlled-temp-output"
+                output_file_name_redacted = _redacted_artifact_name(artifact_path)
+                output_sha256 = _sha256_bytes(artifact_path.read_bytes())
+                insertion_performed = True
+                inserted_block_kind = INSERTED_BLOCK_KIND
+                preserved_member_count = max(0, len(internal_listing) - 1)
+                modified_member_paths = [insertion_target]
+                deterministic_diff_summary = _deterministic_diff_summary_inserted(
+                    target_internal_gcode_path=insertion_target,
+                    preserved_member_count=preserved_member_count,
+                    member_count=len(internal_listing),
+                )
 
         result = {
-            "status": POSTPROCESS_PLAN_READY,
+            "status": status,
             "mode": POSTPROCESS_MODE_DRY_RUN,
             "source_file_name_redacted": _redacted_source_file_name(source),
             "internal_file_listing": internal_listing,
@@ -109,6 +146,15 @@ class PlateChange3mfPostprocessService:
             "output_artifact_created": output_artifact_created,
             "output_artifact_root_redacted": output_artifact_root_redacted,
             "output_artifact_file_name_redacted": output_file_name_redacted,
+            "insertion_performed": insertion_performed,
+            "insertion_marker_present": insertion_marker_present,
+            "inserted_block_kind": inserted_block_kind,
+            "source_sha256": source_sha256,
+            "output_sha256": output_sha256,
+            "deterministic_diff_summary": deterministic_diff_summary,
+            "preserved_member_count": preserved_member_count,
+            "modified_member_paths": modified_member_paths,
+            "real_gcode_inserted": False,
             "printer_upload_supported": False,
             "printer_start_supported": False,
             "real_execution_supported": False,
@@ -133,6 +179,15 @@ class PlateChange3mfPostprocessService:
             "postprocess_supported": False,
             "prototype_only": True,
             "output_artifact_created": False,
+            "insertion_performed": False,
+            "insertion_marker_present": False,
+            "inserted_block_kind": None,
+            "source_sha256": None,
+            "output_sha256": None,
+            "deterministic_diff_summary": _deterministic_diff_summary_no_output(member_count=0, marker_present=False),
+            "preserved_member_count": 0,
+            "modified_member_paths": [],
+            "real_gcode_inserted": False,
             "printer_upload_supported": False,
             "printer_start_supported": False,
             "real_execution_supported": False,
@@ -222,7 +277,7 @@ def _build_candidate_plan(source: Path, gcode_paths: list[str]) -> tuple[list[di
                         "candidate_block_id": block_id,
                         "position": "before_plate_tail_review_window",
                         "review_required": True,
-                        "proposed_change": "NO_AUTOMATIC_INSERTION_IN_WP_064_A",
+                        "proposed_change": "SYMBOLIC_SYNTHETIC_INSERTION_ONLY_IN_WP_064_B",
                         "raw_gcode_added": False,
                     }
                 )
@@ -248,38 +303,53 @@ def _summarize_gcode_bytes(raw: bytes) -> tuple[int, list[str]]:
     return len(lines), markers
 
 
+def _find_synthetic_insertion_target(source: Path, gcode_paths: list[str]) -> tuple[str | None, bool]:
+    marker = SYNTHETIC_INSERTION_POINT.encode("utf-8")
+    inserted_block = PLATE_CHANGE_SYMBOLIC_BLOCK.encode("utf-8")
+    matching_paths: list[str] = []
+    marker_present = False
+    try:
+        with zipfile.ZipFile(source, "r") as zf:
+            for internal_path in gcode_paths:
+                raw = zf.read(internal_path)
+                marker_count = raw.count(marker)
+                if marker_count:
+                    marker_present = True
+                if marker_count == 1 and inserted_block not in raw:
+                    matching_paths.append(internal_path)
+    except (zipfile.BadZipFile, OSError, KeyError) as exc:
+        raise PlateChange3mfPostprocessError("invalid_3mf", "Source is not a readable 3MF ZIP artifact") from exc
+    if len(matching_paths) != 1:
+        return None, marker_present
+    return matching_paths[0], marker_present
+
+
 def _write_output_artifact(
     *,
     source: Path,
     output_dir: Path,
-    internal_gcode_paths: list[str],
-    detected_printer_model_family: str | None,
+    source_sha256: str,
+    target_internal_gcode_path: str,
 ) -> Path:
-    output_path = output_dir / f"plate-change-3mf-postprocess-{_short_hash(str(source))}.3mf"
+    output_path = output_dir / f"plate-change-3mf-postprocess-{_short_hash(source_sha256)}.3mf"
     tmp_path = output_path.with_suffix(".tmp")
-    manifest = {
-        "prototype_only": True,
-        "postprocess_supported": False,
-        "internal_gcode_paths": internal_gcode_paths,
-        "detected_printer_model_family": detected_printer_model_family,
-        "raw_gcode_included": False,
-        "printer_upload_supported": False,
-        "printer_start_supported": False,
-        "real_execution_supported": False,
-        "safety_notes": list(SAFETY_NOTES),
-    }
     try:
         with zipfile.ZipFile(source, "r") as zin, zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zout:
             for item in zin.infolist():
-                if item.filename == PLAN_MANIFEST_PATH:
-                    continue
-                zout.writestr(item, zin.read(item.filename))
-            zout.writestr(PLAN_MANIFEST_PATH, json.dumps(manifest, sort_keys=True, indent=2).encode("utf-8"))
+                payload = zin.read(item.filename)
+                if item.filename == target_internal_gcode_path:
+                    payload = _insert_symbolic_block(payload)
+                zout.writestr(item, payload)
         tmp_path.replace(output_path)
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
     return output_path
+
+
+def _insert_symbolic_block(raw: bytes) -> bytes:
+    marker = SYNTHETIC_INSERTION_POINT.encode("utf-8")
+    return raw.replace(marker, PLATE_CHANGE_SYMBOLIC_BLOCK.encode("utf-8") + marker, 1)
 
 
 def _redacted_source_file_name(source: Path) -> str:
@@ -295,11 +365,60 @@ def _redacted_artifact_name(path: Path) -> str:
 
 def _redacted_diff_summary(gcode_paths: list[str], insertion_points: list[dict[str, Any]]) -> dict[str, Any]:
     return {
-        "summary": "No raw G-code diff is emitted by WP-064-A; only symbolic review points are planned",
+        "summary": "No raw G-code diff is emitted by WP-064-B; only symbolic synthetic insertion metadata is reported",
         "gcode_files_scanned": len(gcode_paths),
         "candidate_insertion_points": len(insertion_points),
         "raw_lines_added": 0,
         "raw_lines_removed": 0,
+        "raw_gcode_included": False,
+        "requires_human_diff_review": True,
+    }
+
+
+def _deterministic_diff_summary_no_output(*, member_count: int, marker_present: bool) -> dict[str, Any]:
+    return {
+        "summary": "No output artifact requested; deterministic synthetic insertion was not performed",
+        "target_internal_gcode_path": None,
+        "inserted_block_count": 0,
+        "modified_member_count": 0,
+        "preserved_member_count": member_count,
+        "zip_member_count_before": member_count,
+        "zip_member_count_after": member_count,
+        "insertion_marker_present": marker_present,
+        "raw_gcode_included": False,
+        "requires_human_diff_review": True,
+    }
+
+
+def _deterministic_diff_summary_unsupported(*, member_count: int, marker_present: bool) -> dict[str, Any]:
+    return {
+        "summary": "No deterministic synthetic insertion point found; output artifact blocked",
+        "target_internal_gcode_path": None,
+        "inserted_block_count": 0,
+        "modified_member_count": 0,
+        "preserved_member_count": member_count,
+        "zip_member_count_before": member_count,
+        "zip_member_count_after": member_count,
+        "insertion_marker_present": marker_present,
+        "raw_gcode_included": False,
+        "requires_human_diff_review": True,
+    }
+
+
+def _deterministic_diff_summary_inserted(
+    *,
+    target_internal_gcode_path: str,
+    preserved_member_count: int,
+    member_count: int,
+) -> dict[str, Any]:
+    return {
+        "summary": "Inserted one symbolic WP-064-B marker block into one synthetic internal G-code member",
+        "target_internal_gcode_path": target_internal_gcode_path,
+        "inserted_block_count": 1,
+        "modified_member_count": 1,
+        "preserved_member_count": preserved_member_count,
+        "zip_member_count_before": member_count,
+        "zip_member_count_after": member_count,
         "raw_gcode_included": False,
         "requires_human_diff_review": True,
     }
@@ -311,6 +430,10 @@ def _new_sentinels() -> dict[str, int]:
 
 def _short_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
 
 
 plate_change_3mf_postprocess_service = PlateChange3mfPostprocessService()
