@@ -2,9 +2,9 @@
         harness-persistence harness-backup harness-restore harness-orca-health harness-orca-slice \
         harness-observability-health harness-bed-automation harness-erp-draft-write harness-obico-shadow \
         harness-printflow-canary harness-plate-change-command harness-plate-change-transport harness-plate-change-3mf-postprocess \
-        harness-plate-change-3mf-physical-canary \
+        harness-plate-change-3mf-physical-canary harness-swapmod-3mf-dry-run \
         test-unit test-characterization test-contract test-integration test-scenario test-observability \
-        test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary test-plate-change-command test-plate-change-transport test-plate-change-3mf-postprocess test-plate-change-3mf-physical-canary test-plate-change-3mf-insertion \
+        test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary test-plate-change-command test-plate-change-transport test-plate-change-3mf-postprocess test-plate-change-3mf-physical-canary test-plate-change-3mf-insertion test-swapmod-3mf-dry-run \
         verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
@@ -65,6 +65,9 @@ harness-plate-change-3mf-postprocess:
 
 harness-plate-change-3mf-physical-canary:
 	python3 -m unittest harness.tests.test_plate_change_3mf_physical_canary_mock
+
+harness-swapmod-3mf-dry-run:
+	python3 -m unittest harness.tests.test_swapmod_3mf_dry_run_mock
 
 harness-bed-automation:
 	python3 -m unittest harness.tests.test_bed_automation_mock
@@ -141,6 +144,10 @@ test-plate-change-3mf-postprocess: harness-plate-change-3mf-postprocess
 test-plate-change-3mf-physical-canary: harness-plate-change-3mf-physical-canary
 	python3 -m unittest backend.tests.unit.services.test_plate_change_3mf_physical_canary backend.tests.unit.test_plate_change_3mf_physical_canary_architecture
 	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-wp064d-tests -e LOG_DIR=/tmp/bambuddy-wp064d-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.integration.test_plate_change_3mf_physical_canary_api
+
+test-swapmod-3mf-dry-run: harness-swapmod-3mf-dry-run
+	python3 -m unittest backend.tests.unit.services.test_swapmod_3mf_dry_run backend.tests.unit.test_swapmod_3mf_dry_run_architecture
+	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-wp065-tests -e LOG_DIR=/tmp/bambuddy-wp065-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.integration.test_swapmod_3mf_dry_run_api
 
 test-plate-change-3mf-insertion:
 	python3 -m unittest \
