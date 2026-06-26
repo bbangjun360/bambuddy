@@ -34,6 +34,8 @@ In scope:
 - Copy safe static fixtures into `harness/fixtures/phase0/`.
 - Summarize model and policy ideas that map cleanly to Bambuddy.
 - List feature candidates with Bambuddy integration points and risk level.
+- Import all relevant configuration, environment, and JSON key names, including
+  secret-key names and placeholder examples.
 - Record excluded actual secret values or files with reasons.
 
 Out of scope:
@@ -55,11 +57,17 @@ Primary source paths in the cloned Print Farm OS repository:
 - `docs/3d-printing-automation/*.md`
 - `print-farm-os/README.md`
 - `print-farm-os/config/*.example.json`
+- `print-farm-os/ops/*.env.example`
+- `print-farm-os/infra/env.example`
+- `print-farm-os/infra/docker-compose.yml`
 - `print-farm-os/fixtures/*`
 - `print-farm-os/tests/test_*.py`
+- `print-farm-os/scripts/*`
 - `print-farm-os/print_farm_os/core/*.py`
 - `print-farm-os/print_farm_os/phase0/*.py`
 - `print-farm-os/backend/migrations/*.sql`
+- `print-farm-os/backend/src/print_farm_api/app.py`
+- `print-farm-os/frontend/vite.config.ts`
 
 The import should keep source path references in indexes so future work can
 trace each summary back to the original file.
@@ -78,6 +86,7 @@ docs/reference/print-farm-os/
     validation-checkpoints.md
   models-and-policies.md
   feature-candidates.md
+  config-and-env-keys.md
   excluded-sensitive-values.md
 
 harness/fixtures/phase0/
@@ -104,6 +113,8 @@ Use this classification:
   is more useful than copying every byte.
 - Exclude or redact only actual secret values: printer access codes, API tokens,
   passwords, private keys, customer data, and personal data.
+- Preserve all key names, variable names, and placeholder examples, including
+  names containing `ACCESS_CODE`, `TOKEN`, `PASSWORD`, `SECRET`, and `API_KEY`.
 
 Every excluded or secret-redacted source must be listed in
 `docs/reference/print-farm-os/excluded-sensitive-values.md` with a short reason.
@@ -147,6 +158,31 @@ Each row should include:
 For each idea, include the likely Bambuddy integration point, for example
 `LibraryFile`, `PrintQueueItem`, `PrintLogEntry`, existing label APIs, ERP work
 packages, or bed automation work packages.
+
+## Configuration And Key Catalog
+
+`config-and-env-keys.md` should list every relevant key name discovered in:
+
+- `print-farm-os/config/*.json`
+- `print-farm-os/ops/*.env.example`
+- `print-farm-os/infra/env.example`
+- `print-farm-os/README.md`
+- `docs/3d-printing-automation/*.md`
+- scripts and tests where environment variables are referenced
+
+The catalog should include:
+
+- JSON key paths from source example configs.
+- Normalized JSON key paths for `phase0-inventory.example.json` and
+  `phase0-discovery-ignore.example.json`, using paths such as `printers[].id`
+  instead of array-index-only examples.
+- Environment variable names and dynamic environment-variable patterns.
+- Sensitive-key classification by name.
+- Placeholder or example value shape when present.
+- Likely Bambuddy mapping or follow-up use.
+
+Do not copy actual secret values, but do copy the secret-bearing key names and
+placeholder strings such as `<set locally>`.
 
 ## Feature Candidates
 
