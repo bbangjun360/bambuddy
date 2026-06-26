@@ -38,7 +38,11 @@ Package implements them.
 | `DATABASE_URL` | Compose backend environment, migration fallback, health checks, tests | Yes | `<postgresql-url>` | Database connection fallback reference only. |
 | `EXPECT_CLI_BIN` | UI Expect verification helper script | No | `<expect-cli-path>` | UI verification helper override reference. |
 | `EXPECT_NPM_CACHE` | UI Expect verification helper script | No | `<npm-cache-path>` | UI verification npm cache override reference. |
+| `LOCALAPPDATA` | Runtime quick check Docker Desktop CLI candidate lookup | No | `<windows-local-app-data-path>` | Windows Docker Desktop discovery path reference. |
 | `POSTGRES_PASSWORD` | Compose Postgres service | Yes | `<local-postgres-password>` | Local service password key name; do not import a value. |
+| `POSTGRES_DB` | Compose Postgres service | No | `<postgres-database-name>` | Local Postgres database name reference. |
+| `POSTGRES_USER` | Compose Postgres service | No | `<postgres-username>` | Local Postgres username reference. |
+| `ProgramFiles` | Runtime quick check Docker Desktop CLI candidate lookup | No | `<windows-program-files-path>` | Windows Docker Desktop installation path reference. |
 | `PRINT_FARM_DATABASE_URL` | README, env examples, compose, health checks, migrations, tests | Yes | `<postgresql-url>` | Preferred database URL key for reference import docs. |
 | `PRINT_FARM_DB_CONNECT_ATTEMPTS` | Migration CLI/runtime | No | `<integer>` | Migration retry tuning reference. |
 | `PRINT_FARM_DB_CONNECT_RETRY_SECONDS` | Migration CLI/runtime | No | `<seconds>` | Migration retry interval reference. |
@@ -69,6 +73,7 @@ Package implements them.
 | `PRINT_FARM_PHASE0_GENERATED_ARTIFACT_A1_01` | Runtime quick check and validation docs | No | `<local .gcode.3mf path>` | A1-specific generated artifact path reference. |
 | `PRINT_FARM_PHASE0_GENERATED_ARTIFACT_A1_MINI_01` | Runtime quick check | No | `<local .gcode.3mf path>` | A1 mini-specific generated artifact path reference. |
 | `PRINT_FARM_PHASE0_GENERATED_ARTIFACT_P1S_01` | Runtime quick check and validation docs | No | `<local .gcode.3mf path>` | P1S-specific generated artifact path reference. |
+| `USERPROFILE` | Runtime quick check Docker Desktop CLI candidate lookup | No | `<windows-user-profile-path>` | Windows user profile Docker Desktop discovery path reference. |
 
 ## Dynamic Environment Patterns
 
