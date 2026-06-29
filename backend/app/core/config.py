@@ -159,6 +159,11 @@ class Settings(BaseSettings):
     farm_swapmod_canary_preflight_require_human_confirmation: bool = True
     farm_swapmod_canary_preflight_single_printer_only: bool = True
 
+    # WP-071 SwapMod state machine. Disabled by default and dry-run only;
+    # it records step progress and verification without executing printer actions.
+    farm_swapmod_state_machine_enabled: bool = False
+    farm_swapmod_state_machine_dry_run: bool = True
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
