@@ -9,6 +9,7 @@ from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.models.user import User
 from backend.app.schemas.swapmod_state_machine import (
+    SwapmodCanaryExecutionGateRequest,
     SwapmodOperatorTriggerRequest,
     SwapmodStateMachineCycleCreate,
     SwapmodTransportStepRequest,
@@ -19,6 +20,7 @@ from backend.app.services.swapmod_state_machine import (
     apply_swapmod_event,
     apply_swapmod_transport_step,
     apply_swapmod_verification,
+    evaluate_swapmod_canary_execution_gate,
     create_swapmod_cycle,
     create_swapmod_operator_trigger,
     get_swapmod_cycle,
@@ -41,6 +43,15 @@ def _require_transport_enabled() -> None:
         raise HTTPException(
             status_code=400,
             detail={"code": "dry_run_required", "message": "SwapMod transport boundary is dry-run only"},
+        )
+
+def _require_canary_execution_gate_enabled() -> None:
+    if not settings.farm_swapmod_canary_execution_gate_enabled:
+        raise HTTPException(status_code=404, detail="SwapMod canary execution gate is disabled")
+    if not settings.farm_swapmod_canary_execution_dry_run or settings.farm_swapmod_canary_allow_real_execution:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "dry_run_required", "message": "SwapMod canary execution gate is dry-run only"},
         )
 
 
@@ -142,6 +153,39 @@ async def apply_swapmod_transport_step_request(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"code": "unsupported_transport_step", "message": str(exc)}) from exc
+
+
+
+@router.post("/cycles/{cycle_key}/canary-execution-gates", status_code=202)
+async def evaluate_swapmod_canary_execution_gate_request(
+    cycle_key: str,
+    body: SwapmodCanaryExecutionGateRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
+):
+    _require_enabled()
+    _require_canary_execution_gate_enabled()
+    cycle = await get_swapmod_cycle(db, cycle_key=cycle_key)
+    if cycle is None:
+        raise HTTPException(status_code=404, detail="SwapMod state machine cycle not found")
+    try:
+        return evaluate_swapmod_canary_execution_gate(
+            cycle,
+            gate_key=body.gate_key,
+            canary_printer_alias=body.canary_printer_alias,
+            requested_action=body.requested_action,
+            operator_approved=body.operator_approved,
+            operator_approval_phrase=body.operator_approval_phrase,
+            checklist=body.checklist.model_dump(),
+            gate_enabled=settings.farm_swapmod_canary_execution_gate_enabled,
+            gate_dry_run=settings.farm_swapmod_canary_execution_dry_run,
+            transport_enabled=settings.farm_swapmod_transport_enabled,
+            transport_dry_run=settings.farm_swapmod_transport_dry_run,
+            allow_real_transport=settings.farm_swapmod_allow_real_transport,
+            allow_real_execution=settings.farm_swapmod_canary_allow_real_execution,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "unsupported_canary_gate", "message": str(exc)}) from exc
 
 
 @router.post("/cycles/{cycle_key}/events")

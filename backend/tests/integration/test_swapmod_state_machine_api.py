@@ -79,6 +79,9 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
         self.previous_transport_enabled = swapmod_route.settings.farm_swapmod_transport_enabled
         self.previous_transport_dry_run = swapmod_route.settings.farm_swapmod_transport_dry_run
         self.previous_allow_real_transport = swapmod_route.settings.farm_swapmod_allow_real_transport
+        self.previous_canary_gate_enabled = swapmod_route.settings.farm_swapmod_canary_execution_gate_enabled
+        self.previous_canary_gate_dry_run = swapmod_route.settings.farm_swapmod_canary_execution_dry_run
+        self.previous_canary_allow_real_execution = swapmod_route.settings.farm_swapmod_canary_allow_real_execution
         swapmod_route.settings.farm_swapmod_state_machine_enabled = False
         swapmod_route.settings.farm_swapmod_state_machine_dry_run = True
         self.client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
@@ -91,6 +94,9 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
         swapmod_route.settings.farm_swapmod_transport_enabled = self.previous_transport_enabled
         swapmod_route.settings.farm_swapmod_transport_dry_run = self.previous_transport_dry_run
         swapmod_route.settings.farm_swapmod_allow_real_transport = self.previous_allow_real_transport
+        swapmod_route.settings.farm_swapmod_canary_execution_gate_enabled = self.previous_canary_gate_enabled
+        swapmod_route.settings.farm_swapmod_canary_execution_dry_run = self.previous_canary_gate_dry_run
+        swapmod_route.settings.farm_swapmod_canary_allow_real_execution = self.previous_canary_allow_real_execution
         for patcher in reversed(self.patches):
             patcher.stop()
         async with self.engine.begin() as conn:
@@ -115,6 +121,59 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
         swapmod_route.settings.farm_swapmod_transport_enabled = True
         swapmod_route.settings.farm_swapmod_transport_dry_run = True
         swapmod_route.settings.farm_swapmod_allow_real_transport = False
+
+    def enable_canary_execution_gate(self) -> None:
+        swapmod_route.settings.farm_swapmod_canary_execution_gate_enabled = True
+        swapmod_route.settings.farm_swapmod_canary_execution_dry_run = True
+        swapmod_route.settings.farm_swapmod_canary_allow_real_execution = False
+
+    def complete_checklist(self) -> dict[str, bool]:
+        return {
+            "operator_present": True,
+            "canary_device_named": True,
+            "camera_ready": True,
+            "build_plate_clear": True,
+            "emergency_stop_reachable": True,
+            "dry_run_transport_verified": True,
+        }
+
+    async def create_ready_cycle(self, cycle_key: str) -> None:
+        await self.client.post(
+            "/api/v1/swapmod-state-machine/operator-triggers",
+            json={
+                "trigger_key": f"{cycle_key}-trigger",
+                "cycle_key": cycle_key,
+                "printer_id": 101,
+                "operator_intent": "START_SWAPMOD_PLATE_CHANGE",
+            },
+        )
+        await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/transport-steps",
+            json={"transport_key": f"{cycle_key}-release", "step": RELEASE_PLATE, "mock_result": "success"},
+        )
+        await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/verifications",
+            json={
+                "verification_key": f"{cycle_key}-release-verification",
+                "verification_source": "manual",
+                "verification_result": "pass",
+            },
+        )
+        await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/transport-steps",
+            json={"transport_key": f"{cycle_key}-load", "step": LOAD_NEXT_PLATE, "mock_result": "success"},
+        )
+        await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/verifications",
+            json={
+                "verification_key": f"{cycle_key}-load-verification",
+                "verification_source": "camera_mock",
+                "verification_result": "pass",
+            },
+        )
+
+    def canary_phrase(self, *, cycle_key: str, alias: str) -> str:
+        return f"CONFIRM SWAPMOD CANARY {alias} CYCLE {cycle_key}"
 
     async def post_event(self, cycle_key: str, event_id: str, event: str, **overrides: object):
         payload: dict[str, object] = {"event_id": event_id, "event": event}
@@ -500,6 +559,137 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(step_response.status_code, 422)
         self.assertEqual(result_response.status_code, 422)
+
+    async def test_canary_execution_gate_is_disabled_by_default(self) -> None:
+        self.enable_state_machine()
+        cycle_key = "api-canary-gate-disabled-cycle"
+        await self.client.post(
+            "/api/v1/swapmod-state-machine/cycles",
+            json={"cycle_key": cycle_key, "printer_id": 101},
+        )
+
+        response = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/canary-execution-gates",
+            json={
+                "gate_key": "api-canary-gate-disabled",
+                "canary_printer_alias": "canary-alpha",
+                "requested_action": "EVALUATE_ONLY",
+                "operator_approved": False,
+                "checklist": self.complete_checklist(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("disabled", response.json()["detail"].lower())
+        await self.assert_no_control_rows()
+
+    async def test_canary_execution_gate_returns_ready_after_verified_swapmod_cycle(self) -> None:
+        self.enable_state_machine()
+        self.enable_transport_boundary()
+        self.enable_canary_execution_gate()
+        cycle_key = "api-canary-gate-ready-cycle"
+        await self.create_ready_cycle(cycle_key)
+        phrase = self.canary_phrase(cycle_key=cycle_key, alias="canary-alpha")
+
+        response = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/canary-execution-gates",
+            json={
+                "gate_key": "api-canary-gate-ready",
+                "canary_printer_alias": "canary-alpha",
+                "requested_action": "ARM_DRY_RUN",
+                "operator_approved": True,
+                "operator_approval_phrase": phrase,
+                "checklist": self.complete_checklist(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 202, response.text)
+        body = response.json()
+        self.assertEqual(body["gate_status"], "ready")
+        self.assertTrue(body["ready_for_canary"])
+        self.assertEqual(body["state"], READY_FOR_NEXT_PRINT)
+        self.assertEqual(body["execution_mode"], "DRY_RUN_CANARY_GATE_ONLY")
+        self.assertEqual(body["canary_printer_alias"], "canary-alpha")
+        self.assertEqual(body["required_operator_approval_phrase"], phrase)
+        self.assertEqual(body["blocked_reasons"], [])
+        self.assertFalse(body["real_execution_supported"])
+        self.assertFalse(body["real_command_sent"])
+        self.assertFalse(body["printer_command_sent"])
+        await self.assert_no_control_rows()
+
+    async def test_canary_execution_gate_blocks_unready_cycle_and_missing_approval(self) -> None:
+        self.enable_state_machine()
+        self.enable_transport_boundary()
+        self.enable_canary_execution_gate()
+        cycle_key = "api-canary-gate-blocked-cycle"
+        await self.client.post(
+            "/api/v1/swapmod-state-machine/operator-triggers",
+            json={
+                "trigger_key": "api-canary-gate-blocked-trigger",
+                "cycle_key": cycle_key,
+                "printer_id": 101,
+                "operator_intent": "START_SWAPMOD_PLATE_CHANGE",
+            },
+        )
+
+        checklist = self.complete_checklist()
+        checklist["camera_ready"] = False
+        response = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/canary-execution-gates",
+            json={
+                "gate_key": "api-canary-gate-blocked",
+                "canary_printer_alias": "canary-alpha",
+                "requested_action": "ARM_DRY_RUN",
+                "operator_approved": False,
+                "operator_approval_phrase": "wrong",
+                "checklist": checklist,
+            },
+        )
+
+        self.assertEqual(response.status_code, 202, response.text)
+        body = response.json()
+        self.assertEqual(body["gate_status"], "blocked")
+        self.assertFalse(body["ready_for_canary"])
+        self.assertIn("cycle_not_ready_for_next_print", body["blocked_reasons"])
+        self.assertIn("operator_approval_missing", body["blocked_reasons"])
+        self.assertIn("operator_phrase_mismatch", body["blocked_reasons"])
+        self.assertIn("checklist_incomplete", body["blocked_reasons"])
+        self.assertFalse(body["real_command_sent"])
+        await self.assert_no_control_rows()
+
+    async def test_canary_execution_gate_schema_rejects_unknown_action_and_raw_command(self) -> None:
+        self.enable_state_machine()
+        self.enable_transport_boundary()
+        self.enable_canary_execution_gate()
+        cycle_key = "api-canary-gate-schema-cycle"
+        await self.create_ready_cycle(cycle_key)
+
+        unknown_action = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/canary-execution-gates",
+            json={
+                "gate_key": "api-canary-gate-bad-action",
+                "canary_printer_alias": "canary-alpha",
+                "requested_action": "START_PRINT",
+                "operator_approved": True,
+                "operator_approval_phrase": self.canary_phrase(cycle_key=cycle_key, alias="canary-alpha"),
+                "checklist": self.complete_checklist(),
+            },
+        )
+        raw_command = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/canary-execution-gates",
+            json={
+                "gate_key": "api-canary-gate-raw",
+                "canary_printer_alias": "canary-alpha",
+                "requested_action": "ARM_DRY_RUN",
+                "operator_approved": True,
+                "operator_approval_phrase": self.canary_phrase(cycle_key=cycle_key, alias="canary-alpha"),
+                "checklist": self.complete_checklist(),
+                "raw_command": "blocked",
+            },
+        )
+
+        self.assertEqual(unknown_action.status_code, 422)
+        self.assertEqual(raw_command.status_code, 422)
 
 
 if __name__ == "__main__":

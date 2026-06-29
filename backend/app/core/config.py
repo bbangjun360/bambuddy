@@ -170,6 +170,12 @@ class Settings(BaseSettings):
     farm_swapmod_transport_dry_run: bool = True
     farm_swapmod_allow_real_transport: bool = False
 
+    # WP-075 SwapMod canary execution gate. Disabled by default and
+    # dry-run/audit-only; real printer execution is intentionally unsupported.
+    farm_swapmod_canary_execution_gate_enabled: bool = False
+    farm_swapmod_canary_execution_dry_run: bool = True
+    farm_swapmod_canary_allow_real_execution: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
