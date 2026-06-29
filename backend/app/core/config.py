@@ -153,6 +153,12 @@ class Settings(BaseSettings):
     farm_swapmod_3mf_dry_run_required: bool = True
     farm_swapmod_3mf_sample_root: str | None = None
 
+    # WP-066 SwapMod canary preflight. Disabled by default and packages redacted
+    # candidate evidence only; it never executes printer commands.
+    farm_swapmod_canary_preflight_enabled: bool = False
+    farm_swapmod_canary_preflight_require_human_confirmation: bool = True
+    farm_swapmod_canary_preflight_single_printer_only: bool = True
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
