@@ -20,6 +20,8 @@ class SwapmodStateMachineHarnessContractTest(unittest.TestCase):
         self.assertIn("test-swapmod-transport-boundary: harness-swapmod-transport-boundary", makefile)
         self.assertIn("harness-swapmod-canary-execution-gate:", makefile)
         self.assertIn("test-swapmod-canary-execution-gate: harness-swapmod-canary-execution-gate", makefile)
+        self.assertIn("harness-swapmod-a1mini-direct-canary:", makefile)
+        self.assertIn("test-swapmod-a1mini-direct-canary: harness-swapmod-a1mini-direct-canary", makefile)
 
     def test_mock_services_do_not_expose_swapmod_hardware_routes(self) -> None:
         text = (ROOT / "harness/mock_services.py").read_text(encoding="utf-8")

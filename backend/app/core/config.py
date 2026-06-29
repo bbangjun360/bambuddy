@@ -176,6 +176,17 @@ class Settings(BaseSettings):
     farm_swapmod_canary_execution_dry_run: bool = True
     farm_swapmod_canary_allow_real_execution: bool = False
 
+    # WP-076 SwapMod A1 Mini direct canary. Disabled by default and requires
+    # explicit real-command opt-in plus server-side allowlisted sequence files.
+    farm_swapmod_a1mini_direct_canary_enabled: bool = False
+    farm_swapmod_a1mini_direct_canary_allow_real_commands: bool = False
+    farm_swapmod_a1mini_direct_canary_require_human_confirmation: bool = True
+    farm_swapmod_a1mini_direct_canary_sequence_root: str | None = None
+    farm_swapmod_a1mini_direct_canary_release_sequence_file: str | None = None
+    farm_swapmod_a1mini_direct_canary_release_sequence_sha256: str | None = None
+    farm_swapmod_a1mini_direct_canary_load_sequence_file: str | None = None
+    farm_swapmod_a1mini_direct_canary_load_sequence_sha256: str | None = None
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -24,6 +24,7 @@ PRINT_FINISHED = "PRINT_FINISHED"
 START_STEP = "START_STEP"
 STEP_MOCK_SUCCEEDED = "STEP_MOCK_SUCCEEDED"
 STEP_MOCK_FAILED = "STEP_MOCK_FAILED"
+STEP_REAL_COMMAND_SENT = "STEP_REAL_COMMAND_SENT"
 VERIFY_PASSED = "VERIFY_PASSED"
 VERIFY_FAILED = "VERIFY_FAILED"
 RETRY_REQUESTED = "RETRY_REQUESTED"
@@ -77,6 +78,7 @@ SUPPORTED_EVENTS = (
     START_STEP,
     STEP_MOCK_SUCCEEDED,
     STEP_MOCK_FAILED,
+    STEP_REAL_COMMAND_SENT,
     VERIFY_PASSED,
     VERIFY_FAILED,
     RETRY_REQUESTED,
@@ -211,6 +213,13 @@ async def apply_swapmod_event(
             to_state = LOADING_PLATE
             next_current_step = LOAD_NEXT_PLATE
     elif event == STEP_MOCK_SUCCEEDED:
+        if from_state == RELEASING_PLATE and _matches_step(step, RELEASE_PLATE):
+            to_state = VERIFY_RELEASED
+            next_current_step = VERIFY_PLATE_RELEASED
+        elif from_state == LOADING_PLATE and _matches_step(step, LOAD_NEXT_PLATE):
+            to_state = VERIFY_LOADED
+            next_current_step = VERIFY_PLATE_READY
+    elif event == STEP_REAL_COMMAND_SENT:
         if from_state == RELEASING_PLATE and _matches_step(step, RELEASE_PLATE):
             to_state = VERIFY_RELEASED
             next_current_step = VERIFY_PLATE_RELEASED
