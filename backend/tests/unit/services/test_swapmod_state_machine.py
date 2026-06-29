@@ -35,6 +35,7 @@ from backend.app.services.swapmod_state_machine import (
     VERIFY_RELEASED,
     WAITING_FOR_PRINT_FINISH,
     apply_swapmod_event,
+    apply_swapmod_verification,
     create_swapmod_cycle,
     create_swapmod_operator_trigger,
     public_swapmod_cycle,
@@ -275,6 +276,61 @@ class SwapmodStateMachineServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.state, READY_TO_RELEASE)
         self.assertEqual(second.transition_count, 1)
         self.assertEqual(second.transition_log, first_log)
+
+    async def test_verification_adapter_passes_released_plate_to_ready_to_load(self) -> None:
+        cycle = await create_swapmod_cycle(self.session, cycle_key="swapmod-verification-pass", printer_id=101)
+        cycle = await apply_swapmod_event(self.session, cycle, PRINT_FINISHED, event_id="event-1")
+        cycle = await apply_swapmod_event(self.session, cycle, START_STEP, event_id="event-2", step=RELEASE_PLATE)
+        cycle = await apply_swapmod_event(self.session, cycle, STEP_MOCK_SUCCEEDED, event_id="event-3", step=RELEASE_PLATE)
+
+        cycle = await apply_swapmod_verification(
+            self.session,
+            cycle,
+            verification_key="verification-pass-001",
+            verification_source="manual",
+            verification_result="pass",
+        )
+
+        self.assertEqual(cycle.state, READY_TO_LOAD)
+        self.assertEqual(cycle.current_step, LOAD_NEXT_PLATE)
+        self.assertFalse(cycle.manual_review_required)
+        self.assertFalse(cycle.ready_for_next_print)
+        self.assertEqual(cycle.transition_log[-1]["event"], VERIFY_PASSED)
+        self.assertEqual(cycle.transition_log[-1]["verification_source"], "manual")
+
+    async def test_verification_adapter_failed_loaded_plate_requires_manual_review(self) -> None:
+        cycle = await create_swapmod_cycle(self.session, cycle_key="swapmod-verification-fail", printer_id=101)
+        for event, event_id, step, verification_source, verification_result in (
+            (PRINT_FINISHED, "event-1", None, None, None),
+            (START_STEP, "event-2", RELEASE_PLATE, None, None),
+            (STEP_MOCK_SUCCEEDED, "event-3", RELEASE_PLATE, None, None),
+            (VERIFY_PASSED, "event-4", VERIFY_PLATE_RELEASED, "manual", "pass"),
+            (START_STEP, "event-5", LOAD_NEXT_PLATE, None, None),
+            (STEP_MOCK_SUCCEEDED, "event-6", LOAD_NEXT_PLATE, None, None),
+        ):
+            cycle = await apply_swapmod_event(
+                self.session,
+                cycle,
+                event,
+                event_id=event_id,
+                step=step,
+                verification_source=verification_source,
+                verification_result=verification_result,
+            )
+
+        cycle = await apply_swapmod_verification(
+            self.session,
+            cycle,
+            verification_key="verification-fail-001",
+            verification_source="camera_mock",
+            verification_result="fail",
+        )
+
+        self.assertEqual(cycle.state, MANUAL_REVIEW_REQUIRED)
+        self.assertTrue(cycle.manual_review_required)
+        self.assertFalse(cycle.ready_for_next_print)
+        self.assertEqual(cycle.transition_log[-1]["event"], VERIFY_FAILED)
+        self.assertEqual(cycle.transition_log[-1]["verification_source"], "camera_mock")
 
 
 if __name__ == "__main__":

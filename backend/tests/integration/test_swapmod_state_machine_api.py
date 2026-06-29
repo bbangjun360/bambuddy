@@ -19,6 +19,7 @@ from backend.app.services.swapmod_state_machine import (
     PRINT_FINISHED,
     READY_FOR_NEXT_PRINT,
     READY_TO_RELEASE,
+    READY_TO_LOAD,
     RELEASE_PLATE,
     RETRY_REQUESTED,
     START_STEP,
@@ -297,6 +298,94 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raw_response.status_code, 422)
         self.assertEqual(unknown_intent_response.status_code, 422)
+
+    async def test_verification_endpoint_applies_manual_pass_result(self) -> None:
+        self.enable_state_machine()
+        cycle_key = "api-verification-pass-cycle"
+        create_response = await self.client.post(
+            "/api/v1/swapmod-state-machine/operator-triggers",
+            json={
+                "trigger_key": "api-verification-trigger",
+                "cycle_key": cycle_key,
+                "printer_id": 101,
+                "operator_intent": "START_SWAPMOD_PLATE_CHANGE",
+            },
+        )
+        self.assertEqual(create_response.status_code, 202, create_response.text)
+        await self.post_event(cycle_key, "event-start-release", START_STEP, step=RELEASE_PLATE)
+        await self.post_event(cycle_key, "event-release-success", STEP_MOCK_SUCCEEDED, step=RELEASE_PLATE)
+
+        response = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/verifications",
+            json={
+                "verification_key": "api-verification-pass",
+                "verification_source": "manual",
+                "verification_result": "pass",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["state"], READY_TO_LOAD)
+        self.assertEqual(body["current_step"], LOAD_NEXT_PLATE)
+        self.assertFalse(body["real_execution_supported"])
+        self.assertFalse(body["printer_command_sent"])
+        await self.assert_no_control_rows()
+
+    async def test_verification_endpoint_applies_camera_mock_fail_result(self) -> None:
+        self.enable_state_machine()
+        cycle_key = "api-verification-fail-cycle"
+        await self.client.post(
+            "/api/v1/swapmod-state-machine/cycles",
+            json={"cycle_key": cycle_key, "printer_id": 101},
+        )
+        await self.post_event(cycle_key, "event-1", PRINT_FINISHED)
+        await self.post_event(cycle_key, "event-2", START_STEP, step=RELEASE_PLATE)
+        await self.post_event(cycle_key, "event-3", STEP_MOCK_SUCCEEDED, step=RELEASE_PLATE)
+
+        response = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/verifications",
+            json={
+                "verification_key": "api-verification-fail",
+                "verification_source": "camera_mock",
+                "verification_result": "fail",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["manual_review_required"])
+        self.assertFalse(body["ready_for_next_print"])
+        self.assertEqual(body["transition_log"][-1]["event"], VERIFY_FAILED)
+
+    async def test_verification_endpoint_rejects_unknown_source_and_raw_command(self) -> None:
+        self.enable_state_machine()
+        cycle_key = "api-verification-schema-cycle"
+        await self.client.post(
+            "/api/v1/swapmod-state-machine/cycles",
+            json={"cycle_key": cycle_key, "printer_id": 101},
+        )
+
+        source_response = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/verifications",
+            json={
+                "verification_key": "bad-source",
+                "verification_source": "live_camera",
+                "verification_result": "pass",
+            },
+        )
+        raw_response = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/verifications",
+            json={
+                "verification_key": "raw-command",
+                "verification_source": "manual",
+                "verification_result": "pass",
+                "raw_command": "blocked",
+            },
+        )
+
+        self.assertEqual(source_response.status_code, 422)
+        self.assertEqual(raw_response.status_code, 422)
 
 
 if __name__ == "__main__":
