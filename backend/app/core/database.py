@@ -203,6 +203,7 @@ async def init_db():
         smart_plug,
         smart_plug_energy_snapshot,
         spool,
+        swapmod_state_machine,
         spool_assignment,
         spool_catalog,
         spool_k_profile,
