@@ -41,6 +41,28 @@ class SwapmodTransportStepRequest(BaseModel):
     note: str | None = Field(default=None, max_length=512)
 
 
+class SwapmodCanaryExecutionChecklist(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operator_present: bool = False
+    canary_device_named: bool = False
+    camera_ready: bool = False
+    build_plate_clear: bool = False
+    emergency_stop_reachable: bool = False
+    dry_run_transport_verified: bool = False
+
+
+class SwapmodCanaryExecutionGateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    gate_key: str = Field(min_length=1, max_length=128)
+    canary_printer_alias: str = Field(min_length=1, max_length=128)
+    requested_action: Literal["EVALUATE_ONLY", "ARM_DRY_RUN"] = "EVALUATE_ONLY"
+    operator_approved: bool = False
+    operator_approval_phrase: str | None = Field(default=None, max_length=256)
+    checklist: SwapmodCanaryExecutionChecklist
+
+
 class SwapmodStateMachineEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

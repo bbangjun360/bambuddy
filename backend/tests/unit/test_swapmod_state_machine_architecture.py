@@ -25,6 +25,9 @@ class SwapmodStateMachineArchitectureTest(unittest.TestCase):
         self.assertIn("farm_swapmod_transport_enabled: bool = False", text)
         self.assertIn("farm_swapmod_transport_dry_run: bool = True", text)
         self.assertIn("farm_swapmod_allow_real_transport: bool = False", text)
+        self.assertIn("farm_swapmod_canary_execution_gate_enabled: bool = False", text)
+        self.assertIn("farm_swapmod_canary_execution_dry_run: bool = True", text)
+        self.assertIn("farm_swapmod_canary_allow_real_execution: bool = False", text)
 
     def test_implementation_files_exist_for_model_service_schema_and_route(self) -> None:
         for path in IMPLEMENTATION_FILES:
@@ -78,6 +81,7 @@ class SwapmodStateMachineArchitectureTest(unittest.TestCase):
         self.assertIn('@router.post("/operator-triggers"', route_text)
         self.assertIn('@router.post("/cycles/{cycle_key}/verifications"', route_text)
         self.assertIn('@router.post("/cycles/{cycle_key}/transport-steps"', route_text)
+        self.assertIn('@router.post("/cycles/{cycle_key}/canary-execution-gates"', route_text)
         self.assertIn('@router.post("/cycles/{cycle_key}/events"', route_text)
         self.assertIn("swapmod_state_machine", main_text)
         self.assertIn("app.include_router(swapmod_state_machine.router", main_text)
@@ -104,6 +108,8 @@ class SwapmodStateMachineArchitectureTest(unittest.TestCase):
         self.assertIn('Literal["pass", "fail"]', schema_text)
         self.assertIn('Literal["RELEASE_PLATE", "LOAD_NEXT_PLATE"]', schema_text)
         self.assertIn('Literal["success", "failure", "timeout"]', schema_text)
+        self.assertIn('Literal["EVALUATE_ONLY", "ARM_DRY_RUN"]', schema_text)
+        self.assertIn("SwapmodCanaryExecutionChecklist", schema_text)
         for forbidden in ("command_text", "raw_command", "raw_gcode", "gcode_line"):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, schema_text)

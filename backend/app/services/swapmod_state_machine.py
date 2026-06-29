@@ -44,6 +44,19 @@ DRY_RUN_STEP_FAILED = "DRY_RUN_STEP_FAILED"
 DRY_RUN_STEP_TIMEOUT = "DRY_RUN_STEP_TIMEOUT"
 TRANSPORT_BLOCKED = "TRANSPORT_BLOCKED"
 
+CANARY_GATE_READY = "ready"
+CANARY_GATE_BLOCKED = "blocked"
+SWAPMOD_CANARY_GATE_MODE = "DRY_RUN_CANARY_GATE_ONLY"
+SUPPORTED_CANARY_GATE_ACTIONS = ("EVALUATE_ONLY", "ARM_DRY_RUN")
+CANARY_GATE_CHECKLIST_FIELDS = (
+    "operator_present",
+    "canary_device_named",
+    "camera_ready",
+    "build_plate_clear",
+    "emergency_stop_reachable",
+    "dry_run_transport_verified",
+)
+
 SUPPORTED_STATES = (
     IDLE,
     WAITING_FOR_PRINT_FINISH,
@@ -400,6 +413,82 @@ async def recover_swapmod_cycle_after_restart(
     event_id: str,
 ) -> SwapmodStateMachineCycle:
     return await apply_swapmod_event(db, cycle, PROCESS_RESTARTED, event_id=event_id)
+
+def required_swapmod_canary_approval_phrase(*, cycle_key: str, canary_printer_alias: str) -> str:
+    return f"CONFIRM SWAPMOD CANARY {canary_printer_alias} CYCLE {cycle_key}"
+
+
+def evaluate_swapmod_canary_execution_gate(
+    cycle: SwapmodStateMachineCycle,
+    *,
+    gate_key: str,
+    canary_printer_alias: str,
+    requested_action: str,
+    operator_approved: bool,
+    operator_approval_phrase: str | None,
+    checklist: dict[str, bool],
+    gate_enabled: bool,
+    gate_dry_run: bool,
+    transport_enabled: bool,
+    transport_dry_run: bool,
+    allow_real_transport: bool,
+    allow_real_execution: bool,
+) -> dict[str, object]:
+    if requested_action not in SUPPORTED_CANARY_GATE_ACTIONS:
+        raise ValueError("unsupported SwapMod canary gate action")
+
+    alias = canary_printer_alias.strip()
+    required_phrase = required_swapmod_canary_approval_phrase(
+        cycle_key=cycle.cycle_key,
+        canary_printer_alias=alias,
+    )
+    blocked_reasons: list[str] = []
+
+    if not gate_enabled:
+        blocked_reasons.append("canary_gate_disabled")
+    if not gate_dry_run:
+        blocked_reasons.append("canary_gate_dry_run_required")
+    if not transport_enabled:
+        blocked_reasons.append("transport_boundary_disabled")
+    if not transport_dry_run:
+        blocked_reasons.append("transport_dry_run_required")
+    if allow_real_transport:
+        blocked_reasons.append("real_transport_not_supported")
+    if allow_real_execution:
+        blocked_reasons.append("real_execution_not_supported")
+    if cycle.state != READY_FOR_NEXT_PRINT or not cycle.ready_for_next_print:
+        blocked_reasons.append("cycle_not_ready_for_next_print")
+    if not alias:
+        blocked_reasons.append("canary_printer_alias_required")
+    if not operator_approved:
+        blocked_reasons.append("operator_approval_missing")
+    if operator_approval_phrase != required_phrase:
+        blocked_reasons.append("operator_phrase_mismatch")
+
+    checklist_complete = all(bool(checklist.get(field)) for field in CANARY_GATE_CHECKLIST_FIELDS)
+    if not checklist_complete:
+        blocked_reasons.append("checklist_incomplete")
+
+    gate_status = CANARY_GATE_READY if not blocked_reasons else CANARY_GATE_BLOCKED
+    payload = public_swapmod_cycle(cycle)
+    payload.update(
+        {
+            "gate_key": gate_key,
+            "gate_status": gate_status,
+            "ready_for_canary": gate_status == CANARY_GATE_READY,
+            "blocked_reasons": blocked_reasons,
+            "execution_mode": SWAPMOD_CANARY_GATE_MODE,
+            "requested_action": requested_action,
+            "canary_printer_alias": alias,
+            "required_operator_approval_phrase": required_phrase,
+            "operator_approved": operator_approved,
+            "checklist_complete": checklist_complete,
+            "real_execution_supported": False,
+            "real_command_sent": False,
+            "printer_command_sent": False,
+        }
+    )
+    return payload
 
 
 def public_swapmod_cycle(cycle: SwapmodStateMachineCycle) -> dict[str, object]:

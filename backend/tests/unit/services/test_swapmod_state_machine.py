@@ -11,6 +11,8 @@ from backend.app.models.print_queue import PrintQueueItem
 from backend.app.services.swapmod_state_machine import (
     BLOCKED_TIMEOUT,
     BLOCKED_UNKNOWN_STATE,
+    CANARY_GATE_BLOCKED,
+    CANARY_GATE_READY,
     LOAD_NEXT_PLATE,
     LOADING_PLATE,
     MANUAL_REVIEW_REQUIRED,
@@ -37,11 +39,20 @@ from backend.app.services.swapmod_state_machine import (
     apply_swapmod_event,
     apply_swapmod_transport_step,
     apply_swapmod_verification,
+    evaluate_swapmod_canary_execution_gate,
     create_swapmod_cycle,
     create_swapmod_operator_trigger,
+    get_swapmod_cycle,
     public_swapmod_cycle,
+    required_swapmod_canary_approval_phrase,
     recover_swapmod_cycle_after_restart,
 )
+
+
+async def get_cycle(session: AsyncSession, cycle_key: str):
+    cycle = await get_swapmod_cycle(session, cycle_key=cycle_key)
+    assert cycle is not None
+    return cycle
 
 
 class SwapmodStateMachineServiceTest(unittest.IsolatedAsyncioTestCase):
@@ -400,6 +411,171 @@ class SwapmodStateMachineServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["real_command_sent"])
         self.assertEqual(result["state"], BLOCKED_TIMEOUT)
         self.assertTrue(result["manual_review_required"])
+
+    async def test_canary_execution_gate_blocks_without_ready_cycle_or_operator_confirmation(self) -> None:
+        cycle = await create_swapmod_operator_trigger(
+            self.session,
+            trigger_key="canary-gate-not-ready-trigger",
+            cycle_key="swapmod-canary-gate-not-ready",
+            printer_id=101,
+            operator_intent="START_SWAPMOD_PLATE_CHANGE",
+        )
+
+        result = evaluate_swapmod_canary_execution_gate(
+            cycle,
+            gate_key="canary-gate-not-ready",
+            canary_printer_alias="canary-alpha",
+            requested_action="ARM_DRY_RUN",
+            operator_approved=False,
+            operator_approval_phrase=None,
+            checklist={
+                "operator_present": False,
+                "canary_device_named": True,
+                "camera_ready": True,
+                "build_plate_clear": True,
+                "emergency_stop_reachable": True,
+                "dry_run_transport_verified": True,
+            },
+            gate_enabled=True,
+            gate_dry_run=True,
+            transport_enabled=True,
+            transport_dry_run=True,
+            allow_real_transport=False,
+            allow_real_execution=False,
+        )
+
+        self.assertEqual(result["gate_status"], CANARY_GATE_BLOCKED)
+        self.assertFalse(result["ready_for_canary"])
+        self.assertIn("cycle_not_ready_for_next_print", result["blocked_reasons"])
+        self.assertIn("operator_approval_missing", result["blocked_reasons"])
+        self.assertIn("operator_phrase_mismatch", result["blocked_reasons"])
+        self.assertIn("checklist_incomplete", result["blocked_reasons"])
+        self.assertFalse(result["real_execution_supported"])
+        self.assertFalse(result["real_command_sent"])
+        self.assertFalse(result["printer_command_sent"])
+        self.assertEqual(await self.count_rows(PrintQueueItem), 0)
+        self.assertEqual(await self.count_rows(PrintLogEntry), 0)
+
+    async def test_canary_execution_gate_ready_only_after_verified_ready_cycle(self) -> None:
+        cycle = await create_swapmod_operator_trigger(
+            self.session,
+            trigger_key="canary-gate-ready-trigger",
+            cycle_key="swapmod-canary-gate-ready",
+            printer_id=101,
+            operator_intent="START_SWAPMOD_PLATE_CHANGE",
+        )
+        release = await apply_swapmod_transport_step(
+            self.session,
+            cycle,
+            transport_key="canary-gate-release",
+            step=RELEASE_PLATE,
+            mock_result="success",
+            dry_run=True,
+            transport_enabled=True,
+            allow_real_transport=False,
+        )
+        cycle = await get_cycle(self.session, release["cycle_key"])
+        cycle = await apply_swapmod_verification(
+            self.session,
+            cycle,
+            verification_key="canary-gate-release-verification",
+            verification_source="manual",
+            verification_result="pass",
+        )
+        load = await apply_swapmod_transport_step(
+            self.session,
+            cycle,
+            transport_key="canary-gate-load",
+            step=LOAD_NEXT_PLATE,
+            mock_result="success",
+            dry_run=True,
+            transport_enabled=True,
+            allow_real_transport=False,
+        )
+        cycle = await get_cycle(self.session, load["cycle_key"])
+        cycle = await apply_swapmod_verification(
+            self.session,
+            cycle,
+            verification_key="canary-gate-load-verification",
+            verification_source="camera_mock",
+            verification_result="pass",
+        )
+        phrase = required_swapmod_canary_approval_phrase(
+            cycle_key="swapmod-canary-gate-ready",
+            canary_printer_alias="canary-alpha",
+        )
+
+        result = evaluate_swapmod_canary_execution_gate(
+            cycle,
+            gate_key="canary-gate-ready",
+            canary_printer_alias="canary-alpha",
+            requested_action="ARM_DRY_RUN",
+            operator_approved=True,
+            operator_approval_phrase=phrase,
+            checklist={
+                "operator_present": True,
+                "canary_device_named": True,
+                "camera_ready": True,
+                "build_plate_clear": True,
+                "emergency_stop_reachable": True,
+                "dry_run_transport_verified": True,
+            },
+            gate_enabled=True,
+            gate_dry_run=True,
+            transport_enabled=True,
+            transport_dry_run=True,
+            allow_real_transport=False,
+            allow_real_execution=False,
+        )
+
+        self.assertEqual(result["gate_status"], CANARY_GATE_READY)
+        self.assertTrue(result["ready_for_canary"])
+        self.assertEqual(result["execution_mode"], "DRY_RUN_CANARY_GATE_ONLY")
+        self.assertEqual(result["canary_printer_alias"], "canary-alpha")
+        self.assertEqual(result["required_operator_approval_phrase"], phrase)
+        self.assertEqual(result["blocked_reasons"], [])
+        self.assertFalse(result["real_execution_supported"])
+        self.assertFalse(result["real_command_sent"])
+        self.assertFalse(result["printer_command_sent"])
+        self.assertEqual(await self.count_rows(PrintQueueItem), 0)
+        self.assertEqual(await self.count_rows(PrintLogEntry), 0)
+
+    async def test_canary_execution_gate_blocks_real_execution_and_real_transport_flags(self) -> None:
+        cycle = await create_swapmod_cycle(self.session, cycle_key="swapmod-canary-gate-flags", printer_id=101)
+        phrase = required_swapmod_canary_approval_phrase(
+            cycle_key="swapmod-canary-gate-flags",
+            canary_printer_alias="canary-alpha",
+        )
+
+        result = evaluate_swapmod_canary_execution_gate(
+            cycle,
+            gate_key="canary-gate-flags",
+            canary_printer_alias="canary-alpha",
+            requested_action="ARM_DRY_RUN",
+            operator_approved=True,
+            operator_approval_phrase=phrase,
+            checklist={
+                "operator_present": True,
+                "canary_device_named": True,
+                "camera_ready": True,
+                "build_plate_clear": True,
+                "emergency_stop_reachable": True,
+                "dry_run_transport_verified": True,
+            },
+            gate_enabled=True,
+            gate_dry_run=False,
+            transport_enabled=True,
+            transport_dry_run=False,
+            allow_real_transport=True,
+            allow_real_execution=True,
+        )
+
+        self.assertEqual(result["gate_status"], CANARY_GATE_BLOCKED)
+        self.assertIn("canary_gate_dry_run_required", result["blocked_reasons"])
+        self.assertIn("transport_dry_run_required", result["blocked_reasons"])
+        self.assertIn("real_transport_not_supported", result["blocked_reasons"])
+        self.assertIn("real_execution_not_supported", result["blocked_reasons"])
+        self.assertFalse(result["real_command_sent"])
 
 
 if __name__ == "__main__":
