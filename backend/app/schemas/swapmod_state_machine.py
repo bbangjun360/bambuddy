@@ -32,6 +32,15 @@ class SwapmodVerificationRequest(BaseModel):
     note: str | None = Field(default=None, max_length=512)
 
 
+class SwapmodTransportStepRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transport_key: str = Field(min_length=1, max_length=128)
+    step: Literal["RELEASE_PLATE", "LOAD_NEXT_PLATE"]
+    mock_result: Literal["success", "failure", "timeout"] = "success"
+    note: str | None = Field(default=None, max_length=512)
+
+
 class SwapmodStateMachineEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -15,18 +15,21 @@ from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.swapmod_state_machine import SwapmodStateMachineCycle
 from backend.app.services.swapmod_state_machine import (
+    BLOCKED_TIMEOUT,
     LOAD_NEXT_PLATE,
     PRINT_FINISHED,
     READY_FOR_NEXT_PRINT,
     READY_TO_RELEASE,
     READY_TO_LOAD,
     RELEASE_PLATE,
+    RETRY_AVAILABLE,
     RETRY_REQUESTED,
     START_STEP,
     STEP_MOCK_FAILED,
     STEP_MOCK_SUCCEEDED,
     VERIFY_FAILED,
     VERIFY_PASSED,
+    VERIFY_RELEASED,
     VERIFY_PLATE_READY,
     VERIFY_PLATE_RELEASED,
 )
@@ -73,6 +76,9 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
 
         self.previous_enabled = swapmod_route.settings.farm_swapmod_state_machine_enabled
         self.previous_dry_run = swapmod_route.settings.farm_swapmod_state_machine_dry_run
+        self.previous_transport_enabled = swapmod_route.settings.farm_swapmod_transport_enabled
+        self.previous_transport_dry_run = swapmod_route.settings.farm_swapmod_transport_dry_run
+        self.previous_allow_real_transport = swapmod_route.settings.farm_swapmod_allow_real_transport
         swapmod_route.settings.farm_swapmod_state_machine_enabled = False
         swapmod_route.settings.farm_swapmod_state_machine_dry_run = True
         self.client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
@@ -82,6 +88,9 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
         app.dependency_overrides.clear()
         swapmod_route.settings.farm_swapmod_state_machine_enabled = self.previous_enabled
         swapmod_route.settings.farm_swapmod_state_machine_dry_run = self.previous_dry_run
+        swapmod_route.settings.farm_swapmod_transport_enabled = self.previous_transport_enabled
+        swapmod_route.settings.farm_swapmod_transport_dry_run = self.previous_transport_dry_run
+        swapmod_route.settings.farm_swapmod_allow_real_transport = self.previous_allow_real_transport
         for patcher in reversed(self.patches):
             patcher.stop()
         async with self.engine.begin() as conn:
@@ -100,6 +109,12 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
 
     def enable_state_machine(self) -> None:
         swapmod_route.settings.farm_swapmod_state_machine_enabled = True
+
+
+    def enable_transport_boundary(self) -> None:
+        swapmod_route.settings.farm_swapmod_transport_enabled = True
+        swapmod_route.settings.farm_swapmod_transport_dry_run = True
+        swapmod_route.settings.farm_swapmod_allow_real_transport = False
 
     async def post_event(self, cycle_key: str, event_id: str, event: str, **overrides: object):
         payload: dict[str, object] = {"event_id": event_id, "event": event}
@@ -386,6 +401,105 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(source_response.status_code, 422)
         self.assertEqual(raw_response.status_code, 422)
+
+    async def test_transport_boundary_is_disabled_by_default(self) -> None:
+        self.enable_state_machine()
+        cycle_key = "api-transport-disabled-cycle"
+        await self.client.post(
+            "/api/v1/swapmod-state-machine/cycles",
+            json={"cycle_key": cycle_key, "printer_id": 101},
+        )
+
+        response = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/transport-steps",
+            json={"transport_key": "api-transport-disabled", "step": RELEASE_PLATE, "mock_result": "success"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("disabled", response.json()["detail"].lower())
+
+    async def test_transport_boundary_dry_run_success_returns_audit_and_verification_state(self) -> None:
+        self.enable_state_machine()
+        self.enable_transport_boundary()
+        cycle_key = "api-transport-success-cycle"
+        await self.client.post(
+            "/api/v1/swapmod-state-machine/operator-triggers",
+            json={
+                "trigger_key": "api-transport-trigger",
+                "cycle_key": cycle_key,
+                "printer_id": 101,
+                "operator_intent": "START_SWAPMOD_PLATE_CHANGE",
+            },
+        )
+
+        response = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/transport-steps",
+            json={"transport_key": "api-transport-success", "step": RELEASE_PLATE, "mock_result": "success"},
+        )
+
+        self.assertEqual(response.status_code, 202, response.text)
+        body = response.json()
+        self.assertEqual(body["transport_status"], "DRY_RUN_STEP_COMPLETED")
+        self.assertEqual(body["transport_mode"], "DRY_RUN")
+        self.assertFalse(body["real_transport_supported"])
+        self.assertFalse(body["real_command_sent"])
+        self.assertFalse(body["printer_command_sent"])
+        self.assertEqual(body["state"], VERIFY_RELEASED)
+        self.assertEqual(body["current_step"], VERIFY_PLATE_RELEASED)
+        await self.assert_no_control_rows()
+
+    async def test_transport_boundary_dry_run_failure_and_timeout_paths_are_safe(self) -> None:
+        self.enable_state_machine()
+        self.enable_transport_boundary()
+        failure_cycle = "api-transport-failure-cycle"
+        timeout_cycle = "api-transport-timeout-cycle"
+        for cycle_key in (failure_cycle, timeout_cycle):
+            await self.client.post(
+                "/api/v1/swapmod-state-machine/operator-triggers",
+                json={
+                    "trigger_key": f"{cycle_key}-trigger",
+                    "cycle_key": cycle_key,
+                    "printer_id": 101,
+                    "operator_intent": "START_SWAPMOD_PLATE_CHANGE",
+                },
+            )
+
+        failure = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{failure_cycle}/transport-steps",
+            json={"transport_key": "api-transport-failure", "step": RELEASE_PLATE, "mock_result": "failure"},
+        )
+        timeout = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{timeout_cycle}/transport-steps",
+            json={"transport_key": "api-transport-timeout", "step": RELEASE_PLATE, "mock_result": "timeout"},
+        )
+
+        self.assertEqual(failure.status_code, 202, failure.text)
+        self.assertEqual(timeout.status_code, 202, timeout.text)
+        self.assertEqual(failure.json()["state"], RETRY_AVAILABLE)
+        self.assertTrue(failure.json()["retry_available"])
+        self.assertEqual(timeout.json()["state"], BLOCKED_TIMEOUT)
+        self.assertTrue(timeout.json()["manual_review_required"])
+
+    async def test_transport_boundary_schema_rejects_unknown_step_and_result(self) -> None:
+        self.enable_state_machine()
+        self.enable_transport_boundary()
+        cycle_key = "api-transport-schema-cycle"
+        await self.client.post(
+            "/api/v1/swapmod-state-machine/cycles",
+            json={"cycle_key": cycle_key, "printer_id": 101},
+        )
+
+        step_response = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/transport-steps",
+            json={"transport_key": "bad-step", "step": "SEND_RAW", "mock_result": "success"},
+        )
+        result_response = await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/transport-steps",
+            json={"transport_key": "bad-result", "step": RELEASE_PLATE, "mock_result": "real"},
+        )
+
+        self.assertEqual(step_response.status_code, 422)
+        self.assertEqual(result_response.status_code, 422)
 
 
 if __name__ == "__main__":

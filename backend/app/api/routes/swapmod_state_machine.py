@@ -11,11 +11,13 @@ from backend.app.models.user import User
 from backend.app.schemas.swapmod_state_machine import (
     SwapmodOperatorTriggerRequest,
     SwapmodStateMachineCycleCreate,
+    SwapmodTransportStepRequest,
     SwapmodVerificationRequest,
     SwapmodStateMachineEventRequest,
 )
 from backend.app.services.swapmod_state_machine import (
     apply_swapmod_event,
+    apply_swapmod_transport_step,
     apply_swapmod_verification,
     create_swapmod_cycle,
     create_swapmod_operator_trigger,
@@ -30,6 +32,16 @@ router = APIRouter(prefix="/swapmod-state-machine", tags=["swapmod-state-machine
 def _require_enabled() -> None:
     if not settings.farm_swapmod_state_machine_enabled:
         raise HTTPException(status_code=404, detail="SwapMod state machine is disabled")
+
+
+def _require_transport_enabled() -> None:
+    if not settings.farm_swapmod_transport_enabled:
+        raise HTTPException(status_code=404, detail="SwapMod transport boundary is disabled")
+    if not settings.farm_swapmod_transport_dry_run or settings.farm_swapmod_allow_real_transport:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "dry_run_required", "message": "SwapMod transport boundary is dry-run only"},
+        )
 
 
 @router.get("/status")
@@ -102,6 +114,34 @@ async def apply_swapmod_state_machine_verification(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"code": "unsupported_verification", "message": str(exc)}) from exc
     return public_swapmod_cycle(cycle)
+
+
+@router.post("/cycles/{cycle_key}/transport-steps", status_code=202)
+async def apply_swapmod_transport_step_request(
+    cycle_key: str,
+    body: SwapmodTransportStepRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
+):
+    _require_enabled()
+    _require_transport_enabled()
+    cycle = await get_swapmod_cycle(db, cycle_key=cycle_key)
+    if cycle is None:
+        raise HTTPException(status_code=404, detail="SwapMod state machine cycle not found")
+    try:
+        return await apply_swapmod_transport_step(
+            db,
+            cycle,
+            transport_key=body.transport_key,
+            step=body.step,
+            mock_result=body.mock_result,
+            dry_run=settings.farm_swapmod_transport_dry_run,
+            transport_enabled=settings.farm_swapmod_transport_enabled,
+            allow_real_transport=settings.farm_swapmod_allow_real_transport,
+            note=body.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "unsupported_transport_step", "message": str(exc)}) from exc
 
 
 @router.post("/cycles/{cycle_key}/events")

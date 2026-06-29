@@ -16,6 +16,8 @@ class SwapmodStateMachineHarnessContractTest(unittest.TestCase):
         self.assertIn("test-swapmod-operator-trigger: harness-swapmod-operator-trigger", makefile)
         self.assertIn("harness-swapmod-verification-adapter:", makefile)
         self.assertIn("test-swapmod-verification-adapter: harness-swapmod-verification-adapter", makefile)
+        self.assertIn("harness-swapmod-transport-boundary:", makefile)
+        self.assertIn("test-swapmod-transport-boundary: harness-swapmod-transport-boundary", makefile)
 
     def test_mock_services_do_not_expose_swapmod_hardware_routes(self) -> None:
         text = (ROOT / "harness/mock_services.py").read_text(encoding="utf-8")
@@ -27,6 +29,7 @@ class SwapmodStateMachineHarnessContractTest(unittest.TestCase):
             "swapmod_printer_commands",
             "swapmod_queue_dispatches",
             "swapmod_bed_mutations",
+            "/swapmod/v1/real-transport",
         ]
         for needle in forbidden:
             with self.subTest(needle=needle):
