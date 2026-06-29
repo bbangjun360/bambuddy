@@ -35,6 +35,7 @@ from backend.app.services.swapmod_state_machine import (
     VERIFY_RELEASED,
     WAITING_FOR_PRINT_FINISH,
     apply_swapmod_event,
+    apply_swapmod_transport_step,
     apply_swapmod_verification,
     create_swapmod_cycle,
     create_swapmod_operator_trigger,
@@ -331,6 +332,74 @@ class SwapmodStateMachineServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(cycle.ready_for_next_print)
         self.assertEqual(cycle.transition_log[-1]["event"], VERIFY_FAILED)
         self.assertEqual(cycle.transition_log[-1]["verification_source"], "camera_mock")
+
+    async def test_transport_boundary_dry_run_success_advances_to_verification_without_real_send(self) -> None:
+        cycle = await create_swapmod_cycle(self.session, cycle_key="swapmod-transport-success", printer_id=101)
+        cycle = await apply_swapmod_event(self.session, cycle, PRINT_FINISHED, event_id="event-1")
+
+        result = await apply_swapmod_transport_step(
+            self.session,
+            cycle,
+            transport_key="transport-success-001",
+            step=RELEASE_PLATE,
+            mock_result="success",
+            dry_run=True,
+            transport_enabled=True,
+            allow_real_transport=False,
+        )
+
+        self.assertEqual(result["transport_status"], "DRY_RUN_STEP_COMPLETED")
+        self.assertFalse(result["real_transport_supported"])
+        self.assertFalse(result["real_command_sent"])
+        self.assertEqual(result["state"], VERIFY_RELEASED)
+        self.assertEqual(result["current_step"], VERIFY_PLATE_RELEASED)
+        self.assertEqual(result["transition_log"][-2]["event"], START_STEP)
+        self.assertEqual(result["transition_log"][-1]["event"], STEP_MOCK_SUCCEEDED)
+        self.assertEqual(await self.count_rows(PrintQueueItem), 0)
+        self.assertEqual(await self.count_rows(PrintLogEntry), 0)
+
+    async def test_transport_boundary_dry_run_failure_exposes_retry_without_real_send(self) -> None:
+        cycle = await create_swapmod_cycle(self.session, cycle_key="swapmod-transport-failure", printer_id=101)
+        cycle = await apply_swapmod_event(self.session, cycle, PRINT_FINISHED, event_id="event-1")
+
+        result = await apply_swapmod_transport_step(
+            self.session,
+            cycle,
+            transport_key="transport-failure-001",
+            step=RELEASE_PLATE,
+            mock_result="failure",
+            dry_run=True,
+            transport_enabled=True,
+            allow_real_transport=False,
+        )
+
+        self.assertEqual(result["transport_status"], "DRY_RUN_STEP_FAILED")
+        self.assertFalse(result["real_transport_supported"])
+        self.assertFalse(result["real_command_sent"])
+        self.assertEqual(result["state"], RETRY_AVAILABLE)
+        self.assertTrue(result["retry_available"])
+        self.assertEqual(result["retry_step"], RELEASE_PLATE)
+
+    async def test_transport_boundary_timeout_blocks_without_real_send(self) -> None:
+        cycle = await create_swapmod_cycle(self.session, cycle_key="swapmod-transport-timeout", printer_id=101)
+        cycle = await apply_swapmod_event(self.session, cycle, PRINT_FINISHED, event_id="event-1")
+
+        result = await apply_swapmod_transport_step(
+            self.session,
+            cycle,
+            transport_key="transport-timeout-001",
+            step=RELEASE_PLATE,
+            mock_result="timeout",
+            dry_run=True,
+            transport_enabled=True,
+            allow_real_transport=False,
+        )
+
+        self.assertEqual(result["transport_status"], "DRY_RUN_STEP_TIMEOUT")
+        self.assertFalse(result["real_transport_supported"])
+        self.assertFalse(result["real_command_sent"])
+        self.assertEqual(result["state"], BLOCKED_TIMEOUT)
+        self.assertTrue(result["manual_review_required"])
 
 
 if __name__ == "__main__":

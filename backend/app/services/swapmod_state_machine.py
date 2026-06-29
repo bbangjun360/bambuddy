@@ -38,6 +38,12 @@ VERIFY_PLATE_READY = "VERIFY_PLATE_READY"
 
 START_SWAPMOD_PLATE_CHANGE = "START_SWAPMOD_PLATE_CHANGE"
 
+TRANSPORT_MODE_DRY_RUN = "DRY_RUN"
+DRY_RUN_STEP_COMPLETED = "DRY_RUN_STEP_COMPLETED"
+DRY_RUN_STEP_FAILED = "DRY_RUN_STEP_FAILED"
+DRY_RUN_STEP_TIMEOUT = "DRY_RUN_STEP_TIMEOUT"
+TRANSPORT_BLOCKED = "TRANSPORT_BLOCKED"
+
 SUPPORTED_STATES = (
     IDLE,
     WAITING_FOR_PRINT_FINISH,
@@ -280,6 +286,70 @@ async def apply_swapmod_event(
     return cycle
 
 
+async def apply_swapmod_transport_step(
+    db: AsyncSession,
+    cycle: SwapmodStateMachineCycle,
+    *,
+    transport_key: str,
+    step: str,
+    mock_result: str,
+    dry_run: bool,
+    transport_enabled: bool,
+    allow_real_transport: bool,
+    note: str | None = None,
+) -> dict[str, object]:
+    if step not in {RELEASE_PLATE, LOAD_NEXT_PLATE}:
+        raise ValueError("unsupported SwapMod transport step")
+    if mock_result not in {"success", "failure", "timeout"}:
+        raise ValueError("unsupported SwapMod mock result")
+    if not transport_enabled:
+        raise ValueError("SwapMod transport boundary is disabled")
+    if not dry_run or allow_real_transport:
+        raise ValueError("SwapMod transport boundary is dry-run only")
+
+    cycle = await apply_swapmod_event(
+        db,
+        cycle,
+        START_STEP,
+        event_id=f"transport:{transport_key}:start",
+        step=step,
+        note=note,
+    )
+
+    if mock_result == "success":
+        cycle = await apply_swapmod_event(
+            db,
+            cycle,
+            STEP_MOCK_SUCCEEDED,
+            event_id=f"transport:{transport_key}:success",
+            step=step,
+            note=note,
+        )
+        transport_status = DRY_RUN_STEP_COMPLETED
+    elif mock_result == "failure":
+        cycle = await apply_swapmod_event(
+            db,
+            cycle,
+            STEP_MOCK_FAILED,
+            event_id=f"transport:{transport_key}:failure",
+            step=step,
+            note=note,
+        )
+        transport_status = DRY_RUN_STEP_FAILED
+    else:
+        cycle = await apply_swapmod_event(
+            db,
+            cycle,
+            TIMEOUT,
+            event_id=f"transport:{transport_key}:timeout",
+            step=step,
+            note=note,
+        )
+        transport_status = DRY_RUN_STEP_TIMEOUT
+
+    return _transport_public(cycle, transport_status=transport_status)
+
+
 async def apply_swapmod_verification(
     db: AsyncSession,
     cycle: SwapmodStateMachineCycle,
@@ -357,6 +427,19 @@ def public_swapmod_cycle(cycle: SwapmodStateMachineCycle) -> dict[str, object]:
         "created_at": _iso(cycle.created_at),
         "updated_at": _iso(cycle.updated_at),
     }
+
+
+def _transport_public(cycle: SwapmodStateMachineCycle, *, transport_status: str) -> dict[str, object]:
+    payload = public_swapmod_cycle(cycle)
+    payload.update(
+        {
+            "transport_mode": TRANSPORT_MODE_DRY_RUN,
+            "transport_status": transport_status,
+            "real_transport_supported": False,
+            "real_command_sent": False,
+        }
+    )
+    return payload
 
 
 def swapmod_state_machine_status(*, enabled: bool, dry_run: bool) -> dict[str, object]:

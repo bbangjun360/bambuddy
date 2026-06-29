@@ -164,6 +164,12 @@ class Settings(BaseSettings):
     farm_swapmod_state_machine_enabled: bool = False
     farm_swapmod_state_machine_dry_run: bool = True
 
+    # WP-074 SwapMod transport boundary. Disabled by default and dry-run only;
+    # real transport is intentionally not supported by this Work Package.
+    farm_swapmod_transport_enabled: bool = False
+    farm_swapmod_transport_dry_run: bool = True
+    farm_swapmod_allow_real_transport: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
