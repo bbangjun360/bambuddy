@@ -147,6 +147,12 @@ class Settings(BaseSettings):
     farm_plate_change_3mf_canary_disable_auto_retry: bool = True
     farm_plate_change_3mf_canary_max_starts: int = 1
 
+    # WP-065 SwapMod 3MF dry-run workflow. Disabled by default and never sends
+    # printer, queue, scheduler, MQTT, FTPS, ERP, Obico, or bed automation commands.
+    farm_swapmod_3mf_dry_run_enabled: bool = False
+    farm_swapmod_3mf_dry_run_required: bool = True
+    farm_swapmod_3mf_sample_root: str | None = None
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
