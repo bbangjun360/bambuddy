@@ -11,10 +11,12 @@ from backend.app.models.user import User
 from backend.app.schemas.swapmod_state_machine import (
     SwapmodOperatorTriggerRequest,
     SwapmodStateMachineCycleCreate,
+    SwapmodVerificationRequest,
     SwapmodStateMachineEventRequest,
 )
 from backend.app.services.swapmod_state_machine import (
     apply_swapmod_event,
+    apply_swapmod_verification,
     create_swapmod_cycle,
     create_swapmod_operator_trigger,
     get_swapmod_cycle,
@@ -74,6 +76,31 @@ async def create_swapmod_operator_trigger_request(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"code": "unsupported_operator_intent", "message": str(exc)}) from exc
+    return public_swapmod_cycle(cycle)
+
+
+@router.post("/cycles/{cycle_key}/verifications")
+async def apply_swapmod_state_machine_verification(
+    cycle_key: str,
+    body: SwapmodVerificationRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
+):
+    _require_enabled()
+    cycle = await get_swapmod_cycle(db, cycle_key=cycle_key)
+    if cycle is None:
+        raise HTTPException(status_code=404, detail="SwapMod state machine cycle not found")
+    try:
+        cycle = await apply_swapmod_verification(
+            db,
+            cycle,
+            verification_key=body.verification_key,
+            verification_source=body.verification_source,
+            verification_result=body.verification_result,
+            note=body.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "unsupported_verification", "message": str(exc)}) from exc
     return public_swapmod_cycle(cycle)
 
 

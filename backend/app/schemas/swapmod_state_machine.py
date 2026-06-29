@@ -23,6 +23,15 @@ class SwapmodOperatorTriggerRequest(BaseModel):
     operator_intent: Literal["START_SWAPMOD_PLATE_CHANGE"]
 
 
+class SwapmodVerificationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verification_key: str = Field(min_length=1, max_length=128)
+    verification_source: Literal["manual", "camera_mock"]
+    verification_result: Literal["pass", "fail"]
+    note: str | None = Field(default=None, max_length=512)
+
+
 class SwapmodStateMachineEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -280,6 +280,49 @@ async def apply_swapmod_event(
     return cycle
 
 
+async def apply_swapmod_verification(
+    db: AsyncSession,
+    cycle: SwapmodStateMachineCycle,
+    *,
+    verification_key: str,
+    verification_source: str,
+    verification_result: str,
+    note: str | None = None,
+) -> SwapmodStateMachineCycle:
+    if verification_source not in {"manual", "camera_mock"}:
+        raise ValueError("unsupported SwapMod verification source")
+    if verification_result not in {"pass", "fail"}:
+        raise ValueError("unsupported SwapMod verification result")
+
+    if cycle.state == VERIFY_RELEASED:
+        step = VERIFY_PLATE_RELEASED
+    elif cycle.state == VERIFY_LOADED:
+        step = VERIFY_PLATE_READY
+    else:
+        return await apply_swapmod_event(
+            db,
+            cycle,
+            VERIFY_FAILED,
+            event_id=f"verification:{verification_key}:invalid-state",
+            step=cycle.current_step,
+            verification_source=verification_source,
+            verification_result=verification_result,
+            note=note,
+        )
+
+    event = VERIFY_PASSED if verification_result == "pass" else VERIFY_FAILED
+    return await apply_swapmod_event(
+        db,
+        cycle,
+        event,
+        event_id=f"verification:{verification_key}",
+        step=step,
+        verification_source=verification_source,
+        verification_result=verification_result,
+        note=note,
+    )
+
+
 async def recover_swapmod_cycle_after_restart(
     db: AsyncSession,
     cycle: SwapmodStateMachineCycle,
