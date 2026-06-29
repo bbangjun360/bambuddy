@@ -36,6 +36,8 @@ VERIFY_PLATE_RELEASED = "VERIFY_PLATE_RELEASED"
 LOAD_NEXT_PLATE = "LOAD_NEXT_PLATE"
 VERIFY_PLATE_READY = "VERIFY_PLATE_READY"
 
+START_SWAPMOD_PLATE_CHANGE = "START_SWAPMOD_PLATE_CHANGE"
+
 SUPPORTED_STATES = (
     IDLE,
     WAITING_FOR_PRINT_FINISH,
@@ -108,6 +110,39 @@ async def create_swapmod_cycle(
     await db.flush()
     await db.refresh(cycle)
     return cycle
+
+
+async def create_swapmod_operator_trigger(
+    db: AsyncSession,
+    *,
+    trigger_key: str,
+    cycle_key: str,
+    printer_id: int | None = None,
+    source_print_run_id: str | None = None,
+    operator_intent: str,
+) -> SwapmodStateMachineCycle:
+    if operator_intent != START_SWAPMOD_PLATE_CHANGE:
+        raise ValueError("unsupported SwapMod operator intent")
+
+    cycle = await create_swapmod_cycle(
+        db,
+        cycle_key=cycle_key,
+        printer_id=printer_id,
+        source_print_run_id=source_print_run_id,
+    )
+    event_id = f"operator-trigger:{trigger_key}:print-finished"
+    if event_id in (cycle.seen_event_ids or []):
+        return cycle
+    if cycle.state not in {IDLE, WAITING_FOR_PRINT_FINISH}:
+        return cycle
+
+    return await apply_swapmod_event(
+        db,
+        cycle,
+        PRINT_FINISHED,
+        event_id=event_id,
+        note="operator requested SwapMod plate-change start",
+    )
 
 
 async def get_swapmod_cycle(db: AsyncSession, *, cycle_key: str) -> SwapmodStateMachineCycle | None:

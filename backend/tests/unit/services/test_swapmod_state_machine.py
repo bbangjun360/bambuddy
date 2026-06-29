@@ -36,6 +36,7 @@ from backend.app.services.swapmod_state_machine import (
     WAITING_FOR_PRINT_FINISH,
     apply_swapmod_event,
     create_swapmod_cycle,
+    create_swapmod_operator_trigger,
     public_swapmod_cycle,
     recover_swapmod_cycle_after_restart,
 )
@@ -227,6 +228,53 @@ class SwapmodStateMachineServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cycle.state, VERIFY_RELEASED)
         self.assertEqual(await self.count_rows(PrintQueueItem), 0)
         self.assertEqual(await self.count_rows(PrintLogEntry), 0)
+
+    async def test_operator_trigger_starts_cycle_at_ready_to_release_without_real_commands(self) -> None:
+        cycle = await create_swapmod_operator_trigger(
+            self.session,
+            trigger_key="operator-trigger-001",
+            cycle_key="swapmod-operator-cycle",
+            printer_id=101,
+            source_print_run_id="print-run-operator-001",
+            operator_intent="START_SWAPMOD_PLATE_CHANGE",
+        )
+        payload = public_swapmod_cycle(cycle)
+
+        self.assertEqual(cycle.state, READY_TO_RELEASE)
+        self.assertEqual(cycle.current_step, RELEASE_PLATE)
+        self.assertEqual(cycle.transition_count, 1)
+        self.assertEqual(cycle.transition_log[-1]["event"], PRINT_FINISHED)
+        self.assertFalse(payload["ready_for_next_print"])
+        self.assertFalse(payload["manual_review_required"])
+        self.assertFalse(payload["retry_available"])
+        self.assertFalse(payload["real_execution_supported"])
+        self.assertFalse(payload["printer_command_sent"])
+        self.assertEqual(await self.count_rows(PrintQueueItem), 0)
+        self.assertEqual(await self.count_rows(PrintLogEntry), 0)
+
+    async def test_operator_trigger_is_idempotent_by_trigger_key(self) -> None:
+        first = await create_swapmod_operator_trigger(
+            self.session,
+            trigger_key="operator-trigger-duplicate",
+            cycle_key="swapmod-operator-duplicate",
+            printer_id=101,
+            source_print_run_id="print-run-operator-duplicate",
+            operator_intent="START_SWAPMOD_PLATE_CHANGE",
+        )
+        first_log = list(first.transition_log)
+
+        second = await create_swapmod_operator_trigger(
+            self.session,
+            trigger_key="operator-trigger-duplicate",
+            cycle_key="swapmod-operator-duplicate",
+            printer_id=101,
+            source_print_run_id="print-run-operator-duplicate",
+            operator_intent="START_SWAPMOD_PLATE_CHANGE",
+        )
+
+        self.assertEqual(second.state, READY_TO_RELEASE)
+        self.assertEqual(second.transition_count, 1)
+        self.assertEqual(second.transition_log, first_log)
 
 
 if __name__ == "__main__":

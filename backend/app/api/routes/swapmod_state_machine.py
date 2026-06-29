@@ -9,12 +9,14 @@ from backend.app.core.database import get_db
 from backend.app.core.permissions import Permission
 from backend.app.models.user import User
 from backend.app.schemas.swapmod_state_machine import (
+    SwapmodOperatorTriggerRequest,
     SwapmodStateMachineCycleCreate,
     SwapmodStateMachineEventRequest,
 )
 from backend.app.services.swapmod_state_machine import (
     apply_swapmod_event,
     create_swapmod_cycle,
+    create_swapmod_operator_trigger,
     get_swapmod_cycle,
     public_swapmod_cycle,
     swapmod_state_machine_status,
@@ -51,6 +53,27 @@ async def create_swapmod_state_machine_cycle(
         printer_id=body.printer_id,
         source_print_run_id=body.source_print_run_id,
     )
+    return public_swapmod_cycle(cycle)
+
+
+@router.post("/operator-triggers", status_code=202)
+async def create_swapmod_operator_trigger_request(
+    body: SwapmodOperatorTriggerRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
+):
+    _require_enabled()
+    try:
+        cycle = await create_swapmod_operator_trigger(
+            db,
+            trigger_key=body.trigger_key,
+            cycle_key=body.cycle_key,
+            printer_id=body.printer_id,
+            source_print_run_id=body.source_print_run_id,
+            operator_intent=body.operator_intent,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "unsupported_operator_intent", "message": str(exc)}) from exc
     return public_swapmod_cycle(cycle)
 
 
