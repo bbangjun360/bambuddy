@@ -286,7 +286,11 @@ class PlateChange3mfPhysicalCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_uncertain_printer_state_blocks_without_consuming_start(self) -> None:
         await self.upload()
 
-        for state in (None, SimpleNamespace(state="RUNNING", gcode_file="active.3mf")):
+        for state in (
+            None,
+            SimpleNamespace(state="RUNNING", gcode_file="active.3mf"),
+            SimpleNamespace(state="FINISH", gcode_file="active.3mf"),
+        ):
             with self.subTest(state=state):
                 with self.assertRaises(PlateChange3mfPostprocessError) as raised:
                     await self.start(printer_state=state)
@@ -294,6 +298,14 @@ class PlateChange3mfPhysicalCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.service.canary_status(**self.flags())["start_attempts_used"], 0)
         self.assertEqual(self.ops.starts, [])
+
+    async def test_finish_state_without_active_file_is_known_idle_for_canary_start(self) -> None:
+        await self.upload()
+
+        result = await self.start(printer_state=SimpleNamespace(state="FINISH", gcode_file=""))
+
+        self.assertEqual(result["status"], "CANARY_START_ATTEMPTED")
+        self.assertEqual(len(self.ops.starts), 1)
 
     async def test_no_queue_scheduler_retry_raw_gcode_or_secret_fields_in_responses(self) -> None:
         await self.upload()

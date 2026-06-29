@@ -75,7 +75,11 @@ Every field must be true in the `/canary-start` request:
 6. Re-check the printer and checklist items.
 7. Start with `POST /api/v1/plate-change-3mf/canary-start` using the separate
    start phrase.
-8. Do not retry from software if upload or start fails. Stop and inspect the
+8. Monitor printer status read-only. On A1 Mini swapmod artifacts, a first
+   0-100% progress pass can be followed by a second `RUNNING` cycle while the
+   printer swaps the plate and starts the next output; this is not a stop
+   condition by itself if `error_code` remains empty.
+9. Do not retry from software if upload or start fails. Stop and inspect the
    printer physically.
 
 ## Stop Conditions
@@ -87,7 +91,9 @@ Stop immediately if any of these occur:
 - artifact path is outside the configured output root;
 - artifact path is inside the repository;
 - more than one printer is selected;
-- the printer state is unknown or not idle;
+- the printer state is unknown or not idle; `FINISH` is acceptable only
+  when Bambuddy shows no active file and the operator has confirmed the
+  start checklist;
 - any checklist field is false;
 - the upload phrase is reused for start;
 - any queue, scheduler, retry, batch, multi-printer, raw-command, or raw G-code
