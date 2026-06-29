@@ -72,6 +72,7 @@ class SwapmodStateMachineArchitectureTest(unittest.TestCase):
         self.assertIn('APIRouter(prefix="/swapmod-state-machine"', route_text)
         self.assertIn('@router.get("/status"', route_text)
         self.assertIn('@router.post("/cycles"', route_text)
+        self.assertIn('@router.post("/operator-triggers"', route_text)
         self.assertIn('@router.post("/cycles/{cycle_key}/events"', route_text)
         self.assertIn("swapmod_state_machine", main_text)
         self.assertIn("app.include_router(swapmod_state_machine.router", main_text)
@@ -93,6 +94,7 @@ class SwapmodStateMachineArchitectureTest(unittest.TestCase):
         schema_text = (ROOT / "app/schemas/swapmod_state_machine.py").read_text(encoding="utf-8")
 
         self.assertIn('ConfigDict(extra="forbid")', schema_text)
+        self.assertIn('Literal["START_SWAPMOD_PLATE_CHANGE"]', schema_text)
         for forbidden in ("command_text", "raw_command", "raw_gcode", "gcode_line"):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, schema_text)

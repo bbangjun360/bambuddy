@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -9,6 +11,16 @@ class SwapmodStateMachineCycleCreate(BaseModel):
     cycle_key: str = Field(min_length=1, max_length=128)
     printer_id: int | None = None
     source_print_run_id: str | None = Field(default=None, max_length=128)
+
+
+class SwapmodOperatorTriggerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trigger_key: str = Field(min_length=1, max_length=128)
+    cycle_key: str = Field(min_length=1, max_length=128)
+    printer_id: int | None = None
+    source_print_run_id: str | None = Field(default=None, max_length=128)
+    operator_intent: Literal["START_SWAPMOD_PLATE_CHANGE"]
 
 
 class SwapmodStateMachineEventRequest(BaseModel):

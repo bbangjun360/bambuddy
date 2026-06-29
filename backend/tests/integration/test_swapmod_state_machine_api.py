@@ -18,6 +18,7 @@ from backend.app.services.swapmod_state_machine import (
     LOAD_NEXT_PLATE,
     PRINT_FINISHED,
     READY_FOR_NEXT_PRINT,
+    READY_TO_RELEASE,
     RELEASE_PLATE,
     RETRY_REQUESTED,
     START_STEP,
@@ -126,6 +127,23 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.count_rows(SwapmodStateMachineCycle), 0)
         await self.assert_no_control_rows()
 
+    async def test_operator_trigger_is_disabled_by_default(self) -> None:
+        response = await self.client.post(
+            "/api/v1/swapmod-state-machine/operator-triggers",
+            json={
+                "trigger_key": "api-trigger-disabled",
+                "cycle_key": "api-trigger-disabled-cycle",
+                "printer_id": 101,
+                "source_print_run_id": "print-run-disabled",
+                "operator_intent": "START_SWAPMOD_PLATE_CHANGE",
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("disabled", response.json()["detail"].lower())
+        self.assertEqual(await self.count_rows(SwapmodStateMachineCycle), 0)
+        await self.assert_no_control_rows()
+
     async def test_enabled_cycle_can_reach_ready_for_next_print_without_sending_commands(self) -> None:
         self.enable_state_machine()
         cycle_key = "api-success-cycle"
@@ -209,6 +227,76 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(response.status_code, 422)
+
+    async def test_operator_trigger_starts_ready_to_release_without_sending_commands(self) -> None:
+        self.enable_state_machine()
+
+        response = await self.client.post(
+            "/api/v1/swapmod-state-machine/operator-triggers",
+            json={
+                "trigger_key": "api-trigger-001",
+                "cycle_key": "api-trigger-cycle",
+                "printer_id": 101,
+                "source_print_run_id": "print-run-trigger-001",
+                "operator_intent": "START_SWAPMOD_PLATE_CHANGE",
+            },
+        )
+
+        self.assertEqual(response.status_code, 202, response.text)
+        body = response.json()
+        self.assertEqual(body["state"], READY_TO_RELEASE)
+        self.assertEqual(body["current_step"], RELEASE_PLATE)
+        self.assertFalse(body["ready_for_next_print"])
+        self.assertFalse(body["manual_review_required"])
+        self.assertFalse(body["retry_available"])
+        self.assertFalse(body["real_execution_supported"])
+        self.assertFalse(body["printer_command_sent"])
+        self.assertEqual(body["transition_log"][-1]["event"], PRINT_FINISHED)
+        await self.assert_no_control_rows()
+
+    async def test_operator_trigger_is_idempotent_by_trigger_key(self) -> None:
+        self.enable_state_machine()
+        payload = {
+            "trigger_key": "api-trigger-duplicate",
+            "cycle_key": "api-trigger-duplicate-cycle",
+            "printer_id": 101,
+            "source_print_run_id": "print-run-trigger-duplicate",
+            "operator_intent": "START_SWAPMOD_PLATE_CHANGE",
+        }
+
+        first = await self.client.post("/api/v1/swapmod-state-machine/operator-triggers", json=payload)
+        second = await self.client.post("/api/v1/swapmod-state-machine/operator-triggers", json=payload)
+
+        self.assertEqual(first.status_code, 202, first.text)
+        self.assertEqual(second.status_code, 202, second.text)
+        self.assertEqual(second.json()["state"], READY_TO_RELEASE)
+        self.assertEqual(second.json()["transition_count"], 1)
+        self.assertEqual(second.json()["transition_log"], first.json()["transition_log"])
+
+    async def test_operator_trigger_schema_rejects_raw_command_and_unknown_intent(self) -> None:
+        self.enable_state_machine()
+        raw_response = await self.client.post(
+            "/api/v1/swapmod-state-machine/operator-triggers",
+            json={
+                "trigger_key": "api-trigger-raw",
+                "cycle_key": "api-trigger-raw-cycle",
+                "printer_id": 101,
+                "operator_intent": "START_SWAPMOD_PLATE_CHANGE",
+                "raw_command": "blocked",
+            },
+        )
+        unknown_intent_response = await self.client.post(
+            "/api/v1/swapmod-state-machine/operator-triggers",
+            json={
+                "trigger_key": "api-trigger-unknown",
+                "cycle_key": "api-trigger-unknown-cycle",
+                "printer_id": 101,
+                "operator_intent": "START_NEXT_PRINT",
+            },
+        )
+
+        self.assertEqual(raw_response.status_code, 422)
+        self.assertEqual(unknown_intent_response.status_code, 422)
 
 
 if __name__ == "__main__":

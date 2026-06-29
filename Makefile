@@ -3,10 +3,10 @@
         harness-observability-health harness-bed-automation harness-erp-draft-write harness-obico-shadow \
         harness-printflow-canary harness-plate-change-command harness-plate-change-transport harness-plate-change-3mf-postprocess \
         harness-plate-change-3mf-physical-canary harness-swapmod-3mf-dry-run harness-swapmod-canary-preflight \
-        harness-swapmod-state-machine \
+        harness-swapmod-state-machine harness-swapmod-operator-trigger \
         test-unit test-characterization test-contract test-integration test-scenario test-observability \
         test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary test-plate-change-command test-plate-change-transport test-plate-change-3mf-postprocess test-plate-change-3mf-physical-canary test-plate-change-3mf-insertion test-swapmod-3mf-dry-run test-swapmod-canary-preflight \
-        test-swapmod-state-machine \
+        test-swapmod-state-machine test-swapmod-operator-trigger \
         verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
@@ -75,6 +75,9 @@ harness-swapmod-canary-preflight:
 	python3 -m unittest harness.tests.test_swapmod_canary_preflight_mock
 
 harness-swapmod-state-machine:
+	python3 -m unittest harness.tests.test_swapmod_state_machine_mock
+
+harness-swapmod-operator-trigger:
 	python3 -m unittest harness.tests.test_swapmod_state_machine_mock
 
 harness-bed-automation:
@@ -163,6 +166,9 @@ test-swapmod-canary-preflight: harness-swapmod-canary-preflight
 
 test-swapmod-state-machine: harness-swapmod-state-machine
 	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-swapmod-state-machine-tests -e LOG_DIR=/tmp/bambuddy-swapmod-state-machine-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.unit.services.test_swapmod_state_machine backend.tests.unit.test_swapmod_state_machine_architecture backend.tests.integration.test_swapmod_state_machine_api
+
+test-swapmod-operator-trigger: harness-swapmod-operator-trigger
+	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-swapmod-operator-trigger-tests -e LOG_DIR=/tmp/bambuddy-swapmod-operator-trigger-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.unit.services.test_swapmod_state_machine backend.tests.unit.test_swapmod_state_machine_architecture backend.tests.integration.test_swapmod_state_machine_api
 
 test-plate-change-3mf-insertion:
 	python3 -m unittest \
