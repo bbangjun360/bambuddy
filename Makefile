@@ -4,11 +4,11 @@
         harness-printflow-canary harness-plate-change-command harness-plate-change-transport harness-plate-change-3mf-postprocess \
         harness-plate-change-3mf-physical-canary harness-swapmod-3mf-dry-run harness-swapmod-canary-preflight \
         harness-swapmod-state-machine harness-swapmod-operator-trigger harness-swapmod-verification-adapter harness-swapmod-transport-boundary \
-        harness-swapmod-canary-execution-gate \
+        harness-swapmod-canary-execution-gate harness-swapmod-a1mini-direct-canary \
         test-unit test-characterization test-contract test-integration test-scenario test-observability \
         test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary test-plate-change-command test-plate-change-transport test-plate-change-3mf-postprocess test-plate-change-3mf-physical-canary test-plate-change-3mf-insertion test-swapmod-3mf-dry-run test-swapmod-canary-preflight \
         test-swapmod-state-machine test-swapmod-operator-trigger test-swapmod-verification-adapter test-swapmod-transport-boundary \
-        test-swapmod-canary-execution-gate \
+        test-swapmod-canary-execution-gate test-swapmod-a1mini-direct-canary \
         verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
@@ -89,6 +89,9 @@ harness-swapmod-transport-boundary:
 	python3 -m unittest harness.tests.test_swapmod_state_machine_mock
 
 harness-swapmod-canary-execution-gate:
+	python3 -m unittest harness.tests.test_swapmod_state_machine_mock
+
+harness-swapmod-a1mini-direct-canary:
 	python3 -m unittest harness.tests.test_swapmod_state_machine_mock
 
 harness-bed-automation:
@@ -189,6 +192,9 @@ test-swapmod-transport-boundary: harness-swapmod-transport-boundary
 
 test-swapmod-canary-execution-gate: harness-swapmod-canary-execution-gate
 	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-swapmod-canary-execution-gate-tests -e LOG_DIR=/tmp/bambuddy-swapmod-canary-execution-gate-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.unit.services.test_swapmod_state_machine backend.tests.unit.test_swapmod_state_machine_architecture backend.tests.integration.test_swapmod_state_machine_api
+
+test-swapmod-a1mini-direct-canary: harness-swapmod-a1mini-direct-canary
+	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-swapmod-a1mini-direct-canary-tests -e LOG_DIR=/tmp/bambuddy-swapmod-a1mini-direct-canary-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.unit.services.test_swapmod_a1mini_direct_canary backend.tests.unit.test_swapmod_a1mini_direct_canary_architecture backend.tests.integration.test_swapmod_a1mini_direct_canary_api
 
 test-plate-change-3mf-insertion:
 	python3 -m unittest \

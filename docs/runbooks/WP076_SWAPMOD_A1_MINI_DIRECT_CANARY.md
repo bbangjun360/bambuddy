@@ -1,0 +1,89 @@
+# WP-076 SwapMod A1 Mini Direct Canary Runbook
+
+## Purpose
+
+Run one supervised A1 Mini direct plate-change transport step through Bambuddy.
+This is not a general command endpoint and not a queue or scheduler path.
+
+## Required Configuration
+
+All flags are default-off. Enable only for the named canary printer session:
+
+```bash
+FARM_SWAPMOD_STATE_MACHINE_ENABLED=true
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ENABLED=true
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ALLOW_REAL_COMMANDS=true
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_REQUIRE_HUMAN_CONFIRMATION=true
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_SEQUENCE_ROOT=/path/outside/repo
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_RELEASE_SEQUENCE_FILE=release.gcode
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_RELEASE_SEQUENCE_SHA256=<sha256>
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_LOAD_SEQUENCE_FILE=load.gcode
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_LOAD_SEQUENCE_SHA256=<sha256>
+```
+
+The sequence root must be outside the repository. Sequence files are
+server-side allowlisted files; the API never accepts raw G-code or a path.
+
+## Checklist
+
+Every field must be true before a direct transport request:
+
+- `operator_present`
+- `printer_visible`
+- `emergency_stop_ready`
+- `power_cutoff_ready`
+- `a1_mini_confirmed`
+- `swapmod_hardware_installed`
+- `bed_area_clear`
+- `plate_stack_ready`
+- `no_other_job_running`
+- `dry_run_gate_reviewed`
+
+## Procedure
+
+1. Confirm the printer is the A1 Mini canary and visible to the operator.
+2. Confirm emergency stop and power cutoff are reachable.
+3. Confirm the SwapMod hardware and plate stack are physically installed and
+   aligned.
+4. Confirm Bambuddy reports no active file and a known idle state.
+5. Create or locate a SwapMod cycle and move it to the state matching the step:
+   `READY_TO_RELEASE` for `RELEASE_PLATE`, or `READY_TO_LOAD` for
+   `LOAD_NEXT_PLATE`.
+6. Verify the configured sequence SHA-256.
+7. Use the exact phrase:
+
+```text
+CONFIRM_A1_MINI_DIRECT_PLATE_CHANGE <printer_id> <cycle_key> <step> <sequence_sha256>
+```
+
+8. Submit the direct canary request.
+9. Monitor physically. Do not retry from software if motion is uncertain or the
+   request fails.
+10. After motion, perform manual/camera verification through the existing
+    SwapMod state-machine verification endpoint.
+
+## Stop Conditions
+
+Stop immediately if any of these occur:
+
+- any direct canary flag is not explicitly enabled for the session;
+- the configured sequence SHA-256 does not match;
+- the printer is not A1 Mini;
+- Bambuddy shows an active file or non-idle state;
+- any checklist field is false;
+- the phrase does not exactly match;
+- the response reports `COMMAND_FAILED`;
+- physical motion is uncertain, interrupted, or unexpected;
+- any route attempts queue, scheduler, upload/start, raw command, multi-printer,
+  automatic retry, or next-print automation.
+
+## Rollback
+
+Set either flag false and restart Bambuddy if needed:
+
+```bash
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ENABLED=false
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ALLOW_REAL_COMMANDS=false
+```
+
+There is no migration and no automatic resume after restart.
