@@ -187,6 +187,10 @@ class Settings(BaseSettings):
     farm_swapmod_a1mini_direct_canary_load_sequence_file: str | None = None
     farm_swapmod_a1mini_direct_canary_load_sequence_sha256: str | None = None
 
+    # WP-077 SwapMod bed readiness handoff. Disabled by default and records
+    # Bambuddy-owned bed readiness only from an already verified SwapMod cycle.
+    farm_swapmod_bed_readiness_handoff_enabled: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

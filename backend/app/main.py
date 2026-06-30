@@ -67,6 +67,7 @@ from backend.app.api.routes import (
     spoolman_inventory,
     swapmod_3mf_dry_run,
     swapmod_a1mini_direct_canary,
+    swapmod_bed_readiness,
     swapmod_canary_preflight,
     swapmod_state_machine,
     support,
@@ -6244,6 +6245,7 @@ app.include_router(plate_change_3mf_postprocess.router, prefix=app_settings.api_
 app.include_router(plate_change_command.router, prefix=app_settings.api_prefix)
 app.include_router(swapmod_3mf_dry_run.router, prefix=app_settings.api_prefix)
 app.include_router(swapmod_a1mini_direct_canary.router, prefix=app_settings.api_prefix)
+app.include_router(swapmod_bed_readiness.router, prefix=app_settings.api_prefix)
 app.include_router(swapmod_canary_preflight.router, prefix=app_settings.api_prefix)
 app.include_router(swapmod_state_machine.router, prefix=app_settings.api_prefix)
 app.include_router(printflow_canary.router, prefix=app_settings.api_prefix)
