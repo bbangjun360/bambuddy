@@ -70,6 +70,28 @@ def _canonical_filament_type(ftype: str) -> str:
     return _FILAMENT_EQUIV_MAP.get(upper, upper)
 
 
+def _scheduler_handoff_identity_blocked_reasons(
+    next_print_gate: dict[str, object],
+    queue_readiness_binding_gate: dict[str, object],
+) -> list[str]:
+    """Verify both scheduler gates refer to the same SwapMod handoff."""
+    if not next_print_gate.get("enforced") or not queue_readiness_binding_gate.get("enforced"):
+        return []
+
+    reasons: list[str] = []
+    latest_print_run_id = next_print_gate.get("latest_print_run_id")
+    binding_source_print_run_id = queue_readiness_binding_gate.get("source_print_run_id")
+    if latest_print_run_id != binding_source_print_run_id:
+        reasons.append("scheduler_handoff_source_print_run_mismatch")
+
+    next_source_cycle_key = next_print_gate.get("source_cycle_key")
+    binding_source_cycle_key = queue_readiness_binding_gate.get("source_cycle_key")
+    if next_source_cycle_key != binding_source_cycle_key:
+        reasons.append("scheduler_handoff_source_cycle_mismatch")
+
+    return reasons
+
+
 class PrintScheduler:
     """Background scheduler that processes the print queue."""
 
@@ -1984,6 +2006,26 @@ class PrintScheduler:
                 scheduler_queue_readiness_binding_gate.get("binding_id"),
                 scheduler_queue_readiness_binding_gate.get("source_cycle_key"),
                 scheduler_queue_readiness_binding_gate.get("bed_state"),
+            )
+            return False
+
+        scheduler_handoff_identity_blocked_reasons = _scheduler_handoff_identity_blocked_reasons(
+            scheduler_next_print_gate,
+            scheduler_queue_readiness_binding_gate,
+        )
+        if scheduler_handoff_identity_blocked_reasons:
+            logger.warning(
+                "Queue item %s: SwapMod scheduler handoff chain blocked printer %s; "
+                "reasons=%s latest_print_run_id=%s next_source_cycle_key=%s "
+                "binding_source_print_run_id=%s binding_source_cycle_key=%s binding_id=%s",
+                item.id,
+                item.printer_id,
+                scheduler_handoff_identity_blocked_reasons,
+                scheduler_next_print_gate.get("latest_print_run_id"),
+                scheduler_next_print_gate.get("source_cycle_key"),
+                scheduler_queue_readiness_binding_gate.get("source_print_run_id"),
+                scheduler_queue_readiness_binding_gate.get("source_cycle_key"),
+                scheduler_queue_readiness_binding_gate.get("binding_id"),
             )
             return False
 

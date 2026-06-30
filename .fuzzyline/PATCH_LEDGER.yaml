@@ -1,0 +1,34 @@
+# Core patch ledger for Bambuddy farm customization.
+# Records intentional patches to upstream-owned files that must be reviewed when upstream changes.
+patches:
+  - id: WP-082-swapmod-scheduler-handoff-chain
+    date: 2026-06-30
+    workpack: workpacks/exec/WP-082_SWAPMOD_SCHEDULER_HANDOFF_CHAIN.md
+    files:
+      - backend/app/services/print_scheduler.py
+    upstream_area: PrintScheduler._start_print
+    reason: >-
+      Ensure the WP-079 latest-print gate and WP-081 queue-readiness binding gate
+      describe the same SwapMod source print run and cycle before scheduler upload,
+      queue status mutation, bed-clear state mutation, or printer start.
+    behavior: >-
+      When both existing default-off scheduler gates are enforced and their
+      source print run or source cycle identity differs, _start_print logs
+      scheduler_handoff_source_print_run_mismatch and/or
+      scheduler_handoff_source_cycle_mismatch and returns False before external
+      printer boundaries are reached.
+    feature_flags:
+      - FARM_SWAPMOD_SCHEDULER_NEXT_PRINT_GATE_ENABLED=false
+      - FARM_SWAPMOD_SCHEDULER_QUEUE_READINESS_BINDING_ENABLED=false
+      - FARM_BED_AUTOMATION_ENABLED=false
+    rollback: >-
+      Disable the existing scheduler gates or revert this WP-082 scheduler guard
+      and tests. No database migration or public API rollback is required.
+    validation:
+      - make test-swapmod-scheduler-handoff-chain
+      - make test-swapmod-scheduler-queue-readiness-binding
+      - make test-swapmod-queue-readiness-binding
+      - make test-swapmod-scheduler-next-print-gate
+      - make verify-fast
+      - python3 harness/scripts/check_workpack.py workpacks/exec/WP-082_SWAPMOD_SCHEDULER_HANDOFF_CHAIN.md
+      - git diff --check
