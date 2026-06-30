@@ -33,6 +33,7 @@ from backend.app.services.filament_deficit import compute_deficit_for_queue_item
 from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import printer_manager, supports_drying
 from backend.app.services.smart_plug_manager import smart_plug_manager
+from backend.app.services.swapmod_scheduler_next_print_gate import evaluate_scheduler_next_print_gate
 from backend.app.utils.filename import derive_remote_filename
 from backend.app.utils.printer_models import normalize_printer_model
 
@@ -314,8 +315,10 @@ class PrintScheduler:
                         continue
 
                     # Start the print
-                    await self._start_print(db, item)
+                    start_handled = await self._start_print(db, item)
                     busy_printers.add(item.printer_id)
+                    if not start_handled:
+                        continue
 
                     # SJF starvation guard: mark items that were jumped
                     if sjf_enabled and item.print_time_seconds is not None:
@@ -440,8 +443,10 @@ class PrintScheduler:
                         if await self._block_on_filament_deficit(db, item):
                             continue
 
-                        await self._start_print(db, item)
+                        start_handled = await self._start_print(db, item)
                         busy_printers.add(printer_id)
+                        if not start_handled:
+                            continue
 
                         # SJF starvation guard: mark model-based items that were jumped
                         if sjf_enabled and item.print_time_seconds is not None:
@@ -1908,7 +1913,7 @@ class PrintScheduler:
         if owner:
             printer_manager.set_current_print_user(item.printer_id, owner.id, owner.username)
 
-    async def _start_print(self, db: AsyncSession, item: PrintQueueItem):
+    async def _start_print(self, db: AsyncSession, item: PrintQueueItem) -> bool:
         """Upload file and start print for a queue item.
 
         Supports two sources:
@@ -1927,7 +1932,7 @@ class PrintScheduler:
             await db.commit()
             logger.error("Queue item %s: Printer %s not found", item.id, item.printer_id)
             await self._power_off_if_needed(db, item)
-            return
+            return True
 
         # Check printer is connected
         if not printer_manager.is_connected(item.printer_id):
@@ -1937,7 +1942,26 @@ class PrintScheduler:
             await db.commit()
             logger.error("Queue item %s: Printer %s not connected", item.id, item.printer_id)
             await self._power_off_if_needed(db, item)
-            return
+            return True
+
+        scheduler_next_print_gate = await evaluate_scheduler_next_print_gate(
+            db,
+            printer_id=item.printer_id,
+            enabled=settings.farm_swapmod_scheduler_next_print_gate_enabled,
+            bed_automation_enabled=settings.farm_bed_automation_enabled,
+        )
+        if not scheduler_next_print_gate["next_print_allowed"]:
+            logger.warning(
+                "Queue item %s: SwapMod scheduler next-print gate blocked printer %s; "
+                "reasons=%s latest_print_run_id=%s source_cycle_key=%s bed_state=%s",
+                item.id,
+                item.printer_id,
+                scheduler_next_print_gate.get("blocked_reasons"),
+                scheduler_next_print_gate.get("latest_print_run_id"),
+                scheduler_next_print_gate.get("source_cycle_key"),
+                scheduler_next_print_gate.get("bed_state"),
+            )
+            return False
 
         # Determine source: archive or library file
         archive = None
@@ -2010,7 +2034,7 @@ class PrintScheduler:
             await db.commit()
             logger.error("Queue item %s: No archive_id or library_file_id specified", item.id)
             await self._power_off_if_needed(db, item)
-            return
+            return True
 
         # Check file exists on disk
         if not file_path.exists():
@@ -2020,7 +2044,7 @@ class PrintScheduler:
             await db.commit()
             logger.error("Queue item %s: File not found: %s", item.id, file_path)
             await self._power_off_if_needed(db, item)
-            return
+            return True
 
         # G-code injection for auto-print systems (#422)
         injected_path = None
@@ -2130,7 +2154,7 @@ class PrintScheduler:
                 db=db,
             )
             await self._power_off_if_needed(db, item)
-            return
+            return True
 
         # Parse AMS mapping if stored
         ams_mapping = None
@@ -2308,6 +2332,8 @@ class PrintScheduler:
             )
 
             await self._power_off_if_needed(db, item)
+
+        return True
 
     @staticmethod
     async def _watchdog_print_start(
