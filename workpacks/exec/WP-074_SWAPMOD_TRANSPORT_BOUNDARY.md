@@ -39,11 +39,11 @@ Responses include the public cycle shape plus `transport_mode`, `transport_statu
 
 ## Evidence
 
-2026-06-29 local validation:
+2026-06-30 local validation:
 
-- `make test-swapmod-transport-boundary` passed.
-- `make test-swapmod-state-machine` passed.
-- `make verify-fast` passed.
+- `make test-swapmod-transport-boundary` passed: harness 2 tests, Docker unit/architecture/integration 44 tests.
+- `make test-swapmod-state-machine` passed: harness 2 tests, Docker unit/architecture/integration 44 tests.
+- `make verify-fast` passed: context/workpack/hooks, harness contract/unit, and characterization gates.
 - `git diff --check` passed.
 - Implementation scan found no direct printer/network/control transport references.
 
