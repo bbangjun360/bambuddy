@@ -1,0 +1,348 @@
+from __future__ import annotations
+
+import asyncio
+import tempfile
+import unittest
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from backend.app.core.database import Base
+from backend.app.models.archive import PrintArchive
+from backend.app.models.print_log import PrintLogEntry
+from backend.app.models.print_queue import PrintQueueItem
+from backend.app.models.printer import Printer
+from backend.app.models.swapmod_queue_readiness_binding import SwapmodQueueReadinessBinding
+from backend.app.services.swapmod_bed_readiness import record_swapmod_bed_readiness
+from backend.app.services.swapmod_queue_readiness_binding import bind_swapmod_queue_readiness
+from backend.app.services.swapmod_scheduler_next_print_gate import scheduler_print_run_key
+from backend.app.services.swapmod_state_machine import (
+    LOAD_NEXT_PLATE,
+    PRINT_FINISHED,
+    RELEASE_PLATE,
+    START_STEP,
+    STEP_MOCK_SUCCEEDED,
+    VERIFY_PASSED,
+    VERIFY_PLATE_READY,
+    VERIFY_PLATE_RELEASED,
+    apply_swapmod_event,
+    create_swapmod_cycle,
+)
+
+
+def _status(state: str, subtask_id: str | None = None, gcode_file: str | None = None):
+    return SimpleNamespace(state=state, subtask_id=subtask_id, gcode_file=gcode_file)
+
+
+class SwapmodSchedulerConsumedHandoffRetryTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        asyncio.get_running_loop().slow_callback_duration = 1.0
+        from backend.app.models import (  # noqa: F401
+            api_key,
+            archive,
+            auth_ephemeral,
+            bed_automation,
+            erp_draft_write,
+            group,
+            library,
+            print_log,
+            print_queue,
+            printer,
+            settings,
+            swapmod_queue_readiness_binding,
+            swapmod_state_machine,
+            user,
+        )
+
+        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        self.sessionmaker = async_sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
+        self.session = self.sessionmaker()
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.base_dir = Path(self.temp_dir.name)
+
+    async def asyncTearDown(self) -> None:
+        await self.session.close()
+        self.temp_dir.cleanup()
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await self.engine.dispose()
+
+    async def create_startable_queue_item(self) -> tuple[Printer, PrintQueueItem]:
+        printer = Printer(
+            name="A1 Mini Consumed Handoff Retry",
+            ip_address="192.0.2.83",
+            serial_number="WP083SERIAL",
+            access_code="12345678",
+            model="A1 mini",
+        )
+        self.session.add(printer)
+        await self.session.flush()
+
+        relative_path = Path("archives") / f"wp083-{printer.id}.gcode.3mf"
+        source_path = self.base_dir / relative_path
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_bytes(b"placeholder 3mf")
+        archive = PrintArchive(
+            printer_id=printer.id,
+            filename=f"wp083-{printer.id}.gcode.3mf",
+            print_name="WP083",
+            file_path=str(relative_path),
+            file_size=source_path.stat().st_size,
+            status="completed",
+        )
+        self.session.add(archive)
+        await self.session.flush()
+        item = PrintQueueItem(printer_id=printer.id, archive_id=archive.id, status="pending", position=1, plate_id=1)
+        self.session.add(item)
+        await self.session.commit()
+        await self.session.refresh(printer)
+        await self.session.refresh(item)
+        return printer, item
+
+    async def create_print_log(self, printer: Printer) -> PrintLogEntry:
+        entry = PrintLogEntry(
+            printer_id=printer.id,
+            printer_name=printer.name,
+            print_name="Finished plate",
+            status="completed",
+            completed_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        self.session.add(entry)
+        await self.session.flush()
+        return entry
+
+    async def create_ready_swapmod_cycle(self, *, printer: Printer, source_print_run_id: str, cycle_key: str):
+        cycle = await create_swapmod_cycle(
+            self.session,
+            cycle_key=cycle_key,
+            printer_id=printer.id,
+            source_print_run_id=source_print_run_id,
+        )
+        for event, event_id, step, verification_source, verification_result in (
+            (PRINT_FINISHED, "event-1", None, None, None),
+            (START_STEP, "event-2", RELEASE_PLATE, None, None),
+            (STEP_MOCK_SUCCEEDED, "event-3", RELEASE_PLATE, None, None),
+            (VERIFY_PASSED, "event-4", VERIFY_PLATE_RELEASED, "manual", "pass"),
+            (START_STEP, "event-5", LOAD_NEXT_PLATE, None, None),
+            (STEP_MOCK_SUCCEEDED, "event-6", LOAD_NEXT_PLATE, None, None),
+            (VERIFY_PASSED, "event-7", VERIFY_PLATE_READY, "camera_mock", "pass"),
+        ):
+            cycle = await apply_swapmod_event(
+                self.session,
+                cycle,
+                event,
+                event_id=f"{cycle_key}:{event_id}",
+                step=step,
+                verification_source=verification_source,
+                verification_result=verification_result,
+            )
+        return cycle
+
+    async def record_ready_bed_handoff(self, cycle) -> None:
+        await record_swapmod_bed_readiness(
+            self.session,
+            cycle,
+            handoff_key=f"{cycle.cycle_key}-bed-ready",
+            printer_id=cycle.printer_id,
+            enabled=True,
+            bed_automation_enabled=True,
+            bed_automation_dry_run=True,
+        )
+
+    async def bind_queue_item_to_ready_handoff(
+        self,
+        *,
+        cycle,
+        item: PrintQueueItem,
+        printer: Printer,
+    ) -> dict[str, object]:
+        return await bind_swapmod_queue_readiness(
+            self.session,
+            cycle,
+            binding_key=f"{cycle.cycle_key}-queue-binding",
+            queue_item_id=item.id,
+            printer_id=printer.id,
+            enabled=True,
+            bed_automation_enabled=True,
+        )
+
+    async def run_start_print_with_handoff_gates(self, item: PrintQueueItem):
+        from backend.app.services import print_scheduler as scheduler_module
+        from backend.app.services.print_scheduler import PrintScheduler
+
+        previous_next_gate_enabled = scheduler_module.settings.farm_swapmod_scheduler_next_print_gate_enabled
+        previous_binding_gate_enabled = scheduler_module.settings.farm_swapmod_scheduler_queue_readiness_binding_enabled
+        previous_bed_enabled = scheduler_module.settings.farm_bed_automation_enabled
+        previous_base_dir = scheduler_module.settings.base_dir
+        scheduler_module.settings.farm_swapmod_scheduler_next_print_gate_enabled = True
+        scheduler_module.settings.farm_swapmod_scheduler_queue_readiness_binding_enabled = True
+        scheduler_module.settings.farm_bed_automation_enabled = True
+        scheduler_module.settings.base_dir = self.base_dir
+
+        def close_spawned_coroutine(coro, *args, **kwargs):
+            coro.close()
+            return None
+
+        register_mock = MagicMock()
+        try:
+            with (
+                patch.object(scheduler_module.printer_manager, "is_connected", return_value=True),
+                patch.object(
+                    scheduler_module.printer_manager,
+                    "get_status",
+                    return_value=_status("IDLE", "old-subtask"),
+                ),
+                patch.object(scheduler_module.printer_manager, "set_awaiting_plate_clear", MagicMock()) as clear_mock,
+                patch.object(scheduler_module.printer_manager, "start_print", MagicMock(return_value=True)) as start_mock,
+                patch.object(scheduler_module, "get_ftp_retry_settings", AsyncMock(return_value=(False, 1, 0, 5))),
+                patch.object(scheduler_module, "delete_file_async", AsyncMock(return_value=True)) as delete_mock,
+                patch.object(scheduler_module, "upload_file_async", AsyncMock(return_value=True)) as upload_mock,
+                patch.object(
+                    scheduler_module,
+                    "spawn_background_task",
+                    MagicMock(side_effect=close_spawned_coroutine),
+                ) as spawn_mock,
+                patch.object(scheduler_module, "cache_3mf_download", MagicMock()) as cache_mock,
+                patch.dict("sys.modules", {"backend.app.main": SimpleNamespace(register_expected_print=register_mock)}),
+                patch.object(scheduler_module.notification_service, "on_queue_job_started", AsyncMock()) as notify_mock,
+                patch.object(scheduler_module.notification_service, "on_queue_job_failed", AsyncMock()) as fail_notify_mock,
+                patch("backend.app.services.mqtt_relay.mqtt_relay.on_queue_job_started", AsyncMock()) as mqtt_mock,
+            ):
+                start_handled = await PrintScheduler()._start_print(self.session, item)
+        finally:
+            scheduler_module.settings.farm_swapmod_scheduler_next_print_gate_enabled = previous_next_gate_enabled
+            scheduler_module.settings.farm_swapmod_scheduler_queue_readiness_binding_enabled = previous_binding_gate_enabled
+            scheduler_module.settings.farm_bed_automation_enabled = previous_bed_enabled
+            scheduler_module.settings.base_dir = previous_base_dir
+
+        return {
+            "start_handled": start_handled,
+            "clear": clear_mock,
+            "start": start_mock,
+            "delete": delete_mock,
+            "upload": upload_mock,
+            "spawn": spawn_mock,
+            "cache": cache_mock,
+            "register": register_mock,
+            "notify": notify_mock,
+            "fail_notify": fail_notify_mock,
+            "mqtt": mqtt_mock,
+        }
+
+    async def run_start_print_expect_block_before_external_calls(self, item: PrintQueueItem) -> tuple[bool, str]:
+        from backend.app.services import print_scheduler as scheduler_module
+        from backend.app.services.print_scheduler import PrintScheduler
+
+        previous_next_gate_enabled = scheduler_module.settings.farm_swapmod_scheduler_next_print_gate_enabled
+        previous_binding_gate_enabled = scheduler_module.settings.farm_swapmod_scheduler_queue_readiness_binding_enabled
+        previous_bed_enabled = scheduler_module.settings.farm_bed_automation_enabled
+        previous_base_dir = scheduler_module.settings.base_dir
+        scheduler_module.settings.farm_swapmod_scheduler_next_print_gate_enabled = True
+        scheduler_module.settings.farm_swapmod_scheduler_queue_readiness_binding_enabled = True
+        scheduler_module.settings.farm_bed_automation_enabled = True
+        scheduler_module.settings.base_dir = self.base_dir
+        try:
+            with (
+                patch.object(scheduler_module.printer_manager, "is_connected", return_value=True),
+                patch.object(
+                    scheduler_module.printer_manager,
+                    "set_awaiting_plate_clear",
+                    MagicMock(side_effect=AssertionError("must not clear bed state")),
+                ),
+                patch.object(
+                    scheduler_module.printer_manager,
+                    "start_print",
+                    MagicMock(side_effect=AssertionError("must not start printer")),
+                ),
+                patch.object(
+                    scheduler_module,
+                    "get_ftp_retry_settings",
+                    AsyncMock(side_effect=AssertionError("must not request FTP settings")),
+                ),
+                patch.object(
+                    scheduler_module,
+                    "delete_file_async",
+                    AsyncMock(side_effect=AssertionError("must not delete remote file")),
+                ),
+                patch.object(
+                    scheduler_module,
+                    "upload_file_async",
+                    AsyncMock(side_effect=AssertionError("must not upload file")),
+                ),
+            ):
+                with self.assertLogs("backend.app.services.print_scheduler", level="WARNING") as captured:
+                    start_handled = await PrintScheduler()._start_print(self.session, item)
+        finally:
+            scheduler_module.settings.farm_swapmod_scheduler_next_print_gate_enabled = previous_next_gate_enabled
+            scheduler_module.settings.farm_swapmod_scheduler_queue_readiness_binding_enabled = previous_binding_gate_enabled
+            scheduler_module.settings.farm_bed_automation_enabled = previous_bed_enabled
+            scheduler_module.settings.base_dir = previous_base_dir
+
+        return start_handled, "\n".join(captured.output)
+
+    async def watchdog_reverts_to_pending(self, item: PrintQueueItem, printer: Printer) -> None:
+        from backend.app.services import print_scheduler as scheduler_module
+        from backend.app.services.print_scheduler import PrintScheduler
+
+        client = MagicMock()
+        with (
+            patch.object(scheduler_module.printer_manager, "get_status", MagicMock(return_value=_status("IDLE", "old-subtask"))),
+            patch.object(scheduler_module.printer_manager, "get_client", MagicMock(return_value=client)),
+            patch.object(scheduler_module, "async_session", self.sessionmaker),
+            patch("backend.app.core.database.async_session", self.sessionmaker),
+        ):
+            await PrintScheduler._watchdog_print_start(
+                queue_item_id=item.id,
+                printer_id=printer.id,
+                pre_state="IDLE",
+                pre_subtask_id="old-subtask",
+                timeout=0.01,
+                poll_interval=0,
+            )
+
+    async def test_consumed_handoff_cannot_be_retried_after_watchdog_reverts_queue_item_to_pending(self) -> None:
+        printer, item = await self.create_startable_queue_item()
+        run = await self.create_print_log(printer)
+        cycle = await self.create_ready_swapmod_cycle(
+            printer=printer,
+            source_print_run_id=scheduler_print_run_key(run.id),
+            cycle_key=f"wp083-consumed-cycle-{run.id}",
+        )
+        await self.record_ready_bed_handoff(cycle)
+        binding_payload = await self.bind_queue_item_to_ready_handoff(cycle=cycle, item=item, printer=printer)
+
+        start_mocks = await self.run_start_print_with_handoff_gates(item)
+        self.assertTrue(start_mocks["start_handled"])
+        start_mocks["start"].assert_called_once()
+        binding = await self.session.get(SwapmodQueueReadinessBinding, binding_payload["binding_id"])
+        assert binding is not None
+        self.assertIsNotNone(binding.consumed_at)
+
+        with self.assertLogs("backend.app.services.print_scheduler", level="WARNING") as watchdog_logs:
+            await self.watchdog_reverts_to_pending(item, printer)
+        self.assertIn("reverted to 'pending'", "\n".join(watchdog_logs.output))
+        await self.session.refresh(item)
+        self.assertEqual(item.status, "pending")
+        self.assertIsNone(item.started_at)
+
+        start_handled, logs = await self.run_start_print_expect_block_before_external_calls(item)
+
+        self.assertFalse(start_handled)
+        self.assertIn("SwapMod scheduler queue-readiness binding gate blocked", logs)
+        self.assertIn("queue_readiness_binding_consumed", logs)
+        still_consumed = await self.session.get(SwapmodQueueReadinessBinding, binding_payload["binding_id"])
+        assert still_consumed is not None
+        self.assertIsNotNone(still_consumed.consumed_at)
+        await self.session.refresh(item)
+        self.assertEqual(item.status, "pending")
+        self.assertIsNone(item.started_at)
+
+
+if __name__ == "__main__":
+    unittest.main()
