@@ -195,6 +195,10 @@ class Settings(BaseSettings):
     # it never dispatches a queue item or starts a printer.
     farm_swapmod_next_print_gate_enabled: bool = False
 
+    # WP-079 SwapMod scheduler next-print gate. Disabled by default; when
+    # enabled it blocks queue scheduler dispatch before upload or print start.
+    farm_swapmod_scheduler_next_print_gate_enabled: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
