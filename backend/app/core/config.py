@@ -203,6 +203,11 @@ class Settings(BaseSettings):
     # record-only; scheduler consumption is intentionally outside this slice.
     farm_swapmod_queue_readiness_binding_enabled: bool = False
 
+    # WP-081 SwapMod scheduler queue-readiness binding gate. Disabled by
+    # default; when enabled the scheduler requires a READY binding before
+    # upload/start and records consumption only after the printer command is accepted.
+    farm_swapmod_scheduler_queue_readiness_binding_enabled: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

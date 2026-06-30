@@ -34,6 +34,10 @@ from backend.app.services.notification_service import notification_service
 from backend.app.services.printer_manager import printer_manager, supports_drying
 from backend.app.services.smart_plug_manager import smart_plug_manager
 from backend.app.services.swapmod_scheduler_next_print_gate import evaluate_scheduler_next_print_gate
+from backend.app.services.swapmod_scheduler_queue_readiness_binding import (
+    consume_scheduler_queue_readiness_binding,
+    evaluate_scheduler_queue_readiness_binding_gate,
+)
 from backend.app.utils.filename import derive_remote_filename
 from backend.app.utils.printer_models import normalize_printer_model
 
@@ -1963,6 +1967,26 @@ class PrintScheduler:
             )
             return False
 
+        scheduler_queue_readiness_binding_gate = await evaluate_scheduler_queue_readiness_binding_gate(
+            db,
+            queue_item_id=item.id,
+            printer_id=item.printer_id,
+            enabled=settings.farm_swapmod_scheduler_queue_readiness_binding_enabled,
+            bed_automation_enabled=settings.farm_bed_automation_enabled,
+        )
+        if not scheduler_queue_readiness_binding_gate["next_print_allowed"]:
+            logger.warning(
+                "Queue item %s: SwapMod scheduler queue-readiness binding gate blocked printer %s; "
+                "reasons=%s binding_id=%s source_cycle_key=%s bed_state=%s",
+                item.id,
+                item.printer_id,
+                scheduler_queue_readiness_binding_gate.get("blocked_reasons"),
+                scheduler_queue_readiness_binding_gate.get("binding_id"),
+                scheduler_queue_readiness_binding_gate.get("source_cycle_key"),
+                scheduler_queue_readiness_binding_gate.get("bed_state"),
+            )
+            return False
+
         # Determine source: archive or library file
         archive = None
         library_file = None
@@ -2236,6 +2260,31 @@ class PrintScheduler:
 
         if started:
             logger.info("Queue item %s: Print started successfully - %s", item.id, filename)
+            try:
+                scheduler_queue_readiness_binding_consume = await consume_scheduler_queue_readiness_binding(
+                    db,
+                    queue_item_id=item.id,
+                    printer_id=item.printer_id,
+                    enabled=settings.farm_swapmod_scheduler_queue_readiness_binding_enabled,
+                )
+                if (
+                    settings.farm_swapmod_scheduler_queue_readiness_binding_enabled
+                    and not scheduler_queue_readiness_binding_consume.get("queue_readiness_binding_consumed")
+                ):
+                    logger.warning(
+                        "Queue item %s: failed to consume SwapMod scheduler queue-readiness binding; "
+                        "reasons=%s binding_id=%s printer_id=%s",
+                        item.id,
+                        scheduler_queue_readiness_binding_consume.get("blocked_reasons"),
+                        scheduler_queue_readiness_binding_consume.get("binding_id"),
+                        item.printer_id,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Queue item %s: failed to consume SwapMod scheduler queue-readiness binding: %s",
+                    item.id,
+                    e,
+                )
 
             # Register the local 3MF in the cover-cache so /cover skips FTP
             # (#1166 follow-up). file_path was resolved earlier from either the
