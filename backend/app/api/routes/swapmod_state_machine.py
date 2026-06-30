@@ -10,11 +10,17 @@ from backend.app.core.permissions import Permission
 from backend.app.models.user import User
 from backend.app.schemas.swapmod_state_machine import (
     SwapmodCanaryExecutionGateRequest,
+    SwapmodNextPrintGateRequest,
     SwapmodOperatorTriggerRequest,
     SwapmodStateMachineCycleCreate,
     SwapmodTransportStepRequest,
     SwapmodVerificationRequest,
     SwapmodStateMachineEventRequest,
+)
+from backend.app.services.swapmod_next_print_gate import (
+    SwapmodNextPrintGateError,
+    evaluate_swapmod_next_print_gate,
+    swapmod_next_print_gate_status,
 )
 from backend.app.services.swapmod_state_machine import (
     apply_swapmod_event,
@@ -55,6 +61,16 @@ def _require_canary_execution_gate_enabled() -> None:
         )
 
 
+def _require_next_print_gate_enabled() -> None:
+    if not settings.farm_swapmod_next_print_gate_enabled:
+        raise HTTPException(status_code=404, detail="SwapMod next-print gate is disabled")
+    if not settings.farm_bed_automation_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "bed_automation_disabled", "message": "Bed automation must be enabled"},
+        )
+
+
 @router.get("/status")
 async def get_swapmod_state_machine_status(
     _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
@@ -62,6 +78,16 @@ async def get_swapmod_state_machine_status(
     return swapmod_state_machine_status(
         enabled=settings.farm_swapmod_state_machine_enabled,
         dry_run=settings.farm_swapmod_state_machine_dry_run,
+    )
+
+
+@router.get("/next-print-gates/status")
+async def get_swapmod_next_print_gate_status(
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+):
+    return swapmod_next_print_gate_status(
+        enabled=settings.farm_swapmod_next_print_gate_enabled,
+        bed_automation_enabled=settings.farm_bed_automation_enabled,
     )
 
 
@@ -186,6 +212,31 @@ async def evaluate_swapmod_canary_execution_gate_request(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"code": "unsupported_canary_gate", "message": str(exc)}) from exc
+
+
+@router.post("/cycles/{cycle_key}/next-print-gates", status_code=202)
+async def evaluate_swapmod_next_print_gate_request(
+    cycle_key: str,
+    body: SwapmodNextPrintGateRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
+):
+    _require_enabled()
+    _require_next_print_gate_enabled()
+    cycle = await get_swapmod_cycle(db, cycle_key=cycle_key)
+    if cycle is None:
+        raise HTTPException(status_code=404, detail="SwapMod state machine cycle not found")
+    try:
+        return await evaluate_swapmod_next_print_gate(
+            db,
+            cycle,
+            gate_key=body.gate_key,
+            printer_id=body.printer_id,
+            enabled=settings.farm_swapmod_next_print_gate_enabled,
+            bed_automation_enabled=settings.farm_bed_automation_enabled,
+        )
+    except SwapmodNextPrintGateError as exc:
+        raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
 
 
 @router.post("/cycles/{cycle_key}/events")

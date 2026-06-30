@@ -191,6 +191,10 @@ class Settings(BaseSettings):
     # Bambuddy-owned bed readiness only from an already verified SwapMod cycle.
     farm_swapmod_bed_readiness_handoff_enabled: bool = False
 
+    # WP-078 SwapMod next-print gate. Disabled by default and evaluate-only;
+    # it never dispatches a queue item or starts a printer.
+    farm_swapmod_next_print_gate_enabled: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

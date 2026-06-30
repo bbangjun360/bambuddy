@@ -63,6 +63,13 @@ class SwapmodCanaryExecutionGateRequest(BaseModel):
     checklist: SwapmodCanaryExecutionChecklist
 
 
+class SwapmodNextPrintGateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    gate_key: str = Field(min_length=1, max_length=128)
+    printer_id: int
+
+
 class SwapmodStateMachineEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

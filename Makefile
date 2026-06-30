@@ -4,11 +4,11 @@
         harness-printflow-canary harness-plate-change-command harness-plate-change-transport harness-plate-change-3mf-postprocess \
         harness-plate-change-3mf-physical-canary harness-swapmod-3mf-dry-run harness-swapmod-canary-preflight \
         harness-swapmod-state-machine harness-swapmod-operator-trigger harness-swapmod-verification-adapter harness-swapmod-transport-boundary \
-        harness-swapmod-canary-execution-gate harness-swapmod-a1mini-direct-canary harness-swapmod-bed-readiness \
+        harness-swapmod-canary-execution-gate harness-swapmod-a1mini-direct-canary harness-swapmod-bed-readiness harness-swapmod-next-print-gate \
         test-unit test-characterization test-contract test-integration test-scenario test-observability \
         test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary test-plate-change-command test-plate-change-transport test-plate-change-3mf-postprocess test-plate-change-3mf-physical-canary test-plate-change-3mf-insertion test-swapmod-3mf-dry-run test-swapmod-canary-preflight \
         test-swapmod-state-machine test-swapmod-operator-trigger test-swapmod-verification-adapter test-swapmod-transport-boundary \
-        test-swapmod-canary-execution-gate test-swapmod-a1mini-direct-canary test-swapmod-bed-readiness \
+        test-swapmod-canary-execution-gate test-swapmod-a1mini-direct-canary test-swapmod-bed-readiness test-swapmod-next-print-gate \
         verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
@@ -96,6 +96,9 @@ harness-swapmod-a1mini-direct-canary:
 
 harness-swapmod-bed-readiness:
 	python3 -m unittest harness.tests.test_swapmod_bed_readiness_mock
+
+harness-swapmod-next-print-gate:
+	python3 -m unittest harness.tests.test_swapmod_next_print_gate_mock
 
 harness-bed-automation:
 	python3 -m unittest harness.tests.test_bed_automation_mock
@@ -201,6 +204,9 @@ test-swapmod-a1mini-direct-canary: harness-swapmod-a1mini-direct-canary
 
 test-swapmod-bed-readiness: harness-swapmod-bed-readiness
 	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-swapmod-bed-readiness-tests -e LOG_DIR=/tmp/bambuddy-swapmod-bed-readiness-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.unit.services.test_swapmod_bed_readiness backend.tests.unit.test_swapmod_bed_readiness_architecture backend.tests.integration.test_swapmod_bed_readiness_api
+
+test-swapmod-next-print-gate: harness-swapmod-next-print-gate
+	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-swapmod-next-print-gate-tests -e LOG_DIR=/tmp/bambuddy-swapmod-next-print-gate-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.unit.services.test_swapmod_next_print_gate backend.tests.unit.test_swapmod_next_print_gate_architecture backend.tests.integration.test_swapmod_next_print_gate_api
 
 test-plate-change-3mf-insertion:
 	python3 -m unittest \
