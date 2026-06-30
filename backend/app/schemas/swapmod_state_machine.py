@@ -70,6 +70,14 @@ class SwapmodNextPrintGateRequest(BaseModel):
     printer_id: int
 
 
+class SwapmodQueueReadinessBindingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    binding_key: str = Field(min_length=1, max_length=128)
+    queue_item_id: int
+    printer_id: int
+
+
 class SwapmodStateMachineEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

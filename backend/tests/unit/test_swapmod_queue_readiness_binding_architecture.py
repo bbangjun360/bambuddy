@@ -4,34 +4,43 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SERVICE = ROOT / "app/services/swapmod_next_print_gate.py"
+SERVICE = ROOT / "app/services/swapmod_queue_readiness_binding.py"
+MODEL = ROOT / "app/models/swapmod_queue_readiness_binding.py"
 ROUTE = ROOT / "app/api/routes/swapmod_state_machine.py"
 SCHEMA = ROOT / "app/schemas/swapmod_state_machine.py"
 CONFIG = ROOT / "app/core/config.py"
 
 
-class SwapmodNextPrintGateArchitectureTest(unittest.TestCase):
+class SwapmodQueueReadinessBindingArchitectureTest(unittest.TestCase):
     def test_config_flag_is_default_off(self) -> None:
         text = CONFIG.read_text(encoding="utf-8")
 
-        self.assertIn("farm_swapmod_next_print_gate_enabled: bool = False", text)
+        self.assertIn("farm_swapmod_queue_readiness_binding_enabled: bool = False", text)
 
-    def test_route_is_evaluate_only_under_swapmod_state_machine(self) -> None:
+    def test_binding_model_is_durable_and_uniquely_tied_to_queue_item(self) -> None:
+        self.assertTrue(MODEL.exists(), f"missing {MODEL}")
+        text = MODEL.read_text(encoding="utf-8")
+
+        self.assertIn('__tablename__ = "swapmod_queue_readiness_bindings"', text)
+        self.assertIn('UniqueConstraint("binding_key"', text)
+        self.assertIn('UniqueConstraint("queue_item_id"', text)
+        self.assertIn('UniqueConstraint("bed_cycle_key"', text)
+        self.assertIn("queue_fingerprint", text)
+        self.assertIn("consumed_at", text)
+
+    def test_route_records_binding_under_swapmod_state_machine_without_scheduler_start(self) -> None:
         self.assertTrue(SERVICE.exists(), f"missing {SERVICE}")
         route_text = ROUTE.read_text(encoding="utf-8")
 
-        self.assertIn('@router.get("/next-print-gates/status"', route_text)
-        self.assertIn('@router.post("/cycles/{cycle_key}/next-print-gates"', route_text)
-        self.assertIn("evaluate_swapmod_next_print_gate", route_text)
+        self.assertIn('@router.get("/queue-readiness-bindings/status"', route_text)
+        self.assertIn('@router.post("/cycles/{cycle_key}/queue-readiness-bindings"', route_text)
+        self.assertIn("bind_swapmod_queue_readiness", route_text)
 
-    def test_schema_does_not_accept_raw_command_or_dispatch_fields(self) -> None:
+    def test_schema_rejects_raw_command_dispatch_and_scheduler_fields(self) -> None:
         text = SCHEMA.read_text(encoding="utf-8")
-        class_start = text.index("class SwapmodNextPrintGateRequest")
-        next_class_start = text.index("\n\nclass ", class_start + 1)
-        request_schema = text[class_start:next_class_start]
 
-        self.assertIn("class SwapmodNextPrintGateRequest", request_schema)
-        self.assertIn('ConfigDict(extra="forbid")', request_schema)
+        self.assertIn("class SwapmodQueueReadinessBindingRequest", text)
+        self.assertIn('ConfigDict(extra="forbid")', text)
         for forbidden in (
             "raw_gcode",
             "gcode",
@@ -39,15 +48,14 @@ class SwapmodNextPrintGateArchitectureTest(unittest.TestCase):
             "raw_command",
             "sequence_path",
             "file_path",
-            "queue_item_id",
             "dispatch",
             "start_print",
             "scheduler",
         ):
             with self.subTest(forbidden=forbidden):
-                self.assertNotIn(forbidden, request_schema)
+                self.assertNotIn(forbidden, text)
 
-    def test_gate_does_not_import_printer_command_queue_or_downstream_clients(self) -> None:
+    def test_binding_does_not_import_printer_command_scheduler_or_downstream_clients(self) -> None:
         combined = "\n".join(path.read_text(encoding="utf-8") for path in (SERVICE, ROUTE, SCHEMA) if path.exists())
         forbidden = (
             "printer_manager",
@@ -55,7 +63,6 @@ class SwapmodNextPrintGateArchitectureTest(unittest.TestCase):
             "bambu_ftp",
             "print_scheduler",
             "background_dispatch",
-            "PrintQueueItem",
             "PrintLogEntry",
             "ErpDraftWriteRecord",
             "erp_draft_write",

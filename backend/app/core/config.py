@@ -199,6 +199,10 @@ class Settings(BaseSettings):
     # enabled it blocks queue scheduler dispatch before upload or print start.
     farm_swapmod_scheduler_next_print_gate_enabled: bool = False
 
+    # WP-080 SwapMod queue-readiness binding. Disabled by default and
+    # record-only; scheduler consumption is intentionally outside this slice.
+    farm_swapmod_queue_readiness_binding_enabled: bool = False
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
