@@ -100,6 +100,26 @@ Required commands:
 - Proof checks showed no tracked or worktree `.3mf`, `.gcode`, or `.gcode.3mf` artifacts in the repository.
 - Local port 18000 health passed with the direct canary route visible and disabled: `enabled=false`, `allow_real_commands=false`.
 
+2026-06-30 KST supervised A1 Mini physical canary:
+
+- Cycle `wp076-a1mini-20260630-release-2` was operator-approved for one printer and one step at a time.
+- `RELEASE_PLATE` was accepted by Bambuddy direct canary transport and advanced to `VERIFY_RELEASED`.
+- Operator confirmed `release_verified=true`; the state machine advanced to `READY_TO_LOAD`.
+- `LOAD_NEXT_PLATE` was accepted by Bambuddy direct canary transport and advanced to `VERIFY_LOADED`.
+- Operator confirmed `loaded_verified=true`; the state machine advanced to `READY_FOR_NEXT_PRINT` with `ready_for_next_print=true`.
+- No raw G-code was accepted from the API or recorded in this evidence.
+- No queue dispatch, scheduler dispatch, ERP, Obico, upload/start, or next-print automation was executed as part of WP-076.
+- Post-canary rollback was applied by disabling both direct canary flags; local status reported `enabled=false` and `allow_real_commands=false`, with Bambuddy healthy on port 18141.
+
+2026-06-30 KST close-out validation:
+
+- `make test-swapmod-a1mini-direct-canary` passed: 2 harness tests and 14 backend unit/architecture/API tests.
+- `make test-swapmod-state-machine` passed: 2 harness tests and 44 backend unit/architecture/API tests.
+- `make verify-fast` passed: context/workpack/hooks checks, 79 harness tests, and 2 characterization tests.
+- `git diff --check` passed.
+- Direct canary runtime status remained locked: `enabled=false`, `allow_real_commands=false`.
+- Tracked artifact scan found no `.3mf`, `.gcode`, or `.gcode.3mf` files; worktree scan found no such files outside the ignored `harness/artifacts/` fixture directory.
+
 ## Rollback
 
 Disable either `FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ENABLED` or
