@@ -11,11 +11,17 @@ from backend.app.models.user import User
 from backend.app.schemas.swapmod_state_machine import (
     SwapmodCanaryExecutionGateRequest,
     SwapmodNextPrintGateRequest,
+    SwapmodQueueReadinessBindingRequest,
     SwapmodOperatorTriggerRequest,
     SwapmodStateMachineCycleCreate,
     SwapmodTransportStepRequest,
     SwapmodVerificationRequest,
     SwapmodStateMachineEventRequest,
+)
+from backend.app.services.swapmod_queue_readiness_binding import (
+    SwapmodQueueReadinessBindingError,
+    bind_swapmod_queue_readiness,
+    swapmod_queue_readiness_binding_status,
 )
 from backend.app.services.swapmod_next_print_gate import (
     SwapmodNextPrintGateError,
@@ -71,6 +77,16 @@ def _require_next_print_gate_enabled() -> None:
         )
 
 
+def _require_queue_readiness_binding_enabled() -> None:
+    if not settings.farm_swapmod_queue_readiness_binding_enabled:
+        raise HTTPException(status_code=404, detail="SwapMod queue-readiness binding is disabled")
+    if not settings.farm_bed_automation_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "bed_automation_disabled", "message": "Bed automation must be enabled"},
+        )
+
+
 @router.get("/status")
 async def get_swapmod_state_machine_status(
     _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
@@ -87,6 +103,16 @@ async def get_swapmod_next_print_gate_status(
 ):
     return swapmod_next_print_gate_status(
         enabled=settings.farm_swapmod_next_print_gate_enabled,
+        bed_automation_enabled=settings.farm_bed_automation_enabled,
+    )
+
+
+@router.get("/queue-readiness-bindings/status")
+async def get_swapmod_queue_readiness_binding_status(
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+):
+    return swapmod_queue_readiness_binding_status(
+        enabled=settings.farm_swapmod_queue_readiness_binding_enabled,
         bed_automation_enabled=settings.farm_bed_automation_enabled,
     )
 
@@ -236,6 +262,32 @@ async def evaluate_swapmod_next_print_gate_request(
             bed_automation_enabled=settings.farm_bed_automation_enabled,
         )
     except SwapmodNextPrintGateError as exc:
+        raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
+
+
+@router.post("/cycles/{cycle_key}/queue-readiness-bindings", status_code=202)
+async def bind_swapmod_queue_readiness_request(
+    cycle_key: str,
+    body: SwapmodQueueReadinessBindingRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
+):
+    _require_enabled()
+    _require_queue_readiness_binding_enabled()
+    cycle = await get_swapmod_cycle(db, cycle_key=cycle_key)
+    if cycle is None:
+        raise HTTPException(status_code=404, detail="SwapMod state machine cycle not found")
+    try:
+        return await bind_swapmod_queue_readiness(
+            db,
+            cycle,
+            binding_key=body.binding_key,
+            queue_item_id=body.queue_item_id,
+            printer_id=body.printer_id,
+            enabled=settings.farm_swapmod_queue_readiness_binding_enabled,
+            bed_automation_enabled=settings.farm_bed_automation_enabled,
+        )
+    except SwapmodQueueReadinessBindingError as exc:
         raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
 
 
