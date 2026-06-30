@@ -148,6 +148,16 @@ async def bind_swapmod_queue_readiness(
     )
 
 
+async def evaluate_existing_swapmod_queue_readiness_binding(
+    db: AsyncSession,
+    cycle: SwapmodStateMachineCycle,
+    binding: SwapmodQueueReadinessBinding,
+    *,
+    idempotent: bool = True,
+) -> dict[str, object]:
+    return await _evaluate_existing_binding(db, cycle, binding, idempotent=idempotent)
+
+
 async def _get_binding_by_key(
     db: AsyncSession,
     *,

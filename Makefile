@@ -4,11 +4,11 @@
         harness-printflow-canary harness-plate-change-command harness-plate-change-transport harness-plate-change-3mf-postprocess \
         harness-plate-change-3mf-physical-canary harness-swapmod-3mf-dry-run harness-swapmod-canary-preflight \
         harness-swapmod-state-machine harness-swapmod-operator-trigger harness-swapmod-verification-adapter harness-swapmod-transport-boundary \
-        harness-swapmod-canary-execution-gate harness-swapmod-a1mini-direct-canary harness-swapmod-bed-readiness harness-swapmod-next-print-gate harness-swapmod-scheduler-next-print-gate harness-swapmod-queue-readiness-binding \
+        harness-swapmod-canary-execution-gate harness-swapmod-a1mini-direct-canary harness-swapmod-bed-readiness harness-swapmod-next-print-gate harness-swapmod-scheduler-next-print-gate harness-swapmod-queue-readiness-binding harness-swapmod-scheduler-queue-readiness-binding \
         test-unit test-characterization test-contract test-integration test-scenario test-observability \
         test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary test-plate-change-command test-plate-change-transport test-plate-change-3mf-postprocess test-plate-change-3mf-physical-canary test-plate-change-3mf-insertion test-swapmod-3mf-dry-run test-swapmod-canary-preflight \
         test-swapmod-state-machine test-swapmod-operator-trigger test-swapmod-verification-adapter test-swapmod-transport-boundary \
-        test-swapmod-canary-execution-gate test-swapmod-a1mini-direct-canary test-swapmod-bed-readiness test-swapmod-next-print-gate test-swapmod-scheduler-next-print-gate test-swapmod-queue-readiness-binding \
+        test-swapmod-canary-execution-gate test-swapmod-a1mini-direct-canary test-swapmod-bed-readiness test-swapmod-next-print-gate test-swapmod-scheduler-next-print-gate test-swapmod-queue-readiness-binding test-swapmod-scheduler-queue-readiness-binding \
         verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
@@ -105,6 +105,9 @@ harness-swapmod-scheduler-next-print-gate:
 
 harness-swapmod-queue-readiness-binding:
 	python3 -m unittest harness.tests.test_swapmod_queue_readiness_binding_mock
+
+harness-swapmod-scheduler-queue-readiness-binding:
+	python3 -m unittest harness.tests.test_swapmod_scheduler_queue_readiness_binding_mock
 
 harness-bed-automation:
 	python3 -m unittest harness.tests.test_bed_automation_mock
@@ -219,6 +222,9 @@ test-swapmod-scheduler-next-print-gate: harness-swapmod-scheduler-next-print-gat
 
 test-swapmod-queue-readiness-binding: harness-swapmod-queue-readiness-binding
 	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-swapmod-queue-readiness-binding-tests -e LOG_DIR=/tmp/bambuddy-swapmod-queue-readiness-binding-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.unit.services.test_swapmod_queue_readiness_binding backend.tests.unit.test_swapmod_queue_readiness_binding_architecture backend.tests.integration.test_swapmod_queue_readiness_binding_api
+
+test-swapmod-scheduler-queue-readiness-binding: harness-swapmod-scheduler-queue-readiness-binding
+	docker run --rm --network none -e LOG_TO_FILE=false -e DATA_DIR=/tmp/bambuddy-swapmod-scheduler-queue-readiness-binding-tests -e LOG_DIR=/tmp/bambuddy-swapmod-scheduler-queue-readiness-binding-tests/logs -e PYTHONDONTWRITEBYTECODE=1 -v $(CURDIR):/workspace:ro -w /workspace --entrypoint python $(COMPOSE_PROJECT_NAME)-bambuddy:latest -m unittest backend.tests.unit.services.test_swapmod_scheduler_queue_readiness_binding backend.tests.unit.test_swapmod_scheduler_queue_readiness_binding_architecture
 
 test-plate-change-3mf-insertion:
 	python3 -m unittest \
