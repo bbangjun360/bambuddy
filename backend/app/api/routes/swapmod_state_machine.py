@@ -167,6 +167,7 @@ async def get_swapmod_scheduler_handoff_diagnostics_status(
             "printer_command_sent",
             "scheduler_dispatch_supported",
         ],
+        "supported_summary_count_fields": ["blocked_reason_count"],
         "supported_handoff_identity_statuses": ["not_enforced", "not_available", "matched", "mismatch"],
         "supported_blocked_reason_sources": [
             "scheduler_next_print_gate",
