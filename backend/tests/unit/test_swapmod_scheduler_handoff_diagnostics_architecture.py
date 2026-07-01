@@ -69,7 +69,7 @@ class SwapmodSchedulerHandoffDiagnosticsArchitectureTest(unittest.TestCase):
 
         self.assertIn("evaluate_swapmod_scheduler_handoff_diagnostics", text)
         self.assertIn("@router.get(\"/scheduler-handoff-diagnostics\")", text)
-        handler = text.split("async def get_swapmod_scheduler_handoff_diagnostics", 1)[1].split("\n\n@router", 1)[0]
+        handler = text.split("async def get_swapmod_scheduler_handoff_diagnostics(", 1)[1].split("\n\n@router", 1)[0]
         self.assertIn("Permission.PRINTERS_READ", handler)
         self.assertNotIn("Permission.PRINTERS_CONTROL", handler)
         self.assertNotIn("_require_enabled()", handler)
@@ -102,6 +102,36 @@ class SwapmodSchedulerHandoffDiagnosticsArchitectureTest(unittest.TestCase):
             "serial",
             "gpio",
             "usb",
+        )
+        for token in forbidden:
+            with self.subTest(token=token):
+                self.assertNotIn(token, handler)
+
+
+    def test_status_api_route_is_read_only_and_does_not_open_handler_db_session(self) -> None:
+        text = ROUTE.read_text(encoding="utf-8")
+
+        self.assertIn("@router.get(\"/scheduler-handoff-diagnostics/status\")", text)
+        handler = text.split("async def get_swapmod_scheduler_handoff_diagnostics_status", 1)[1].split(
+            "\n\n@router", 1
+        )[0]
+        self.assertIn("Permission.PRINTERS_READ", handler)
+        self.assertNotIn("Permission.PRINTERS_CONTROL", handler)
+        self.assertNotIn("Depends(get_db)", handler)
+        self.assertNotIn("AsyncSession", handler)
+        self.assertNotIn("evaluate_swapmod_scheduler_handoff_diagnostics", handler)
+        self.assertIn("required_query_parameters", handler)
+        forbidden = (
+            "_start_print",
+            "consume_scheduler_queue_readiness_binding",
+            "printer_manager",
+            "bambu_mqtt",
+            "bambu_ftp",
+            "send_gcode",
+            "db.commit",
+            "db.flush",
+            "item.status",
+            "started_at",
         )
         for token in forbidden:
             with self.subTest(token=token):
