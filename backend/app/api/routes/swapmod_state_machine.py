@@ -160,6 +160,13 @@ async def get_swapmod_scheduler_handoff_diagnostics_status(
             "operator_action_source",
         ],
         "supported_gate_statuses": ["allowed", "blocked"],
+        "supported_summary_boolean_fields": [
+            "scheduler_start_allowed",
+            "read_only",
+            "real_command_sent",
+            "printer_command_sent",
+            "scheduler_dispatch_supported",
+        ],
         "supported_handoff_identity_statuses": ["not_enforced", "not_available", "matched", "mismatch"],
         "supported_blocked_reason_sources": [
             "scheduler_next_print_gate",
