@@ -232,6 +232,9 @@ class SwapmodSchedulerHandoffDiagnosticsApiTest(unittest.IsolatedAsyncioTestCase
         self.assertEqual(body["blocked_reasons"], [])
         self.assertFalse(body["scheduler_next_print_gate"]["enforced"])
         self.assertFalse(body["scheduler_queue_readiness_binding_gate"]["enforced"])
+        self.assertEqual(body["diagnostics_summary"]["enforced_gates"], [])
+        self.assertEqual(body["diagnostics_summary"]["handoff_identity_status"], "not_enforced")
+        self.assertFalse(body["diagnostics_summary"]["real_command_sent"])
         self.assertFalse(body["real_command_sent"])
         self.assertFalse(body["printer_command_sent"])
         self.assertFalse(body["queue_dispatch_supported"])
@@ -374,6 +377,12 @@ class SwapmodSchedulerHandoffDiagnosticsApiTest(unittest.IsolatedAsyncioTestCase
         self.assertFalse(body["scheduler_start_allowed"])
         self.assertIn("queue_readiness_binding_consumed", body["blocked_reasons"])
         self.assertTrue(body["queue_readiness_binding_consumed"])
+        self.assertEqual(body["diagnostics_summary"]["primary_blocker"], "queue_readiness_binding_consumed")
+        self.assertEqual(
+            body["diagnostics_summary"]["blocked_reason_sources"]["scheduler_queue_readiness_binding_gate"],
+            ["queue_readiness_binding_consumed"],
+        )
+        self.assertFalse(body["diagnostics_summary"]["printer_command_sent"])
         self.assertFalse(body["printer_command_sent"])
         self.assertFalse(body["scheduler_dispatch_supported"])
         self.assertEqual(await self.binding_consumed_at(binding_id), consumed_at)

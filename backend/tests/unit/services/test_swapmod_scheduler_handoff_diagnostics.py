@@ -193,6 +193,30 @@ class SwapmodSchedulerHandoffDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(diagnostics["scheduler_start_allowed"])
         self.assertEqual(diagnostics["blocked_reasons"], [])
         self.assertEqual(diagnostics["handoff_identity_blocked_reasons"], [])
+        self.assertEqual(
+            diagnostics["diagnostics_summary"],
+            {
+                "contract_version": 1,
+                "gate_status": "allowed",
+                "scheduler_start_allowed": True,
+                "primary_blocker": None,
+                "blocked_reason_count": 0,
+                "blocked_reason_sources": {
+                    "scheduler_next_print_gate": [],
+                    "scheduler_queue_readiness_binding_gate": [],
+                    "handoff_identity": [],
+                },
+                "enforced_gates": [
+                    "scheduler_next_print_gate",
+                    "scheduler_queue_readiness_binding_gate",
+                ],
+                "handoff_identity_status": "matched",
+                "read_only": True,
+                "real_command_sent": False,
+                "printer_command_sent": False,
+                "scheduler_dispatch_supported": False,
+            },
+        )
         self.assertEqual(diagnostics["latest_print_run_id"], scheduler_print_run_key(run.id))
         self.assertEqual(diagnostics["source_cycle_key"], cycle.cycle_key)
         self.assertFalse(diagnostics["real_command_sent"])
@@ -231,10 +255,46 @@ class SwapmodSchedulerHandoffDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
             diagnostics["scheduler_queue_readiness_binding_gate"]["blocked_reasons"],
             ["queue_readiness_binding_consumed"],
         )
+        summary = diagnostics["diagnostics_summary"]
+        self.assertEqual(summary["primary_blocker"], "queue_readiness_binding_consumed")
+        self.assertEqual(summary["blocked_reason_count"], 1)
+        self.assertEqual(
+            summary["blocked_reason_sources"],
+            {
+                "scheduler_next_print_gate": [],
+                "scheduler_queue_readiness_binding_gate": ["queue_readiness_binding_consumed"],
+                "handoff_identity": [],
+            },
+        )
+        self.assertEqual(summary["handoff_identity_status"], "matched")
         self.assertFalse(diagnostics["printer_command_sent"])
         still_consumed = await self.session.get(SwapmodQueueReadinessBinding, binding_payload["binding_id"])
         assert still_consumed is not None
         self.assertEqual(still_consumed.consumed_at, consumed_at)
+        await self.session.refresh(item)
+        self.assertEqual(item.status, "pending")
+        self.assertIsNone(item.started_at)
+
+    async def test_missing_gate_identity_reports_summary_not_available(self) -> None:
+        printer, item = await self.create_startable_queue_item()
+
+        diagnostics = await self.evaluate_diagnostics(item)
+
+        self.assertEqual(diagnostics["gate_status"], "blocked")
+        self.assertFalse(diagnostics["scheduler_start_allowed"])
+        summary = diagnostics["diagnostics_summary"]
+        self.assertEqual(summary["handoff_identity_status"], "not_available")
+        self.assertIn("last_print_run_missing", diagnostics["blocked_reasons"])
+        self.assertIn("queue_readiness_binding_missing", diagnostics["blocked_reasons"])
+        self.assertEqual(
+            summary["blocked_reason_sources"],
+            {
+                "scheduler_next_print_gate": ["last_print_run_missing"],
+                "scheduler_queue_readiness_binding_gate": ["queue_readiness_binding_missing"],
+                "handoff_identity": [],
+            },
+        )
+        self.assertFalse(diagnostics["printer_command_sent"])
         await self.session.refresh(item)
         self.assertEqual(item.status, "pending")
         self.assertIsNone(item.started_at)
@@ -264,6 +324,21 @@ class SwapmodSchedulerHandoffDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("scheduler_handoff_source_print_run_mismatch", diagnostics["blocked_reasons"])
         self.assertIn("scheduler_handoff_source_cycle_mismatch", diagnostics["blocked_reasons"])
+        summary = diagnostics["diagnostics_summary"]
+        self.assertEqual(summary["primary_blocker"], "scheduler_handoff_source_print_run_mismatch")
+        self.assertEqual(summary["blocked_reason_count"], 2)
+        self.assertEqual(
+            summary["blocked_reason_sources"],
+            {
+                "scheduler_next_print_gate": [],
+                "scheduler_queue_readiness_binding_gate": [],
+                "handoff_identity": [
+                    "scheduler_handoff_source_print_run_mismatch",
+                    "scheduler_handoff_source_cycle_mismatch",
+                ],
+            },
+        )
+        self.assertEqual(summary["handoff_identity_status"], "mismatch")
         self.assertEqual(diagnostics["latest_print_run_id"], scheduler_print_run_key(latest_run.id))
         self.assertEqual(diagnostics["source_cycle_key"], latest_cycle.cycle_key)
         self.assertEqual(

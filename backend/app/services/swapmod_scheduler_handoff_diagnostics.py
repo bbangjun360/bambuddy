@@ -43,16 +43,27 @@ async def evaluate_swapmod_scheduler_handoff_diagnostics(
         handoff_identity_blocked_reasons,
     )
     scheduler_start_allowed = not blocked_reasons
+    gate_status = (
+        SCHEDULER_HANDOFF_DIAGNOSTICS_ALLOWED
+        if scheduler_start_allowed
+        else SCHEDULER_HANDOFF_DIAGNOSTICS_BLOCKED
+    )
 
     return {
         "mode": "SWAPMOD_SCHEDULER_HANDOFF_DIAGNOSTICS",
-        "gate_status": SCHEDULER_HANDOFF_DIAGNOSTICS_ALLOWED
-        if scheduler_start_allowed
-        else SCHEDULER_HANDOFF_DIAGNOSTICS_BLOCKED,
+        "gate_status": gate_status,
         "scheduler_start_allowed": scheduler_start_allowed,
         "next_print_allowed": scheduler_start_allowed,
         "blocked_reasons": blocked_reasons,
         "handoff_identity_blocked_reasons": handoff_identity_blocked_reasons,
+        "diagnostics_summary": _diagnostics_summary(
+            gate_status=gate_status,
+            scheduler_start_allowed=scheduler_start_allowed,
+            blocked_reasons=blocked_reasons,
+            next_print_gate=next_print_gate,
+            queue_readiness_binding_gate=queue_readiness_binding_gate,
+            handoff_identity_blocked_reasons=handoff_identity_blocked_reasons,
+        ),
         "queue_item_id": queue_item_id,
         "printer_id": printer_id,
         "latest_print_log_id": next_print_gate.get("latest_print_log_id"),
@@ -72,6 +83,60 @@ async def evaluate_swapmod_scheduler_handoff_diagnostics(
         "real_command_sent": False,
         "printer_command_sent": False,
         "queue_dispatch_supported": False,
+        "scheduler_dispatch_supported": False,
+    }
+
+
+def _diagnostics_summary(
+    *,
+    gate_status: str,
+    scheduler_start_allowed: bool,
+    blocked_reasons: list[str],
+    next_print_gate: dict[str, object],
+    queue_readiness_binding_gate: dict[str, object],
+    handoff_identity_blocked_reasons: list[str],
+) -> dict[str, object]:
+    next_print_reasons = list(next_print_gate.get("blocked_reasons") or [])
+    queue_readiness_binding_reasons = list(queue_readiness_binding_gate.get("blocked_reasons") or [])
+    enforced_gates: list[str] = []
+    if next_print_gate.get("enforced"):
+        enforced_gates.append("scheduler_next_print_gate")
+    if queue_readiness_binding_gate.get("enforced"):
+        enforced_gates.append("scheduler_queue_readiness_binding_gate")
+
+    identity_available = all(
+        (
+            next_print_gate.get("latest_print_run_id"),
+            queue_readiness_binding_gate.get("source_print_run_id"),
+            next_print_gate.get("source_cycle_key"),
+            queue_readiness_binding_gate.get("source_cycle_key"),
+        )
+    )
+    if len(enforced_gates) < 2:
+        handoff_identity_status = "not_enforced"
+    elif not identity_available:
+        handoff_identity_status = "not_available"
+    elif handoff_identity_blocked_reasons:
+        handoff_identity_status = "mismatch"
+    else:
+        handoff_identity_status = "matched"
+
+    return {
+        "contract_version": 1,
+        "gate_status": gate_status,
+        "scheduler_start_allowed": scheduler_start_allowed,
+        "primary_blocker": blocked_reasons[0] if blocked_reasons else None,
+        "blocked_reason_count": len(blocked_reasons),
+        "blocked_reason_sources": {
+            "scheduler_next_print_gate": next_print_reasons,
+            "scheduler_queue_readiness_binding_gate": queue_readiness_binding_reasons,
+            "handoff_identity": handoff_identity_blocked_reasons,
+        },
+        "enforced_gates": enforced_gates,
+        "handoff_identity_status": handoff_identity_status,
+        "read_only": True,
+        "real_command_sent": False,
+        "printer_command_sent": False,
         "scheduler_dispatch_supported": False,
     }
 
