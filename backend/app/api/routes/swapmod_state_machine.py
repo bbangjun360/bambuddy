@@ -133,6 +133,7 @@ async def get_swapmod_scheduler_handoff_diagnostics_status(
         "required_permission": Permission.PRINTERS_READ.value,
         "response_contract_version": 1,
         "diagnostics_summary_contract_version": 1,
+        "blocked_reason_details_contract_version": 1,
         "mutates_state": False,
         "blocked_reason_catalog": swapmod_scheduler_handoff_diagnostics_blocked_reason_catalog(),
         "supported_summary_fields": [
@@ -151,6 +152,12 @@ async def get_swapmod_scheduler_handoff_diagnostics_status(
             "real_command_sent",
             "printer_command_sent",
             "scheduler_dispatch_supported",
+        ],
+        "supported_blocked_reason_detail_fields": [
+            "reason",
+            "sources",
+            "operator_action",
+            "operator_action_source",
         ],
         "supported_handoff_identity_statuses": ["not_enforced", "not_available", "matched", "mismatch"],
         "supported_blocked_reason_sources": [
