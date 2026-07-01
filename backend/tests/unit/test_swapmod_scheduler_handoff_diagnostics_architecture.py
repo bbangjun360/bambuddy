@@ -26,6 +26,9 @@ class SwapmodSchedulerHandoffDiagnosticsArchitectureTest(unittest.TestCase):
         self.assertIn("evaluate_scheduler_queue_readiness_binding_gate", text)
         self.assertIn("scheduler_handoff_source_print_run_mismatch", text)
         self.assertIn("scheduler_handoff_source_cycle_mismatch", text)
+        self.assertIn("diagnostics_summary", text)
+        self.assertIn("blocked_reason_sources", text)
+        self.assertIn("handoff_identity_status", text)
 
     def test_service_does_not_import_scheduler_dispatch_or_external_clients(self) -> None:
         text = SERVICE.read_text(encoding="utf-8") if SERVICE.exists() else ""
