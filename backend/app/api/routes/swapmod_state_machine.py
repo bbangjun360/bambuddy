@@ -168,6 +168,11 @@ async def get_swapmod_scheduler_handoff_diagnostics_status(
             "scheduler_dispatch_supported",
         ],
         "supported_summary_count_fields": ["blocked_reason_count"],
+        "supported_summary_nullable_fields": [
+            "primary_blocker",
+            "primary_operator_action",
+            "primary_operator_action_source",
+        ],
         "supported_handoff_identity_statuses": ["not_enforced", "not_available", "matched", "mismatch"],
         "supported_blocked_reason_sources": [
             "scheduler_next_print_gate",
