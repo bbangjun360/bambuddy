@@ -170,6 +170,7 @@ class SwapmodSchedulerHandoffDiagnosticsArchitectureTest(unittest.TestCase):
         self.assertIn("supported_summary_fields", handler)
         self.assertIn("supported_blocked_reason_detail_fields", handler)
         self.assertIn("supported_gate_statuses", handler)
+        self.assertIn("supported_summary_boolean_fields", handler)
         self.assertIn("supported_handoff_identity_statuses", handler)
         self.assertIn("supported_blocked_reason_sources", handler)
         self.assertIn("blocked_reason_catalog", handler)
