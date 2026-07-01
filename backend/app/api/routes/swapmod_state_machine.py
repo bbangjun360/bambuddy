@@ -191,6 +191,7 @@ async def get_swapmod_scheduler_handoff_diagnostics_status(
             "queue_dispatch_supported",
             "scheduler_dispatch_supported",
         ],
+        "supported_status_string_fields": ["mode", "required_permission"],
         "supported_handoff_identity_statuses": ["not_enforced", "not_available", "matched", "mismatch"],
         "supported_blocked_reason_sources": [
             "scheduler_next_print_gate",
