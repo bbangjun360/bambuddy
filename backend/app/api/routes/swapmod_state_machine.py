@@ -23,6 +23,9 @@ from backend.app.services.swapmod_queue_readiness_binding import (
     bind_swapmod_queue_readiness,
     swapmod_queue_readiness_binding_status,
 )
+from backend.app.services.swapmod_scheduler_handoff_diagnostics import (
+    evaluate_swapmod_scheduler_handoff_diagnostics,
+)
 from backend.app.services.swapmod_next_print_gate import (
     SwapmodNextPrintGateError,
     evaluate_swapmod_next_print_gate,
@@ -113,6 +116,23 @@ async def get_swapmod_queue_readiness_binding_status(
 ):
     return swapmod_queue_readiness_binding_status(
         enabled=settings.farm_swapmod_queue_readiness_binding_enabled,
+        bed_automation_enabled=settings.farm_bed_automation_enabled,
+    )
+
+
+@router.get("/scheduler-handoff-diagnostics")
+async def get_swapmod_scheduler_handoff_diagnostics(
+    queue_item_id: int,
+    printer_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+):
+    return await evaluate_swapmod_scheduler_handoff_diagnostics(
+        db,
+        queue_item_id=queue_item_id,
+        printer_id=printer_id,
+        scheduler_next_print_gate_enabled=settings.farm_swapmod_scheduler_next_print_gate_enabled,
+        scheduler_queue_readiness_binding_enabled=settings.farm_swapmod_scheduler_queue_readiness_binding_enabled,
         bed_automation_enabled=settings.farm_bed_automation_enabled,
     )
 
