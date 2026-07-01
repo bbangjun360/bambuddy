@@ -8,7 +8,9 @@ from unittest.mock import patch
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.app.api.routes import swapmod_state_machine as swapmod_route
+from backend.app.core.auth import create_access_token, get_password_hash
 from backend.app.core.database import Base, get_db
+from backend.app.core.permissions import Permission
 from backend.app.main import app
 from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.print_queue import PrintQueueItem
@@ -193,6 +195,29 @@ class SwapmodSchedulerHandoffDiagnosticsApiTest(unittest.IsolatedAsyncioTestCase
             self.assertIsNotNone(binding)
             return binding.consumed_at
 
+    async def enable_auth_and_create_token(self, *, username: str, permissions: list[str]) -> str:
+        from backend.app.models.group import Group
+        from backend.app.models.settings import Settings
+        from backend.app.models.user import User
+
+        async with self.sessionmaker() as session:
+            session.add(Settings(key="auth_enabled", value="true"))
+            group = Group(
+                name=f"wp087-{username}",
+                description="WP-087 diagnostics auth fixture",
+                permissions=permissions,
+            )
+            user = User(
+                username=username,
+                password_hash=get_password_hash("local-test-only"),
+                role="user",
+                is_active=True,
+            )
+            user.groups.append(group)
+            session.add_all([group, user])
+            await session.commit()
+        return create_access_token(data={"sub": username})
+
     async def test_handoff_diagnostics_api_reports_safe_default_off_status(self) -> None:
         response = await self.client.get(
             "/api/v1/swapmod-state-machine/scheduler-handoff-diagnostics",
@@ -238,6 +263,93 @@ class SwapmodSchedulerHandoffDiagnosticsApiTest(unittest.IsolatedAsyncioTestCase
         )
 
         self.assertEqual(response.status_code, 422)
+
+    async def test_handoff_diagnostics_status_requires_auth_when_enabled(self) -> None:
+        await self.enable_auth_and_create_token(
+            username="wp087-read-status-denied",
+            permissions=[Permission.PRINTERS_READ.value],
+        )
+
+        response = await self.client.get(
+            "/api/v1/swapmod-state-machine/scheduler-handoff-diagnostics/status",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    async def test_handoff_diagnostics_evaluation_requires_auth_when_enabled(self) -> None:
+        await self.enable_auth_and_create_token(
+            username="wp087-read-evaluation-denied",
+            permissions=[Permission.PRINTERS_READ.value],
+        )
+
+        response = await self.client.get(
+            "/api/v1/swapmod-state-machine/scheduler-handoff-diagnostics",
+            params={"queue_item_id": 123, "printer_id": 456},
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    async def test_handoff_diagnostics_status_allows_printers_read_token(self) -> None:
+        token = await self.enable_auth_and_create_token(
+            username="wp087-read-status-allowed",
+            permissions=[Permission.PRINTERS_READ.value],
+        )
+
+        response = await self.client.get(
+            "/api/v1/swapmod-state-machine/scheduler-handoff-diagnostics/status",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["mode"], "SWAPMOD_SCHEDULER_HANDOFF_DIAGNOSTICS_API_STATUS")
+        self.assertFalse(body["printer_command_sent"])
+        self.assertFalse(body["scheduler_dispatch_supported"])
+
+    async def test_handoff_diagnostics_status_rejects_token_without_printers_read(self) -> None:
+        token = await self.enable_auth_and_create_token(
+            username="wp087-no-read-status-denied",
+            permissions=[],
+        )
+
+        response = await self.client.get(
+            "/api/v1/swapmod-state-machine/scheduler-handoff-diagnostics/status",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    async def test_handoff_diagnostics_evaluation_allows_printers_read_token(self) -> None:
+        token = await self.enable_auth_and_create_token(
+            username="wp087-read-evaluation-allowed",
+            permissions=[Permission.PRINTERS_READ.value],
+        )
+
+        response = await self.client.get(
+            "/api/v1/swapmod-state-machine/scheduler-handoff-diagnostics",
+            params={"queue_item_id": 123, "printer_id": 456},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["mode"], "SWAPMOD_SCHEDULER_HANDOFF_DIAGNOSTICS")
+        self.assertFalse(body["printer_command_sent"])
+        self.assertFalse(body["scheduler_dispatch_supported"])
+
+    async def test_handoff_diagnostics_evaluation_rejects_token_without_printers_read(self) -> None:
+        token = await self.enable_auth_and_create_token(
+            username="wp087-no-read-denied",
+            permissions=[],
+        )
+
+        response = await self.client.get(
+            "/api/v1/swapmod-state-machine/scheduler-handoff-diagnostics",
+            params={"queue_item_id": 123, "printer_id": 456},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     async def test_consumed_binding_api_blocks_without_mutating_queue_or_binding(self) -> None:
         queue_item_id = await self.create_queue_item()
