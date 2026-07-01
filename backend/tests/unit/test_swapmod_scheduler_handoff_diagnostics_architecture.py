@@ -39,6 +39,7 @@ class SwapmodSchedulerHandoffDiagnosticsArchitectureTest(unittest.TestCase):
         self.assertIn("blocked_reason_sources", text)
         self.assertIn("blocked_reason_catalog", text)
         self.assertIn("primary_operator_action", text)
+        self.assertIn("blocked_reason_details", text)
         self.assertIn("handoff_identity_status", text)
 
     def test_blocked_reason_catalog_covers_current_gate_emitters(self) -> None:

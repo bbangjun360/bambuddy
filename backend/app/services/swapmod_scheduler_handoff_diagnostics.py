@@ -189,10 +189,8 @@ def _diagnostics_summary(
         "scheduler_queue_readiness_binding_gate": queue_readiness_binding_reasons,
         "handoff_identity": handoff_identity_blocked_reasons,
     }
-    primary_operator_action, primary_operator_action_source = _primary_operator_action(
-        blocked_reasons,
-        blocked_reason_sources,
-    )
+    blocked_reason_details = _blocked_reason_details(blocked_reasons, blocked_reason_sources)
+    primary_operator_action, primary_operator_action_source = _primary_operator_action(blocked_reason_details)
     enforced_gates: list[str] = []
     if next_print_gate.get("enforced"):
         enforced_gates.append("scheduler_next_print_gate")
@@ -223,6 +221,7 @@ def _diagnostics_summary(
         "primary_blocker": blocked_reasons[0] if blocked_reasons else None,
         "primary_operator_action": primary_operator_action,
         "primary_operator_action_source": primary_operator_action_source,
+        "blocked_reason_details": blocked_reason_details,
         "blocked_reason_count": len(blocked_reasons),
         "blocked_reason_sources": blocked_reason_sources,
         "enforced_gates": enforced_gates,
@@ -234,21 +233,48 @@ def _diagnostics_summary(
     }
 
 
-def _primary_operator_action(
+def _blocked_reason_details(
     blocked_reasons: list[str],
     blocked_reason_sources: dict[str, list[str]],
+) -> list[dict[str, object]]:
+    details: list[dict[str, object]] = []
+    for reason in blocked_reasons:
+        sources = [
+            source
+            for source in _SCHEDULER_HANDOFF_DIAGNOSTICS_REASON_SOURCE_ORDER
+            if reason in blocked_reason_sources.get(source, [])
+        ]
+        operator_action = "review_diagnostics_blocker"
+        operator_action_source = None
+        for source in sources:
+            action = _OPERATOR_ACTIONS_BY_SOURCE_REASON.get(source, {}).get(reason)
+            if action is None:
+                continue
+            operator_action = action
+            operator_action_source = source
+            break
+        details.append(
+            {
+                "reason": reason,
+                "sources": sources,
+                "operator_action": operator_action,
+                "operator_action_source": operator_action_source,
+            }
+        )
+    return details
+
+
+def _primary_operator_action(
+    blocked_reason_details: list[dict[str, object]],
 ) -> tuple[str | None, str | None]:
-    if not blocked_reasons:
+    if not blocked_reason_details:
         return None, None
 
-    for reason in blocked_reasons:
-        for source in _SCHEDULER_HANDOFF_DIAGNOSTICS_REASON_SOURCE_ORDER:
-            if reason not in blocked_reason_sources.get(source, []):
-                continue
-            action = _OPERATOR_ACTIONS_BY_SOURCE_REASON.get(source, {}).get(reason)
-            return action or "review_diagnostics_blocker", source
-
-    return "review_diagnostics_blocker", None
+    first_detail = blocked_reason_details[0]
+    return (
+        str(first_detail["operator_action"]),
+        first_detail["operator_action_source"] if first_detail["operator_action_source"] is not None else None,
+    )
 
 
 def _handoff_identity_blocked_reasons(

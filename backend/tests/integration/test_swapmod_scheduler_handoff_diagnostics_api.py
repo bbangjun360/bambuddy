@@ -437,6 +437,17 @@ class SwapmodSchedulerHandoffDiagnosticsApiTest(unittest.IsolatedAsyncioTestCase
             "scheduler_queue_readiness_binding_gate",
         )
         self.assertEqual(
+            body["diagnostics_summary"]["blocked_reason_details"],
+            [
+                {
+                    "reason": "queue_readiness_binding_consumed",
+                    "sources": ["scheduler_queue_readiness_binding_gate"],
+                    "operator_action": "select_unconsumed_queue_binding",
+                    "operator_action_source": "scheduler_queue_readiness_binding_gate",
+                },
+            ],
+        )
+        self.assertEqual(
             body["diagnostics_summary"]["blocked_reason_sources"]["scheduler_queue_readiness_binding_gate"],
             ["queue_readiness_binding_consumed"],
         )
