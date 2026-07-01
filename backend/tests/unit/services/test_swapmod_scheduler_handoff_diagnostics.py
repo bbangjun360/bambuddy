@@ -200,6 +200,8 @@ class SwapmodSchedulerHandoffDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
                 "gate_status": "allowed",
                 "scheduler_start_allowed": True,
                 "primary_blocker": None,
+                "primary_operator_action": None,
+                "primary_operator_action_source": None,
                 "blocked_reason_count": 0,
                 "blocked_reason_sources": {
                     "scheduler_next_print_gate": [],
@@ -257,6 +259,8 @@ class SwapmodSchedulerHandoffDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
         )
         summary = diagnostics["diagnostics_summary"]
         self.assertEqual(summary["primary_blocker"], "queue_readiness_binding_consumed")
+        self.assertEqual(summary["primary_operator_action"], "select_unconsumed_queue_binding")
+        self.assertEqual(summary["primary_operator_action_source"], "scheduler_queue_readiness_binding_gate")
         self.assertEqual(summary["blocked_reason_count"], 1)
         self.assertEqual(
             summary["blocked_reason_sources"],
@@ -284,6 +288,9 @@ class SwapmodSchedulerHandoffDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(diagnostics["scheduler_start_allowed"])
         summary = diagnostics["diagnostics_summary"]
         self.assertEqual(summary["handoff_identity_status"], "not_available")
+        self.assertEqual(summary["primary_blocker"], "last_print_run_missing")
+        self.assertEqual(summary["primary_operator_action"], "review_latest_print_log")
+        self.assertEqual(summary["primary_operator_action_source"], "scheduler_next_print_gate")
         self.assertIn("last_print_run_missing", diagnostics["blocked_reasons"])
         self.assertIn("queue_readiness_binding_missing", diagnostics["blocked_reasons"])
         self.assertEqual(
@@ -326,6 +333,8 @@ class SwapmodSchedulerHandoffDiagnosticsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("scheduler_handoff_source_cycle_mismatch", diagnostics["blocked_reasons"])
         summary = diagnostics["diagnostics_summary"]
         self.assertEqual(summary["primary_blocker"], "scheduler_handoff_source_print_run_mismatch")
+        self.assertEqual(summary["primary_operator_action"], "review_handoff_print_run_identity")
+        self.assertEqual(summary["primary_operator_action_source"], "handoff_identity")
         self.assertEqual(summary["blocked_reason_count"], 2)
         self.assertEqual(
             summary["blocked_reason_sources"],
