@@ -142,6 +142,7 @@ async def get_swapmod_scheduler_handoff_diagnostics_status(
             "primary_blocker",
             "primary_operator_action",
             "primary_operator_action_source",
+            "blocked_reason_details",
             "blocked_reason_count",
             "blocked_reason_sources",
             "enforced_gates",
