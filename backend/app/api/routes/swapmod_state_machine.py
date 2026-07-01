@@ -25,6 +25,7 @@ from backend.app.services.swapmod_queue_readiness_binding import (
 )
 from backend.app.services.swapmod_scheduler_handoff_diagnostics import (
     evaluate_swapmod_scheduler_handoff_diagnostics,
+    swapmod_scheduler_handoff_diagnostics_blocked_reason_catalog,
 )
 from backend.app.services.swapmod_next_print_gate import (
     SwapmodNextPrintGateError,
@@ -133,11 +134,14 @@ async def get_swapmod_scheduler_handoff_diagnostics_status(
         "response_contract_version": 1,
         "diagnostics_summary_contract_version": 1,
         "mutates_state": False,
+        "blocked_reason_catalog": swapmod_scheduler_handoff_diagnostics_blocked_reason_catalog(),
         "supported_summary_fields": [
             "contract_version",
             "gate_status",
             "scheduler_start_allowed",
             "primary_blocker",
+            "primary_operator_action",
+            "primary_operator_action_source",
             "blocked_reason_count",
             "blocked_reason_sources",
             "enforced_gates",

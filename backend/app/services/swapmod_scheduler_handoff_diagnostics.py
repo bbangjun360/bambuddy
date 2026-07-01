@@ -9,6 +9,92 @@ from backend.app.services.swapmod_scheduler_queue_readiness_binding import (
 
 SCHEDULER_HANDOFF_DIAGNOSTICS_ALLOWED = "allowed"
 SCHEDULER_HANDOFF_DIAGNOSTICS_BLOCKED = "blocked"
+SCHEDULER_HANDOFF_DIAGNOSTICS_REASON_CATALOG_VERSION = 1
+
+_SCHEDULER_HANDOFF_DIAGNOSTICS_REASON_SOURCE_ORDER = (
+    "scheduler_next_print_gate",
+    "scheduler_queue_readiness_binding_gate",
+    "handoff_identity",
+)
+
+_SCHEDULER_HANDOFF_DIAGNOSTICS_REASON_CATALOG = {
+    "scheduler_next_print_gate": [
+        {"reason": "printer_missing", "operator_action": "review_printer_selection"},
+        {"reason": "bed_automation_disabled", "operator_action": "review_bed_automation_gate"},
+        {"reason": "last_print_run_missing", "operator_action": "review_latest_print_log"},
+        {
+            "reason": "swapmod_cycle_missing_for_last_print",
+            "operator_action": "review_swapmod_cycle_for_latest_print",
+        },
+        {"reason": "printer_mismatch", "operator_action": "review_printer_identity"},
+        {"reason": "swapmod_manual_review_required", "operator_action": "resolve_swapmod_manual_review"},
+        {"reason": "swapmod_cycle_not_ready", "operator_action": "complete_swapmod_ready_verification"},
+        {"reason": "bed_readiness_record_missing", "operator_action": "review_bed_readiness_handoff"},
+        {"reason": "bed_printer_missing", "operator_action": "review_bed_readiness_printer"},
+        {"reason": "bed_printer_mismatch", "operator_action": "review_bed_printer_identity"},
+        {"reason": "bed_manual_review_required", "operator_action": "resolve_bed_manual_review"},
+        {"reason": "bed_not_ready_for_next_print", "operator_action": "verify_bed_ready_for_next_print"},
+    ],
+    "scheduler_queue_readiness_binding_gate": [
+        {"reason": "printer_missing", "operator_action": "review_printer_selection"},
+        {"reason": "bed_automation_disabled", "operator_action": "review_bed_automation_gate"},
+        {"reason": "queue_readiness_binding_missing", "operator_action": "review_queue_readiness_binding"},
+        {
+            "reason": "queue_readiness_binding_printer_mismatch",
+            "operator_action": "review_binding_printer_identity",
+        },
+        {"reason": "queue_readiness_binding_consumed", "operator_action": "select_unconsumed_queue_binding"},
+        {"reason": "swapmod_cycle_missing_for_binding", "operator_action": "review_binding_source_cycle"},
+        {
+            "reason": "queue_readiness_binding_source_print_run_mismatch",
+            "operator_action": "review_binding_print_run_identity",
+        },
+        {
+            "reason": "queue_readiness_binding_bed_cycle_mismatch",
+            "operator_action": "review_binding_bed_cycle_identity",
+        },
+        {"reason": "queue_readiness_binding_not_ready", "operator_action": "recheck_queue_readiness_binding"},
+        {"reason": "queue_fingerprint_mismatch", "operator_action": "review_current_queue_item_binding"},
+        {"reason": "printer_mismatch", "operator_action": "review_printer_identity"},
+        {"reason": "swapmod_manual_review_required", "operator_action": "resolve_swapmod_manual_review"},
+        {"reason": "swapmod_cycle_not_ready", "operator_action": "complete_swapmod_ready_verification"},
+        {"reason": "bed_readiness_record_missing", "operator_action": "review_bed_readiness_handoff"},
+        {"reason": "bed_printer_missing", "operator_action": "review_bed_readiness_printer"},
+        {"reason": "bed_printer_mismatch", "operator_action": "review_bed_printer_identity"},
+        {"reason": "bed_manual_review_required", "operator_action": "resolve_bed_manual_review"},
+        {"reason": "bed_not_ready_for_next_print", "operator_action": "verify_bed_ready_for_next_print"},
+        {"reason": "queue_item_missing", "operator_action": "review_queue_item_exists"},
+        {"reason": "queue_status_not_pending", "operator_action": "review_queue_item_pending_status"},
+        {"reason": "queue_printer_missing", "operator_action": "review_queue_printer_assignment"},
+        {"reason": "queue_printer_mismatch", "operator_action": "review_queue_printer_identity"},
+        {"reason": "queue_source_missing", "operator_action": "review_queue_source_file"},
+    ],
+    "handoff_identity": [
+        {
+            "reason": "scheduler_handoff_source_print_run_mismatch",
+            "operator_action": "review_handoff_print_run_identity",
+        },
+        {
+            "reason": "scheduler_handoff_source_cycle_mismatch",
+            "operator_action": "review_handoff_cycle_identity",
+        },
+    ],
+}
+
+_OPERATOR_ACTIONS_BY_SOURCE_REASON = {
+    source: {str(entry["reason"]): str(entry["operator_action"]) for entry in entries}
+    for source, entries in _SCHEDULER_HANDOFF_DIAGNOSTICS_REASON_CATALOG.items()
+}
+
+
+def swapmod_scheduler_handoff_diagnostics_blocked_reason_catalog() -> dict[str, object]:
+    return {
+        "contract_version": SCHEDULER_HANDOFF_DIAGNOSTICS_REASON_CATALOG_VERSION,
+        "sources": {
+            source: [dict(entry) for entry in _SCHEDULER_HANDOFF_DIAGNOSTICS_REASON_CATALOG[source]]
+            for source in _SCHEDULER_HANDOFF_DIAGNOSTICS_REASON_SOURCE_ORDER
+        },
+    }
 
 
 async def evaluate_swapmod_scheduler_handoff_diagnostics(
@@ -98,6 +184,15 @@ def _diagnostics_summary(
 ) -> dict[str, object]:
     next_print_reasons = list(next_print_gate.get("blocked_reasons") or [])
     queue_readiness_binding_reasons = list(queue_readiness_binding_gate.get("blocked_reasons") or [])
+    blocked_reason_sources = {
+        "scheduler_next_print_gate": next_print_reasons,
+        "scheduler_queue_readiness_binding_gate": queue_readiness_binding_reasons,
+        "handoff_identity": handoff_identity_blocked_reasons,
+    }
+    primary_operator_action, primary_operator_action_source = _primary_operator_action(
+        blocked_reasons,
+        blocked_reason_sources,
+    )
     enforced_gates: list[str] = []
     if next_print_gate.get("enforced"):
         enforced_gates.append("scheduler_next_print_gate")
@@ -126,12 +221,10 @@ def _diagnostics_summary(
         "gate_status": gate_status,
         "scheduler_start_allowed": scheduler_start_allowed,
         "primary_blocker": blocked_reasons[0] if blocked_reasons else None,
+        "primary_operator_action": primary_operator_action,
+        "primary_operator_action_source": primary_operator_action_source,
         "blocked_reason_count": len(blocked_reasons),
-        "blocked_reason_sources": {
-            "scheduler_next_print_gate": next_print_reasons,
-            "scheduler_queue_readiness_binding_gate": queue_readiness_binding_reasons,
-            "handoff_identity": handoff_identity_blocked_reasons,
-        },
+        "blocked_reason_sources": blocked_reason_sources,
         "enforced_gates": enforced_gates,
         "handoff_identity_status": handoff_identity_status,
         "read_only": True,
@@ -139,6 +232,23 @@ def _diagnostics_summary(
         "printer_command_sent": False,
         "scheduler_dispatch_supported": False,
     }
+
+
+def _primary_operator_action(
+    blocked_reasons: list[str],
+    blocked_reason_sources: dict[str, list[str]],
+) -> tuple[str | None, str | None]:
+    if not blocked_reasons:
+        return None, None
+
+    for reason in blocked_reasons:
+        for source in _SCHEDULER_HANDOFF_DIAGNOSTICS_REASON_SOURCE_ORDER:
+            if reason not in blocked_reason_sources.get(source, []):
+                continue
+            action = _OPERATOR_ACTIONS_BY_SOURCE_REASON.get(source, {}).get(reason)
+            return action or "review_diagnostics_blocker", source
+
+    return "review_diagnostics_blocker", None
 
 
 def _handoff_identity_blocked_reasons(

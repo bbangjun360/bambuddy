@@ -256,6 +256,30 @@ class SwapmodSchedulerHandoffDiagnosticsApiTest(unittest.IsolatedAsyncioTestCase
         self.assertEqual(body["response_contract_version"], 1)
         self.assertEqual(body["diagnostics_summary_contract_version"], 1)
         self.assertFalse(body["mutates_state"])
+        catalog = body["blocked_reason_catalog"]
+        self.assertEqual(catalog["contract_version"], 1)
+        self.assertEqual(
+            list(catalog["sources"].keys()),
+            [
+                "scheduler_next_print_gate",
+                "scheduler_queue_readiness_binding_gate",
+                "handoff_identity",
+            ],
+        )
+        self.assertIn(
+            {
+                "reason": "queue_readiness_binding_consumed",
+                "operator_action": "select_unconsumed_queue_binding",
+            },
+            catalog["sources"]["scheduler_queue_readiness_binding_gate"],
+        )
+        self.assertIn(
+            {
+                "reason": "scheduler_handoff_source_print_run_mismatch",
+                "operator_action": "review_handoff_print_run_identity",
+            },
+            catalog["sources"]["handoff_identity"],
+        )
         example_summary = _diagnostics_summary(
             gate_status="allowed",
             scheduler_start_allowed=True,
@@ -404,6 +428,14 @@ class SwapmodSchedulerHandoffDiagnosticsApiTest(unittest.IsolatedAsyncioTestCase
         self.assertIn("queue_readiness_binding_consumed", body["blocked_reasons"])
         self.assertTrue(body["queue_readiness_binding_consumed"])
         self.assertEqual(body["diagnostics_summary"]["primary_blocker"], "queue_readiness_binding_consumed")
+        self.assertEqual(
+            body["diagnostics_summary"]["primary_operator_action"],
+            "select_unconsumed_queue_binding",
+        )
+        self.assertEqual(
+            body["diagnostics_summary"]["primary_operator_action_source"],
+            "scheduler_queue_readiness_binding_gate",
+        )
         self.assertEqual(
             body["diagnostics_summary"]["blocked_reason_sources"]["scheduler_queue_readiness_binding_gate"],
             ["queue_readiness_binding_consumed"],

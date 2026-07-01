@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -7,6 +8,14 @@ ROOT = Path(__file__).resolve().parents[2]
 SERVICE = ROOT / "app/services/swapmod_scheduler_handoff_diagnostics.py"
 ROUTE = ROOT / "app/api/routes/swapmod_state_machine.py"
 CONFIG = ROOT / "app/core/config.py"
+SCHEDULER_NEXT_PRINT_GATE = ROOT / "app/services/swapmod_scheduler_next_print_gate.py"
+SWAPMOD_NEXT_PRINT_GATE = ROOT / "app/services/swapmod_next_print_gate.py"
+SCHEDULER_QUEUE_READINESS_BINDING = ROOT / "app/services/swapmod_scheduler_queue_readiness_binding.py"
+SWAPMOD_QUEUE_READINESS_BINDING = ROOT / "app/services/swapmod_queue_readiness_binding.py"
+BLOCKER_REASON_PATTERN = re.compile(
+    r'blocked_reasons=\["([^"]+)"\]'
+    r'|(?:reasons|identity_blocked_reasons|blocked_reasons)\.append\("([^"]+)"\)'
+)
 
 
 class SwapmodSchedulerHandoffDiagnosticsArchitectureTest(unittest.TestCase):
@@ -28,7 +37,36 @@ class SwapmodSchedulerHandoffDiagnosticsArchitectureTest(unittest.TestCase):
         self.assertIn("scheduler_handoff_source_cycle_mismatch", text)
         self.assertIn("diagnostics_summary", text)
         self.assertIn("blocked_reason_sources", text)
+        self.assertIn("blocked_reason_catalog", text)
+        self.assertIn("primary_operator_action", text)
         self.assertIn("handoff_identity_status", text)
+
+    def test_blocked_reason_catalog_covers_current_gate_emitters(self) -> None:
+        from backend.app.services.swapmod_scheduler_handoff_diagnostics import (
+            swapmod_scheduler_handoff_diagnostics_blocked_reason_catalog,
+        )
+
+        catalog = swapmod_scheduler_handoff_diagnostics_blocked_reason_catalog()
+        catalog_reasons = {
+            source: {entry["reason"] for entry in entries}
+            for source, entries in catalog["sources"].items()
+        }
+
+        expected_by_source = {
+            "scheduler_next_print_gate": _emitted_blocker_reasons(
+                SCHEDULER_NEXT_PRINT_GATE,
+                SWAPMOD_NEXT_PRINT_GATE,
+            ),
+            "scheduler_queue_readiness_binding_gate": _emitted_blocker_reasons(
+                SCHEDULER_QUEUE_READINESS_BINDING,
+                SWAPMOD_QUEUE_READINESS_BINDING,
+            ),
+            "handoff_identity": _emitted_blocker_reasons(SERVICE),
+        }
+        for source, emitted_reasons in expected_by_source.items():
+            with self.subTest(source=source):
+                missing_reasons = emitted_reasons - catalog_reasons[source]
+                self.assertEqual(missing_reasons, set())
 
     def test_service_does_not_import_scheduler_dispatch_or_external_clients(self) -> None:
         text = SERVICE.read_text(encoding="utf-8") if SERVICE.exists() else ""
@@ -130,6 +168,7 @@ class SwapmodSchedulerHandoffDiagnosticsArchitectureTest(unittest.TestCase):
         self.assertIn("supported_summary_fields", handler)
         self.assertIn("supported_handoff_identity_statuses", handler)
         self.assertIn("supported_blocked_reason_sources", handler)
+        self.assertIn("blocked_reason_catalog", handler)
         self.assertIn("mutates_state", handler)
         forbidden = (
             "_start_print",
@@ -146,6 +185,15 @@ class SwapmodSchedulerHandoffDiagnosticsArchitectureTest(unittest.TestCase):
         for token in forbidden:
             with self.subTest(token=token):
                 self.assertNotIn(token, handler)
+
+
+def _emitted_blocker_reasons(*paths: Path) -> set[str]:
+    emitted: set[str] = set()
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        for match in BLOCKER_REASON_PATTERN.finditer(text):
+            emitted.add(next(group for group in match.groups() if group))
+    return emitted
 
 
 if __name__ == "__main__":
