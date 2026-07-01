@@ -16,6 +16,7 @@ from backend.app.models.print_log import PrintLogEntry
 from backend.app.models.print_queue import PrintQueueItem
 from backend.app.models.swapmod_queue_readiness_binding import SwapmodQueueReadinessBinding
 from backend.app.services.swapmod_bed_readiness import record_swapmod_bed_readiness
+from backend.app.services.swapmod_scheduler_handoff_diagnostics import _diagnostics_summary
 from backend.app.services.swapmod_queue_readiness_binding import bind_swapmod_queue_readiness
 from backend.app.services.swapmod_scheduler_next_print_gate import scheduler_print_run_key
 from backend.app.services.swapmod_state_machine import (
@@ -251,6 +252,31 @@ class SwapmodSchedulerHandoffDiagnosticsApiTest(unittest.IsolatedAsyncioTestCase
         self.assertTrue(body["api_enabled"])
         self.assertTrue(body["read_only"])
         self.assertEqual(body["required_query_parameters"], ["queue_item_id", "printer_id"])
+        self.assertEqual(body["required_permission"], Permission.PRINTERS_READ.value)
+        self.assertEqual(body["response_contract_version"], 1)
+        self.assertEqual(body["diagnostics_summary_contract_version"], 1)
+        self.assertFalse(body["mutates_state"])
+        example_summary = _diagnostics_summary(
+            gate_status="allowed",
+            scheduler_start_allowed=True,
+            blocked_reasons=[],
+            next_print_gate={"enforced": False, "blocked_reasons": []},
+            queue_readiness_binding_gate={"enforced": False, "blocked_reasons": []},
+            handoff_identity_blocked_reasons=[],
+        )
+        self.assertEqual(body["supported_summary_fields"], list(example_summary.keys()))
+        self.assertEqual(
+            body["supported_handoff_identity_statuses"],
+            ["not_enforced", "not_available", "matched", "mismatch"],
+        )
+        self.assertEqual(
+            body["supported_blocked_reason_sources"],
+            [
+                "scheduler_next_print_gate",
+                "scheduler_queue_readiness_binding_gate",
+                "handoff_identity",
+            ],
+        )
         self.assertFalse(body["scheduler_next_print_gate_enabled"])
         self.assertFalse(body["scheduler_queue_readiness_binding_enabled"])
         self.assertFalse(body["bed_automation_enabled"])
