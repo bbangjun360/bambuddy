@@ -305,6 +305,14 @@ class SwapmodSchedulerHandoffDiagnosticsApiTest(unittest.IsolatedAsyncioTestCase
             ],
         )
         self.assertEqual(body["supported_status_string_fields"], ["mode", "required_permission"])
+        self.assertEqual(
+            body["supported_status_version_fields"],
+            [
+                "response_contract_version",
+                "diagnostics_summary_contract_version",
+                "blocked_reason_details_contract_version",
+            ],
+        )
         self.assertFalse(body["mutates_state"])
         catalog = body["blocked_reason_catalog"]
         self.assertEqual(catalog["contract_version"], 1)
