@@ -124,6 +124,13 @@ class SwapmodSchedulerHandoffDiagnosticsArchitectureTest(unittest.TestCase):
         self.assertNotIn("AsyncSession", handler)
         self.assertNotIn("evaluate_swapmod_scheduler_handoff_diagnostics", handler)
         self.assertIn("required_query_parameters", handler)
+        self.assertIn("required_permission", handler)
+        self.assertIn("response_contract_version", handler)
+        self.assertIn("diagnostics_summary_contract_version", handler)
+        self.assertIn("supported_summary_fields", handler)
+        self.assertIn("supported_handoff_identity_statuses", handler)
+        self.assertIn("supported_blocked_reason_sources", handler)
+        self.assertIn("mutates_state", handler)
         forbidden = (
             "_start_print",
             "consume_scheduler_queue_readiness_binding",
