@@ -212,6 +212,25 @@ class SwapmodSchedulerHandoffDiagnosticsApiTest(unittest.IsolatedAsyncioTestCase
         self.assertFalse(body["queue_dispatch_supported"])
         self.assertFalse(body["scheduler_dispatch_supported"])
 
+    async def test_handoff_diagnostics_status_api_reports_safe_defaults(self) -> None:
+        response = await self.client.get(
+            "/api/v1/swapmod-state-machine/scheduler-handoff-diagnostics/status",
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["mode"], "SWAPMOD_SCHEDULER_HANDOFF_DIAGNOSTICS_API_STATUS")
+        self.assertTrue(body["api_enabled"])
+        self.assertTrue(body["read_only"])
+        self.assertEqual(body["required_query_parameters"], ["queue_item_id", "printer_id"])
+        self.assertFalse(body["scheduler_next_print_gate_enabled"])
+        self.assertFalse(body["scheduler_queue_readiness_binding_enabled"])
+        self.assertFalse(body["bed_automation_enabled"])
+        self.assertFalse(body["real_command_sent"])
+        self.assertFalse(body["printer_command_sent"])
+        self.assertFalse(body["queue_dispatch_supported"])
+        self.assertFalse(body["scheduler_dispatch_supported"])
+
     async def test_handoff_diagnostics_api_requires_printer_id(self) -> None:
         response = await self.client.get(
             "/api/v1/swapmod-state-machine/scheduler-handoff-diagnostics",

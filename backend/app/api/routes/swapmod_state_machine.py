@@ -120,6 +120,28 @@ async def get_swapmod_queue_readiness_binding_status(
     )
 
 
+@router.get("/scheduler-handoff-diagnostics/status")
+async def get_swapmod_scheduler_handoff_diagnostics_status(
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+):
+    return {
+        "mode": "SWAPMOD_SCHEDULER_HANDOFF_DIAGNOSTICS_API_STATUS",
+        "api_enabled": True,
+        "read_only": True,
+        "required_query_parameters": ["queue_item_id", "printer_id"],
+        "scheduler_next_print_gate_enabled": settings.farm_swapmod_scheduler_next_print_gate_enabled,
+        "scheduler_queue_readiness_binding_enabled": (
+            settings.farm_swapmod_scheduler_queue_readiness_binding_enabled
+        ),
+        "bed_automation_enabled": settings.farm_bed_automation_enabled,
+        "real_execution_supported": False,
+        "real_command_sent": False,
+        "printer_command_sent": False,
+        "queue_dispatch_supported": False,
+        "scheduler_dispatch_supported": False,
+    }
+
+
 @router.get("/scheduler-handoff-diagnostics")
 async def get_swapmod_scheduler_handoff_diagnostics(
     queue_item_id: int,
