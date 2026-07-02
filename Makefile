@@ -177,6 +177,11 @@ harness-security-workflow-dispatch:
 harness-physical-acceptance-canary:
 	python3 -m unittest harness.tests.test_physical_acceptance_canary
 
+.PHONY: harness-physical-acceptance-evidence-validator test-physical-acceptance-evidence-validator
+
+harness-physical-acceptance-evidence-validator:
+	python3 -m unittest harness.tests.test_physical_acceptance_evidence_validator
+
 harness-bed-automation:
 	python3 -m unittest harness.tests.test_bed_automation_mock
 
@@ -359,6 +364,9 @@ test-security-workflow-dispatch: harness-security-workflow-dispatch
 
 test-physical-acceptance-canary: harness-physical-acceptance-canary
 	python3 harness/scripts/check_workpack.py workpacks/exec/WP-103_PHYSICAL_ACCEPTANCE_CANARY.md
+
+test-physical-acceptance-evidence-validator: harness-physical-acceptance-evidence-validator
+	python3 harness/scripts/check_workpack.py workpacks/exec/WP-104_PHYSICAL_ACCEPTANCE_EVIDENCE_VALIDATOR.md
 
 test-plate-change-3mf-insertion:
 	python3 -m unittest \
