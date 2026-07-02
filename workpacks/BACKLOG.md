@@ -18,11 +18,12 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    `docs/KNOWN_ISSUES.md` (smoke fail-fast; scenario target; ExecPlan
    hygiene pass; frontend gate decision). Git object repair done 2026-07-02.
    Small, unblocks everything else.
-2. **Farm production deploy** (spec WP-01/WP-02) — production compose or
-   deploy story for the farm layer: Prometheus + Grafana + ntfy wiring,
-   Caddy TLS entry, backup/restore drill. Today `deploy/` ships only the
-   upstream app; the farm stack exists only in `harness/`. Largest gap to
-   acceptance; nothing blocks starting it.
+2. **Farm production deploy — completed by WP-109** (spec WP-01/WP-02)
+   — production compose/deploy story for Prometheus + Grafana + ntfy wiring,
+   Caddy TLS entry, and backup/restore drill. The farm stack now lives under
+   `deploy/` with pinned service images, local TLS, backup mount, runbook, and
+   config tests. Future production hardening should be operator-named or folded
+   into the owning capability instead of reopening this backlog item.
 3. **SwapMod enablement rollout** — runbook and staged flag-enable plan for
    the chain (state machine → transport → readiness → next-print gate →
    scheduler gate) on one canary printer; repeated multi-cycle physical
