@@ -8,11 +8,14 @@ testable farm capability at a time.
 ## Read order for every task
 
 1. Read `docs/00_PROJECT_CHARTER.md`.
-2. Read exactly one current file under `workpacks/`.
-3. Read only the module documents referenced by that Work Package.
-4. Read `docs/archive/FULL_SPEC_v1.1.md` only when the Work Package explicitly
+2. Read `docs/KNOWN_ISSUES.md`. If the task would hit a listed defect, fix or
+   unblock that defect first instead of adding another workaround.
+3. Read exactly one current file under `workpacks/`. When choosing what to work
+   on, take the highest unblocked item from `workpacks/BACKLOG.md`.
+4. Read only the module documents referenced by that Work Package.
+5. Read `docs/archive/FULL_SPEC_v1.1.md` only when the Work Package explicitly
    requests it.
-5. For complex work, create and maintain an ExecPlan following `.agent/PLANS.md`.
+6. For complex work, create and maintain an ExecPlan following `.agent/PLANS.md`.
 
 ## Development method
 
@@ -25,6 +28,26 @@ testable farm capability at a time.
 - Add or update the harness before implementing a new external integration.
 - New features must be disabled by default until their tests and canary criteria pass.
 - Do not redesign the Bambuddy UI during the initial phases.
+
+## Work Package selection and numbering
+
+- A Work Package must deliver one capability an operator can observe in the
+  running system or harness. Hardening, contract tests, validators, templates,
+  runbooks, or docs for an existing capability belong to that capability's
+  Work Package: they never mint a new WP number, runbook, release note, or
+  Makefile target. Reopen the finished WP and extend it instead.
+- Before allocating a WP number, check `workpacks/exec/` on `origin/farm-main`
+  AND all open `feature/wp-*` branches; the next number is the maximum found
+  plus one. The WP-9xx range is reserved for off-track tooling and process work.
+- New tests go into existing discovery paths (`harness/tests/test_*.py`,
+  frontend vitest under `src/`). Do not add a per-WP Makefile target; the
+  discovery-based targets already run new test files.
+- Repairing the harness, validation gates, or this guide is always in scope
+  and needs no new WP number. If you find yourself working around a defect
+  that a previous session also worked around, stop the feature task, add the
+  defect to `docs/KNOWN_ISSUES.md`, fix it, then resume.
+- A PR that completes or changes a milestone updates that ExecPlan's Progress
+  and Outcomes sections in the same PR. Stale ExecPlans mislead the next session.
 
 ## Hard architecture rules
 
@@ -69,8 +92,10 @@ make test-integration
 make verify-full
 ```
 
-When a target is not implemented yet, implement it in WP-000 instead of silently
-skipping validation.
+When a validation target is missing or broken, fixing it is part of the current
+task (see Work Package selection and numbering). Never substitute a throwaway
+local workaround for a broken shared gate without recording the defect in
+`docs/KNOWN_ISSUES.md`.
 
 Every PR must include:
 
