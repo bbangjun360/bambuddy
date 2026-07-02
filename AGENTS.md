@@ -107,6 +107,26 @@ Every PR must include:
 - logs/metrics needed to diagnose failure,
 - and a statement that Bambuddy still starts.
 
+## Merge policy
+
+The operator has delegated routine merges (2026-07-02). A session may merge its
+own PR into `farm-main` only when ALL of the following hold:
+
+- The work is the current `workpacks/BACKLOG.md` item, a `docs/KNOWN_ISSUES.md`
+  repair, or an operator-named task.
+- `make verify-fast` and every focused target the PR claims are shown passing
+  in the PR description.
+- The diff contains NO: feature-flag default change, destructive or schema
+  migration, change to physical actuation or safety-gate code
+  (`swapmod_*`, `plate_change*`, `bed_automation*`, canary sequence files,
+  `allow_real_*` handling), auth/permission weakening, new production
+  dependency, or secrets.
+- The PR description states which of these exclusions were checked.
+
+A PR that touches ANY excluded category stays open as a draft PR and waits for
+explicit operator approval in that session's channel. Never merge someone
+else's open PR, and never bypass a failing gate to merge.
+
 ## Safety and data
 
 - Never use production printer credentials, ERP tokens, or real customer data in tests.
@@ -122,4 +142,5 @@ Every PR must include:
 - Custom development belongs on `farm-main` and feature branches.
 - Integrate upstream in `integration/upstream-*`.
 - Read the upstream-update skill and produce an impact report.
-- AI-generated update changes never merge automatically.
+- Upstream-update integration PRs are always operator-approved; the Merge
+  policy self-merge rule does not apply to them.
