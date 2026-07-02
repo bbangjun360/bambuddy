@@ -5,6 +5,7 @@ import argparse
 import re
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Mapping
 
@@ -14,6 +15,7 @@ READY_STATE = "READY_FOR_NEXT_PRINT"
 MANUAL_REVIEW_STATE = "MANUAL_REVIEW"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 CANARY_KEY_RE = re.compile(r"^wp103-physical-acceptance-[0-9]{8}-[0-9]+$")
+TIMESTAMP_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 STRICT_REDACTIONS = {
     "printer_id_redacted": "A1_MINI_CANARY_REDACTED",
     "operator_initials": "REDACTED_OPERATOR",
@@ -68,6 +70,15 @@ def normalized(value: str | None) -> str:
 
 def normalized_bool(value: str | None) -> str:
     return normalized(value).lower()
+
+def has_strict_utc_timestamp(value: str) -> bool:
+    if not TIMESTAMP_RE.fullmatch(value):
+        return False
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return False
+    return True
 
 
 def validate_record(record: Mapping[str, str]) -> ValidationResult:
@@ -127,9 +138,10 @@ def validate_record(record: Mapping[str, str]) -> ValidationResult:
     ):
         reasons.append("FARM_SWAPMOD_A1MINI_DIRECT_CANARY_REQUIRE_HUMAN_CONFIRMATION must be true")
 
-    timestamp = normalized(record.get("timestamp_utc"))
-    if timestamp and ("T" not in timestamp or not timestamp.endswith("Z")):
-        reasons.append("timestamp_utc must be UTC ISO-8601 ending in Z")
+    timestamp_raw = record.get("timestamp_utc")
+    timestamp = normalized(timestamp_raw)
+    if timestamp and (timestamp_raw != timestamp or not has_strict_utc_timestamp(timestamp)):
+        reasons.append("timestamp_utc must be strict UTC ISO-8601 seconds ending in Z")
 
     valid = not reasons
     return ValidationResult(
@@ -145,21 +157,21 @@ def parse_records(text: str) -> list[dict[str, str]]:
     current: dict[str, str] = {}
 
     for line_number, raw_line in enumerate(text.splitlines(), 1):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            if not line and current:
+        stripped_line = raw_line.strip()
+        if not stripped_line or stripped_line.startswith("#"):
+            if not stripped_line and current:
                 records.append(current)
                 current = {}
             continue
-        if "=" not in line:
+        if "=" not in raw_line:
             raise ValueError(f"line {line_number}: expected key=value")
-        key, value = line.split("=", 1)
+        key, value = raw_line.split("=", 1)
         key = key.strip()
         if not key:
             raise ValueError(f"line {line_number}: missing key")
         if key in current:
             raise ValueError(f"line {line_number}: duplicate key {key}")
-        current[key] = value.strip()
+        current[key] = value if key == "timestamp_utc" else value.strip()
 
     if current:
         records.append(current)
@@ -184,13 +196,23 @@ def validate_file(path: Path) -> int:
         return 1
 
     exit_code = 0
+    canary_key_records: dict[str, int] = {}
     for index, record in enumerate(records, 1):
         result = validate_record(record)
-        state = READY_STATE if result.ready_for_next_print else MANUAL_REVIEW_STATE
+        reasons = list(result.reasons)
+        canary_key = normalized(record.get("canary_key"))
+        if canary_key:
+            previous_index = canary_key_records.get(canary_key)
+            if previous_index is None:
+                canary_key_records[canary_key] = index
+            else:
+                reasons.append(f"duplicate canary_key {canary_key} already appeared in record {previous_index}")
+
+        state = READY_STATE if result.ready_for_next_print and not reasons else MANUAL_REVIEW_STATE
         print(f"record {index}: {state}")
-        for reason in result.reasons:
+        for reason in reasons:
             print(f"- {reason}")
-        if not result.valid:
+        if reasons:
             exit_code = 1
     return exit_code
 

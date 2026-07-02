@@ -13,6 +13,9 @@ VALIDATOR = ROOT / "harness/scripts/physical_acceptance_evidence_validator.py"
 RUNBOOK = ROOT / "docs/runbooks/WP104_PHYSICAL_ACCEPTANCE_EVIDENCE_VALIDATOR.md"
 EVIDENCE = ROOT / "docs/releases/WP104_PHYSICAL_ACCEPTANCE_EVIDENCE_VALIDATION.md"
 WORKPACK = ROOT / "workpacks/exec/WP-104_PHYSICAL_ACCEPTANCE_EVIDENCE_VALIDATOR.md"
+WP106_RUNBOOK = ROOT / "docs/runbooks/WP106_PHYSICAL_ACCEPTANCE_VALIDATOR_METADATA_HARDENING.md"
+WP106_EVIDENCE = ROOT / "docs/releases/WP106_PHYSICAL_ACCEPTANCE_VALIDATOR_METADATA_HARDENING.md"
+WP106_WORKPACK = ROOT / "workpacks/exec/WP-106_PHYSICAL_ACCEPTANCE_VALIDATOR_METADATA_HARDENING.md"
 
 
 class PhysicalAcceptanceEvidenceValidatorHarnessTest(unittest.TestCase):
@@ -67,6 +70,20 @@ class PhysicalAcceptanceEvidenceValidatorHarnessTest(unittest.TestCase):
         target_body = makefile.split("test-physical-acceptance-evidence-validator:", 1)[1].split("\n\n", 1)[0]
         self.assertIn("check_workpack.py workpacks/exec/WP-104_PHYSICAL_ACCEPTANCE_EVIDENCE_VALIDATOR.md", target_body)
 
+    def test_makefile_exposes_physical_acceptance_validator_metadata_hardening_target(self) -> None:
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+        self.assertIn("harness-physical-acceptance-validator-metadata-hardening:", makefile)
+        self.assertIn(
+            "test-physical-acceptance-validator-metadata-hardening: harness-physical-acceptance-validator-metadata-hardening",
+            makefile,
+        )
+        target_body = makefile.split("test-physical-acceptance-validator-metadata-hardening:", 1)[1].split("\n\n", 1)[0]
+        self.assertIn(
+            "check_workpack.py workpacks/exec/WP-106_PHYSICAL_ACCEPTANCE_VALIDATOR_METADATA_HARDENING.md",
+            target_body,
+        )
+
     def test_documents_define_human_gated_validator_scope(self) -> None:
         missing = [str(path.relative_to(ROOT)) for path in (RUNBOOK, EVIDENCE, WORKPACK) if not path.exists()]
         self.assertEqual([], missing)
@@ -87,6 +104,30 @@ class PhysicalAcceptanceEvidenceValidatorHarnessTest(unittest.TestCase):
             "canary_key=wp103-physical-acceptance-YYYYMMDD-N",
             "No additional evidence keys are accepted",
             "python3 harness/scripts/physical_acceptance_evidence_validator.py",
+            "No runtime endpoint is added",
+            "Bambuddy still starts",
+            "Logs and metrics",
+            "Migration and rollback",
+            "Contract changes",
+        ]
+        for token in required_tokens:
+            with self.subTest(token=token):
+                self.assertIn(token, combined)
+
+    def test_wp106_documents_define_metadata_hardening_scope(self) -> None:
+        missing = [str(path.relative_to(ROOT)) for path in (WP106_RUNBOOK, WP106_EVIDENCE, WP106_WORKPACK) if not path.exists()]
+        self.assertEqual([], missing)
+
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in (WP106_RUNBOOK, WP106_EVIDENCE, WP106_WORKPACK))
+        required_tokens = [
+            "# WP-106 Physical Acceptance Validator Metadata Hardening",
+            "No physical printer action is executed by this validator metadata hardening",
+            "Bambuddy remains the sole authority",
+            "Evidence validation is not physical safety evidence",
+            "strict UTC ISO-8601 seconds ending in Z",
+            "duplicate canary_key",
+            "READY_FOR_NEXT_PRINT",
+            "MANUAL_REVIEW",
             "No runtime endpoint is added",
             "Bambuddy still starts",
             "Logs and metrics",
@@ -130,6 +171,86 @@ class PhysicalAcceptanceEvidenceValidatorHarnessTest(unittest.TestCase):
 
                 self.assertFalse(result.valid)
                 self.assertIn("canary_key must match wp103-physical-acceptance-YYYYMMDD-N", result.reasons)
+
+    def test_validator_rejects_ambiguous_or_malformed_timestamps(self) -> None:
+        validator = self.load_validator()
+        bad_timestamps = (
+            "notTvalidZ",
+            "2026-07-02T03:45:00",
+            "2026-07-02 03:45:00Z",
+            "2026-07-02T03:45:00+09:00",
+            "2026-02-30T03:45:00Z",
+            "2026-07-02T03:45:00.123Z",
+            "2026-07-02T03:45:00Z\nunexpected_field=true",
+            " 2026-07-02T03:45:00Z",
+            "2026-07-02T03:45:00Z ",
+            "2026-07-02T03:45:00Z\n",
+        )
+
+        for timestamp in bad_timestamps:
+            with self.subTest(timestamp=timestamp):
+                record = self.complete_ready_record()
+                record["timestamp_utc"] = timestamp
+                result = validator.validate_record(record)
+
+                self.assertFalse(result.valid)
+                self.assertIn(
+                    "timestamp_utc must be strict UTC ISO-8601 seconds ending in Z",
+                    result.reasons,
+                )
+
+    def test_validator_cli_rejects_duplicate_canary_key_records(self) -> None:
+        self.assertTrue(VALIDATOR.exists(), "physical acceptance evidence validator script is missing")
+        first = self.complete_ready_record()
+        second = self.complete_ready_record()
+        second["timestamp_utc"] = "2026-07-02T03:46:00Z"
+        body = "\n\n".join(
+            "\n".join(f"{key}={value}" for key, value in record.items()) for record in (first, second)
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            evidence_path = Path(tmpdir) / "duplicate-canary-evidence.env"
+            evidence_path.write_text(body, encoding="utf-8")
+            completed = subprocess.run(
+                [sys.executable, str(VALIDATOR), str(evidence_path)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        self.assertEqual(1, completed.returncode, completed.stdout)
+        self.assertIn("record 2: MANUAL_REVIEW", completed.stdout)
+        self.assertIn(
+            "duplicate canary_key wp103-physical-acceptance-20260702-1 already appeared in record 1",
+            completed.stdout,
+        )
+
+    def test_validator_cli_rejects_timestamp_with_trailing_file_whitespace(self) -> None:
+        self.assertTrue(VALIDATOR.exists(), "physical acceptance evidence validator script is missing")
+        record = self.complete_ready_record()
+        lines = []
+        for key, value in record.items():
+            suffix = " " if key == "timestamp_utc" else ""
+            lines.append(f"{key}={value}{suffix}")
+        body = "\n".join(lines)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            evidence_path = Path(tmpdir) / "timestamp-trailing-space.env"
+            evidence_path.write_text(body, encoding="utf-8")
+            completed = subprocess.run(
+                [sys.executable, str(VALIDATOR), str(evidence_path)],
+                cwd=ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+
+        self.assertEqual(1, completed.returncode, completed.stdout)
+        self.assertIn("record 1: MANUAL_REVIEW", completed.stdout)
+        self.assertIn("timestamp_utc must be strict UTC ISO-8601 seconds ending in Z", completed.stdout)
 
     def test_validator_rejects_unexpected_evidence_fields(self) -> None:
         validator = self.load_validator()
@@ -234,7 +355,7 @@ class PhysicalAcceptanceEvidenceValidatorHarnessTest(unittest.TestCase):
 
     def test_physical_acceptance_validator_documents_do_not_contain_placeholders(self) -> None:
         placeholder_pattern = re.compile(r"\b(TODO|TBD|FIXME|XXX)\b|<[^>\n]+>")
-        for path in (RUNBOOK, EVIDENCE, WORKPACK):
+        for path in (RUNBOOK, EVIDENCE, WORKPACK, WP106_RUNBOOK, WP106_EVIDENCE, WP106_WORKPACK):
             with self.subTest(path=path):
                 self.assertTrue(path.exists(), f"{path.relative_to(ROOT)} is missing")
                 text = path.read_text(encoding="utf-8")
