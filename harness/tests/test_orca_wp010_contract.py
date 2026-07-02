@@ -101,7 +101,8 @@ class OrcaWP010ContractTest(unittest.TestCase):
         self.assertEqual(manifest["profile_set_sha256"], expected_set_hash)
 
     def test_harness_pins_real_orca_image(self) -> None:
-        image = _read_env()["ORCA_IMAGE"]
+        env_file = ENV_FILE if ENV_FILE.exists() else EXAMPLE_ENV_FILE
+        image = _read_env(env_file)["ORCA_IMAGE"]
 
         self.assertNotIn("placeholder", image)
         self.assertEqual([], _orca_image_contract_errors(image))
