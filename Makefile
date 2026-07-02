@@ -182,6 +182,11 @@ harness-physical-acceptance-canary:
 harness-physical-acceptance-evidence-validator:
 	python3 -m unittest harness.tests.test_physical_acceptance_evidence_validator
 
+.PHONY: harness-physical-acceptance-evidence-template test-physical-acceptance-evidence-template
+
+harness-physical-acceptance-evidence-template:
+	python3 -m unittest harness.tests.test_physical_acceptance_evidence_template
+
 harness-bed-automation:
 	python3 -m unittest harness.tests.test_bed_automation_mock
 
@@ -367,6 +372,9 @@ test-physical-acceptance-canary: harness-physical-acceptance-canary
 
 test-physical-acceptance-evidence-validator: harness-physical-acceptance-evidence-validator
 	python3 harness/scripts/check_workpack.py workpacks/exec/WP-104_PHYSICAL_ACCEPTANCE_EVIDENCE_VALIDATOR.md
+
+test-physical-acceptance-evidence-template: harness-physical-acceptance-evidence-template
+	python3 harness/scripts/check_workpack.py workpacks/exec/WP-105_PHYSICAL_ACCEPTANCE_EVIDENCE_TEMPLATE.md
 
 test-plate-change-3mf-insertion:
 	python3 -m unittest \
