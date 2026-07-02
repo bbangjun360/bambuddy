@@ -14,17 +14,6 @@ Rules:
 
 ## OPEN
 
-### GIT-01 Corrupt zero-byte git objects
-
-- Symptom: `git fsck` reports 7 empty loose objects (first seen WP-066,
-  2026-06-26). Commits currently work because the objects are unreachable,
-  but `git gc`/`git clone` from this copy can fail.
-- Workarounds seen: sessions moved to fresh `/tmp` worktrees instead of
-  repairing (WP-066 note "commit flow blocked").
-- Real fix: with human approval, move the zero-byte files out of
-  `.git/objects/`, then `git fetch origin` to restore any that matter.
-  Destructive-command rule applies: requires explicit operator approval.
-
 ### HARNESS-02 verify-full smoke needs the compose harness running
 
 - Symptom: `make test-integration` (smoke.py) expects Bambuddy on
@@ -61,6 +50,16 @@ Rules:
   on the same-PR update rule in AGENTS.md applies.
 
 ## FIXED
+
+### GIT-01 Corrupt zero-byte git objects — FIXED 2026-07-02
+
+- Was: `git fsck` reported 7 empty loose objects (first seen WP-066,
+  2026-06-26); sessions moved to fresh `/tmp` worktrees instead of repairing.
+- Fix: with operator approval, the zero-byte files were moved out of
+  `.git/objects/` and objects re-fetched from origin; `git fsck` is clean.
+  This applies to the primary local clone; if another clone shows the same
+  symptom, repeat the same operator-approved procedure.
+
 
 ### HARNESS-03 `.env.harness.example` shipped broken placeholders — FIXED 2026-07-02
 

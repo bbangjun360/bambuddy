@@ -15,9 +15,9 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
 ## Priority order
 
 1. **Harness and process debt** — resolve the OPEN items in
-   `docs/KNOWN_ISSUES.md` (git object repair needs operator approval;
-   smoke fail-fast; scenario target; ExecPlan hygiene pass). Small, unblocks
-   everything else.
+   `docs/KNOWN_ISSUES.md` (smoke fail-fast; scenario target; ExecPlan
+   hygiene pass; frontend gate decision). Git object repair done 2026-07-02.
+   Small, unblocks everything else.
 2. **Farm production deploy** (spec WP-01/WP-02) — production compose or
    deploy story for the farm layer: Prometheus + Grafana + ntfy wiring,
    Caddy TLS entry, backup/restore drill. Today `deploy/` ships only the
@@ -27,8 +27,9 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    the chain (state machine → transport → readiness → next-print gate →
    scheduler gate) on one canary printer; repeated multi-cycle physical
    validation; then the design decision for an autonomous (not per-step
-   human-phrase) actuation path. Blocked on: operator schedule for
-   supervised runs.
+   human-phrase) actuation path. Operator sessions are scheduled in
+   `docs/runbooks/SWAPMOD_ROLLOUT_SCHEDULE.md` (S1..S9, 2026-07-06 to
+   2026-07-24, Mon/Wed/Fri).
 4. **Real ERPNext integration** (spec WP-04 completion) — stand up a real
    ERPNext instance, point the existing adapter at it (config override),
    validate read-only import and Draft-write against it. The adapter code is
