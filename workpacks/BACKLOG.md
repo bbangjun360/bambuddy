@@ -27,9 +27,10 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    the chain (state machine → transport → readiness → next-print gate →
    scheduler gate) on one canary printer; repeated multi-cycle physical
    validation; then the design decision for an autonomous (not per-step
-   human-phrase) actuation path. Operator sessions are scheduled in
-   `docs/runbooks/SWAPMOD_ROLLOUT_SCHEDULE.md` (S1..S9, 2026-07-06 to
-   2026-07-24, Mon/Wed/Fri).
+   human-phrase) actuation path. Operator sessions run as an ordered
+   sequence (S1..S9) in `docs/runbooks/SWAPMOD_ROLLOUT_SCHEDULE.md`: no
+   fixed dates, next session whenever the operator is available, gated
+   only on the previous session's validated evidence.
 4. **Real ERPNext integration** (spec WP-04 completion) — stand up a real
    ERPNext instance, point the existing adapter at it (config override),
    validate read-only import and Draft-write against it. The adapter code is
