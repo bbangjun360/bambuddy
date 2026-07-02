@@ -145,6 +145,34 @@ class SmokeTargetsTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Software caused connection abort"):
                 smoke.wait_for("bambuddy-root", "http://example.test/", timeout=1)
 
+    def test_preflight_reports_harness_not_running_before_readiness_loop(self) -> None:
+        attempts = []
+
+        def fake_connect(address: tuple[str, int], timeout: float) -> object:
+            attempts.append((address, timeout))
+            raise ConnectionRefusedError(111, "Connection refused")
+
+        with self.assertRaisesRegex(
+            smoke.HarnessNotRunningError,
+            "make harness-up",
+        ):
+            smoke.preflight_harness_targets(
+                {"bambuddy-root": "http://127.0.0.1:18000/"},
+                connector=fake_connect,
+            )
+
+        self.assertEqual(attempts, [(('127.0.0.1', 18000), 1.0)])
+
+    def test_preflight_skips_remote_override_targets(self) -> None:
+        attempts = []
+
+        smoke.preflight_harness_targets(
+            {"bambuddy-root": "http://harness.example.test:18000/"},
+            connector=lambda address, timeout: attempts.append((address, timeout)),
+        )
+
+        self.assertEqual(attempts, [])
+
 
 if __name__ == "__main__":
     unittest.main()
