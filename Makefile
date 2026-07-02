@@ -5,7 +5,7 @@
         harness-plate-change-3mf-physical-canary harness-swapmod-3mf-dry-run harness-swapmod-canary-preflight \
         harness-swapmod-state-machine harness-swapmod-operator-trigger harness-swapmod-verification-adapter harness-swapmod-transport-boundary \
         harness-swapmod-canary-execution-gate harness-swapmod-a1mini-direct-canary harness-swapmod-bed-readiness harness-swapmod-next-print-gate harness-swapmod-scheduler-next-print-gate harness-swapmod-queue-readiness-binding harness-swapmod-scheduler-queue-readiness-binding harness-swapmod-scheduler-handoff-chain harness-swapmod-scheduler-consumed-handoff-retry harness-swapmod-scheduler-handoff-diagnostics harness-swapmod-scheduler-handoff-diagnostics-api harness-swapmod-scheduler-handoff-diagnostics-status harness-swapmod-scheduler-handoff-diagnostics-auth harness-swapmod-scheduler-handoff-diagnostics-explainability harness-swapmod-scheduler-handoff-diagnostics-status-contract harness-swapmod-scheduler-handoff-diagnostics-reason-catalog harness-swapmod-scheduler-handoff-diagnostics-blocker-details harness-swapmod-scheduler-handoff-diagnostics-detail-contract harness-swapmod-scheduler-handoff-diagnostics-gate-status-contract harness-swapmod-scheduler-handoff-diagnostics-summary-boolean-contract harness-swapmod-scheduler-handoff-diagnostics-summary-count-contract harness-swapmod-scheduler-handoff-diagnostics-summary-nullable-contract harness-swapmod-scheduler-handoff-diagnostics-summary-collection-contract harness-swapmod-scheduler-handoff-diagnostics-status-boolean-contract harness-swapmod-scheduler-handoff-diagnostics-status-string-contract harness-swapmod-scheduler-handoff-diagnostics-status-version-contract harness-release-readiness-acceptance harness-security-workflow-dispatch \
-        test-unit test-characterization test-contract test-integration test-scenario test-observability \
+        frontend-gate-check test-frontend test-unit test-characterization test-contract test-integration test-scenario test-observability \
         test-erp-readonly test-erp-draft-write test-bed-automation test-obico-shadow test-printflow-canary test-plate-change-command test-plate-change-transport test-plate-change-3mf-postprocess test-plate-change-3mf-physical-canary test-plate-change-3mf-insertion test-swapmod-3mf-dry-run test-swapmod-canary-preflight \
         test-swapmod-state-machine test-swapmod-operator-trigger test-swapmod-verification-adapter test-swapmod-transport-boundary \
         test-swapmod-canary-execution-gate test-swapmod-a1mini-direct-canary test-swapmod-bed-readiness test-swapmod-next-print-gate test-swapmod-scheduler-next-print-gate test-swapmod-queue-readiness-binding test-swapmod-scheduler-queue-readiness-binding test-swapmod-scheduler-handoff-chain test-swapmod-scheduler-consumed-handoff-retry test-swapmod-scheduler-handoff-diagnostics test-swapmod-scheduler-handoff-diagnostics-api test-swapmod-scheduler-handoff-diagnostics-status test-swapmod-scheduler-handoff-diagnostics-auth test-swapmod-scheduler-handoff-diagnostics-explainability test-swapmod-scheduler-handoff-diagnostics-status-contract test-swapmod-scheduler-handoff-diagnostics-reason-catalog test-swapmod-scheduler-handoff-diagnostics-blocker-details test-swapmod-scheduler-handoff-diagnostics-detail-contract test-swapmod-scheduler-handoff-diagnostics-gate-status-contract test-swapmod-scheduler-handoff-diagnostics-summary-boolean-contract test-swapmod-scheduler-handoff-diagnostics-summary-count-contract test-swapmod-scheduler-handoff-diagnostics-summary-nullable-contract test-swapmod-scheduler-handoff-diagnostics-summary-collection-contract test-swapmod-scheduler-handoff-diagnostics-status-boolean-contract test-swapmod-scheduler-handoff-diagnostics-status-string-contract test-swapmod-scheduler-handoff-diagnostics-status-version-contract test-release-readiness-acceptance test-security-workflow-dispatch \
@@ -215,6 +215,13 @@ workpack-check:
 hooks-check:
 	python3 -m py_compile .codex/hooks/*.py
 
+frontend-gate-check:
+	python3 harness/scripts/check_frontend_gate.py
+
+test-frontend:
+	npm --prefix frontend ci
+	npm --prefix frontend run test:run
+
 test-unit:
 	python3 -m py_compile backend/app/main.py backend/app/core/config.py backend/app/core/database.py
 	python3 -m unittest discover -s harness/tests -p 'test_*.py'
@@ -397,8 +404,8 @@ test-plate-change-3mf-insertion:
 		backend.tests.unit.services.test_plate_change_3mf_postprocess.PlateChange3mfPostprocessServiceTest.test_real_sample_output_blocks_repo_path_output \
 		backend.tests.unit.services.test_plate_change_3mf_postprocess.PlateChange3mfPostprocessServiceTest.test_real_sample_output_review_manifest_only_returns_required_metadata
 
-verify-fast: context-check workpack-check hooks-check test-contract test-unit test-characterization
+verify-fast: context-check workpack-check hooks-check frontend-gate-check test-contract test-unit test-characterization
 	@echo "Fast deterministic gate passed."
 
-verify-full: verify-fast test-unit test-characterization test-integration test-scenario
+verify-full: verify-fast frontend-gate-check test-unit test-characterization test-integration test-scenario
 	@echo "Full gate passed."

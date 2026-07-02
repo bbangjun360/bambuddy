@@ -2,17 +2,25 @@
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import json
 import os
+import socket
 import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS_ENV_FILE = ROOT / ".env.harness"
+LOCAL_HOSTNAMES = {"localhost"}
+
+
+class HarnessNotRunningError(RuntimeError):
+    """Raised when local smoke targets are not listening at all."""
 
 
 def _read_harness_env(env_file: Path = HARNESS_ENV_FILE) -> dict[str, str]:
@@ -108,6 +116,53 @@ TRANSIENT_READINESS_ERRORS = (
 TARGETS = resolve_targets()
 
 
+def _loopback_address(url: str) -> tuple[str, int] | None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    hostname = parsed.hostname
+    is_loopback = hostname in LOCAL_HOSTNAMES
+    if not is_loopback:
+        try:
+            is_loopback = ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            is_loopback = False
+    if not is_loopback:
+        return None
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return hostname, port
+
+
+def preflight_harness_targets(
+    targets: Mapping[str, str] | None = None,
+    *,
+    connector: Callable[[tuple[str, int], float], object] = socket.create_connection,
+    timeout: float = 1.0,
+) -> None:
+    selected_targets = TARGETS if targets is None else targets
+    failures: list[str] = []
+    for name, url in selected_targets.items():
+        address = _loopback_address(url)
+        if address is None:
+            continue
+        connection = None
+        try:
+            connection = connector(address, timeout)
+        except OSError as exc:
+            failures.append(f"{name} at {url} is not listening: {exc}")
+        finally:
+            close = getattr(connection, "close", None)
+            if callable(close):
+                close()
+    if failures:
+        details = "; ".join(failures)
+        raise HarnessNotRunningError(
+            "Harness is not reachable before smoke readiness checks: "
+            f"{details}. Start it with `make harness-up` or set "
+            "BAMBUDDY_BASE_URL/MOCK_BASE_URL to a running harness."
+        )
+
+
 def wait_for(name: str, url: str, timeout: float = 90.0) -> dict:
     deadline = time.monotonic() + timeout
     last_error = ""
@@ -125,6 +180,7 @@ def wait_for(name: str, url: str, timeout: float = 90.0) -> dict:
 
 
 def main() -> int:
+    preflight_harness_targets(TARGETS)
     results = []
     for name, url in TARGETS.items():
         results.append(wait_for(name, url))
@@ -135,6 +191,15 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
+    except HarnessNotRunningError as exc:
+        print(
+            json.dumps(
+                {"healthy": False, "reason": "harness_not_running", "error": str(exc)},
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     except Exception as exc:
         print(json.dumps({"healthy": False, "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         raise SystemExit(1)

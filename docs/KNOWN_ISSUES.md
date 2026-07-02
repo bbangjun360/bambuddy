@@ -14,42 +14,47 @@ Rules:
 
 ## OPEN
 
-### HARNESS-02 verify-full smoke needs the compose harness running
-
-- Symptom: `make test-integration` (smoke.py) expects Bambuddy on
-  `BAMBUDDY_PORT` (default 18000). On a checkout where the harness compose is
-  not up, verify-full fails.
-- Workarounds seen: WP-060 through WP-064 each started a throwaway localhost
-  SQLite container to satisfy smoke. Do not repeat this.
-- Real fix: make `test-integration` fail fast with a clear message when the
-  harness is not up (distinct from a real smoke failure), or start/stop the
-  harness inside the target. Root cause of "harness not up" was HARNESS-03.
-
-### HARNESS-04 test-scenario discovers zero tests
-
-- Symptom: `make test-scenario` discovers `scenario_*.py` and finds nothing,
-  so verify-full's scenario stage is a no-op (gap noted since WP-010).
-- Real fix: either add the first scenario test or make the target fail on
-  zero collected tests so the gap stays visible.
-
-### PROCESS-05 Frontend suite is outside the enforced gates
-
-- Symptom: `verify-fast`/`verify-full` run Python only; `make test-frontend`
-  and `make test-paper-export` exist but nothing enforces them, so frontend
-  regressions pass the gates.
-- Real fix: decide whether node is a required toolchain; if yes, add
-  `test-frontend` to verify-full. Until then, any PR touching `frontend/`
-  must run `make test-frontend` and say so in the PR.
-
-### PROCESS-06 Stale ExecPlans
-
-- Symptom: many ExecPlans under `workpacks/exec/` (WP-010, 030, 040, 050,
-  063-*, 064-*) still show "commit/push/PR" unchecked although the PRs merged.
-  The next session cannot trust Progress sections.
-- Real fix: one hygiene pass updating Outcomes to match git history; from now
-  on the same-PR update rule in AGENTS.md applies.
+No known open repository, harness, or process defects are currently blocking the
+next highest backlog item. Add new repeated defects here instead of carrying
+local workarounds between sessions.
 
 ## FIXED
+
+### HARNESS-02 verify-full smoke needs the compose harness running — FIXED 2026-07-02
+
+- Was: `make test-integration` waited through the full smoke readiness timeout
+  when no local Bambuddy/mock harness was listening, then emitted only a generic
+  connection-refused smoke failure. WP-060 through WP-064 worked around this with
+  temporary localhost containers.
+- Fix: `harness/scripts/smoke.py` now preflights loopback smoke targets and exits
+  with structured `reason: harness_not_running` guidance before the readiness
+  loop. A listening-but-unhealthy app still fails through the normal smoke path.
+
+### HARNESS-04 test-scenario discovers zero tests — FIXED 2026-07-02
+
+- Was: earlier `make test-scenario` runs discovered no scenario tests, leaving
+  verify-full's scenario stage as a no-op.
+- Fix: `harness/tests/scenario_baseline_harness.py` is present and
+  `make test-scenario` runs two synthetic loopback scenario tests.
+  `test_makefile_contract.py` now asserts that the scenario target has at least
+  one checked-in `scenario_*.py` file to discover.
+
+### PROCESS-05 Frontend suite is outside the enforced gates — FIXED 2026-07-02
+
+- Was: frontend changes were not represented in shared validation policy.
+- Fix: Node is not a required toolchain for non-frontend farm validation. The
+  Makefile now provides explicit `test-frontend` and `frontend-gate-check`
+  targets, and `verify-fast`/`verify-full` run the gate check. If a PR changes
+  `frontend/`, the gate requires `make test-frontend` evidence and an explicit
+  `FRONTEND_TESTED=1` rerun.
+
+### PROCESS-06 Stale ExecPlans — FIXED 2026-07-02
+
+- Was: old ExecPlans under `workpacks/exec/` still showed PR creation pending
+  although their branches had merged.
+- Fix: WP-010, WP-030, WP-040, WP-050, WP-063-A/B/C, and WP-064-A/B/C/D now
+  carry concise hygiene notes with the local merge/PR evidence. The same-PR
+  update rule in `AGENTS.md` remains the forward process.
 
 ### GIT-01 Corrupt zero-byte git objects — FIXED 2026-07-02
 

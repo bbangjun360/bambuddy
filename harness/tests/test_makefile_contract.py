@@ -73,6 +73,27 @@ class MakefileContractTest(unittest.TestCase):
         self.assertIn("farm_wp030", body)
         self.assertIn("down -v --remove-orphans", body)
 
+    def test_scenario_target_has_checked_in_scenarios_to_discover(self) -> None:
+        body = _target_body(MAKEFILE.read_text(encoding="utf-8"), "test-scenario")
+
+        self.assertIn("-p 'scenario_*.py'", body)
+        self.assertGreater(
+            len(list((ROOT / "harness/tests").glob("scenario_*.py"))),
+            0,
+            "test-scenario must not be a zero-test gate",
+        )
+
+    def test_frontend_gate_policy_is_encoded_in_make_targets(self) -> None:
+        text = MAKEFILE.read_text(encoding="utf-8")
+        test_frontend = _target_body(text, "test-frontend")
+        frontend_gate = _target_body(text, "frontend-gate-check")
+
+        self.assertIn("npm --prefix frontend", test_frontend)
+        self.assertIn("test:run", test_frontend)
+        self.assertIn("harness/scripts/check_frontend_gate.py", frontend_gate)
+        self.assertRegex(text, r"(?m)^verify-fast: .*frontend-gate-check")
+        self.assertRegex(text, r"(?m)^verify-full: .*frontend-gate-check")
+
 
 if __name__ == "__main__":
     unittest.main()
