@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - prometheus:9090
+
+  # The upstream Bambuddy compose file defaults to host networking on Linux.
+  # host.docker.internal is supplied by deploy/docker-compose.farm.yml so the
+  # observability container can scrape the existing app without joining printer
+  # discovery networking or receiving printer credentials.
+  - job_name: bambuddy
+    metrics_path: /api/v1/metrics
+    static_configs:
+      - targets:
+          - host.docker.internal:8000
+
+  - job_name: ntfy
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - ntfy:80
