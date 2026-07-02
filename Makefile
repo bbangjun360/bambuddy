@@ -172,6 +172,11 @@ harness-release-readiness-acceptance:
 harness-security-workflow-dispatch:
 	python3 -m unittest harness.tests.test_security_workflow_dispatch_mock
 
+.PHONY: harness-physical-acceptance-canary test-physical-acceptance-canary
+
+harness-physical-acceptance-canary:
+	python3 -m unittest harness.tests.test_physical_acceptance_canary
+
 harness-bed-automation:
 	python3 -m unittest harness.tests.test_bed_automation_mock
 
@@ -351,6 +356,9 @@ test-release-readiness-acceptance: harness-release-readiness-acceptance
 
 test-security-workflow-dispatch: harness-security-workflow-dispatch
 	python3 harness/scripts/check_workpack.py workpacks/exec/WP-102_SECURITY_AUDIT_MANUAL_DISPATCH.md
+
+test-physical-acceptance-canary: harness-physical-acceptance-canary
+	python3 harness/scripts/check_workpack.py workpacks/exec/WP-103_PHYSICAL_ACCEPTANCE_CANARY.md
 
 test-plate-change-3mf-insertion:
 	python3 -m unittest \
