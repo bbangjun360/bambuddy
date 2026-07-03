@@ -71,6 +71,7 @@ separate operator-approved Work Package; do not fold it into a session.
 | Session | Status | Date | Evidence | Notes |
 |---|---|---|---|---|
 | S1 | failed attempt 1 — repeat | 2026-07-03 | `docs/releases/evidence/wp103-physical-acceptance-20260703-{1,2,3}.env` | cycles 1–2 green (READY_FOR_NEXT_PRINT, manually verified); cycle 3 release failed: plate jammed mid-eject, operator cleared it by hand, printer safe, no software retry, cycle ended MANUAL_REVIEW_REQUIRED. Flags reset to default-off before session end. S1 stays next up as a new attempt. |
+| S1 | failed attempt 2 — diagnose before repeat | 2026-07-03 | `docs/releases/evidence/wp103-physical-acceptance-20260703-4.env` | attempt 2 halted on cycle 1: identical failure mode to attempt 1 (plate jammed mid-eject during RELEASE_PLATE); operator cleared plate by hand, printer safe, flags reset to default-off. Two identical jams across consecutive attempts — physical diagnosis of stack/lifter alignment vs release sequence v02-00 required before attempt 3. |
 | S2 | pending | — | — | — |
 | S3 | pending | — | — | — |
 | S4 | pending | — | — | — |
