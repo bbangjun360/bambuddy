@@ -86,5 +86,6 @@ separate operator-approved Work Package; do not fold it into a session.
 | S6 | ready | — | — | — |
 | S6 | **DONE** | 2026-07-06 | `docs/releases/evidence/wp103-physical-acceptance-20260706-17.env` | S5 repeated with an injected verify-fail mid-swap -> MANUAL_REVIEW_REQUIRED. Even with plate-clear acked and a handoff recorded (which preserved MANUAL_REVIEW), the scheduler never dispatched the real queued job across 4+ ticks; live WARNINGs listed 4 block reasons including swapmod_manual_review_required and bed_manual_review_required. Queue item cancelled before recovery; recovery via inspection + MANUAL_OVERRIDE_PASSED; fresh plate loaded and verified. Stage 2 complete. Flags reset to default-off. S7 is next up. |
 | S7 | ready | — | — | — |
-| S8 | pending | — | — | — |
+| S7 | **DONE** | 2026-07-06 | `docs/releases/evidence/wp103-physical-acceptance-20260706-18.env` | Full acceptance loop once under supervision: print A completed (print_log:3) -> queued next job confirmed blocked -> supervised swap (release/load verified with per-step phrases) -> plate-clear + handoff READY_RECORDED -> scheduler dispatched print B automatically (MQTT project_file, no human start) -> print B completed (print_log:4). Note: a sticky MANUAL_REVIEW bed record from the S6 drill correctly blocked gate reuse of the s6 cycle, so the setup print ran with the scheduler gate off and the formal loop began at print A completion. Flags reset to default-off. S8 is next up. |
+| S8 | ready | — | — | — |
 | S9 | pending | — | — | — |
