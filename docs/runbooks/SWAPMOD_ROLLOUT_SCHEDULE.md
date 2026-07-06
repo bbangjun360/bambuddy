@@ -76,7 +76,8 @@ separate operator-approved Work Package; do not fold it into a session.
 | S1 | failed attempt 4 | 2026-07-06 | `docs/releases/evidence/wp103-physical-acceptance-20260706-1.env` | release (v02-00) failed again; operator could not observe the cause, so the session ended MANUAL_REVIEW without a diagnosis. Bed manually cleared and reset before attempt 5. Hardware adjustment between 07-03 and 07-06 was not reported by the operator. Flags reset to default-off. |
 | S1 | **DONE (attempt 5)** | 2026-07-06 | `docs/releases/evidence/wp103-physical-acceptance-20260706-{2,3,4}.env` | 3/3 consecutive full cycles reached READY_FOR_NEXT_PRINT with release sequence v02-00 after the operator manually cleared/reset the bed; all three records validate READY (exit 0). Per-step operator phrases and manual verification throughout; flags reset to default-off at session end. S2 is now next up. |
 | S2 | ready | — | — | — |
-| S3 | pending | — | — | — |
+| S2 | **DONE** | 2026-07-06 | `docs/releases/evidence/wp103-physical-acceptance-20260706-{5,6,7}.env` | 3/3 cycles green incl. the deliberate abort+recovery drill on cycle 2: verification failed on purpose after a physically-good release -> MANUAL_REVIEW_REQUIRED; while aborted, a fully-authorized transport request was rejected (400 cycle_state_not_ready_for_step) with no printer command sent; recovery required operator physical inspection then MANUAL_OVERRIDE_PASSED(step=VERIFY_PLATE_RELEASED) -> READY_TO_LOAD -> load completed. Recovery procedure: (1) inspect printer/bed physically, (2) POST /swapmod-state-machine/cycles/{key}/events with event=MANUAL_OVERRIDE_PASSED and the step being reviewed, (3) resume the normal step flow. Flags reset to default-off at session end. S3 is next up. |
+| S3 | ready | — | — | — |
 | S4 | pending | — | — | — |
 | S5 | pending | — | — | — |
 | S6 | pending | — | — | — |
