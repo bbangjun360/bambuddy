@@ -78,7 +78,8 @@ separate operator-approved Work Package; do not fold it into a session.
 | S2 | ready | — | — | — |
 | S2 | **DONE** | 2026-07-06 | `docs/releases/evidence/wp103-physical-acceptance-20260706-{5,6,7}.env` | 3/3 cycles green incl. the deliberate abort+recovery drill on cycle 2: verification failed on purpose after a physically-good release -> MANUAL_REVIEW_REQUIRED; while aborted, a fully-authorized transport request was rejected (400 cycle_state_not_ready_for_step) with no printer command sent; recovery required operator physical inspection then MANUAL_OVERRIDE_PASSED(step=VERIFY_PLATE_RELEASED) -> READY_TO_LOAD -> load completed. Recovery procedure: (1) inspect printer/bed physically, (2) POST /swapmod-state-machine/cycles/{key}/events with event=MANUAL_OVERRIDE_PASSED and the step being reviewed, (3) resume the normal step flow. Flags reset to default-off at session end. S3 is next up. |
 | S3 | ready | — | — | — |
-| S4 | pending | — | — | — |
+| S3 | **DONE** | 2026-07-06 | `docs/releases/evidence/wp103-physical-acceptance-20260706-{8,9,10,11,12}.env` | 5/5 consecutive full cycles reached READY_FOR_NEXT_PRINT with no physical operator intervention beyond required phrases and visual verification; all records validate READY (exit 0); ~2-3.5 min per cycle (06:11-06:20 UTC). The 07-03 front-hook jam did not recur (root cause still unconfirmed - keep watching). Stage 1 complete. Flags reset to default-off at session end. S4 (evaluate-only gate integration) is next up. |
+| S4 | ready | — | — | — |
 | S5 | pending | — | — | — |
 | S6 | pending | — | — | — |
 | S7 | pending | — | — | — |
