@@ -84,6 +84,7 @@ separate operator-approved Work Package; do not fold it into a session.
 | S5 | ready | — | — | — |
 | S5 | **DONE** | 2026-07-06 | `docs/releases/evidence/wp103-physical-acceptance-20260706-16.env` | WP-079 scheduler gate enforced with a real queued next job. Setup print created print_log:1; swap cycle bound to it. Blocked phase: queue item pending across 3+ scheduler ticks; after swap verification + plate-clear ack the swapmod gate was the sole blocker (scheduler WARNING logs, reasons=[bed_readiness_record_missing], 16:02-16:03 UTC). Handoff READY_RECORDED -> automatic MQTT project_file dispatch at 16:04:08 UTC; dispatched print completed (print_log:2, ready as S6 precondition). No dispatch before verified readiness; dispatch after, with no human start action. All flags reset to default-off at session end. S6 is next up. |
 | S6 | ready | — | — | — |
-| S7 | pending | — | — | — |
+| S6 | **DONE** | 2026-07-06 | `docs/releases/evidence/wp103-physical-acceptance-20260706-17.env` | S5 repeated with an injected verify-fail mid-swap -> MANUAL_REVIEW_REQUIRED. Even with plate-clear acked and a handoff recorded (which preserved MANUAL_REVIEW), the scheduler never dispatched the real queued job across 4+ ticks; live WARNINGs listed 4 block reasons including swapmod_manual_review_required and bed_manual_review_required. Queue item cancelled before recovery; recovery via inspection + MANUAL_OVERRIDE_PASSED; fresh plate loaded and verified. Stage 2 complete. Flags reset to default-off. S7 is next up. |
+| S7 | ready | — | — | — |
 | S8 | pending | — | — | — |
 | S9 | pending | — | — | — |
