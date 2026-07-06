@@ -80,7 +80,8 @@ separate operator-approved Work Package; do not fold it into a session.
 | S3 | ready | — | — | — |
 | S3 | **DONE** | 2026-07-06 | `docs/releases/evidence/wp103-physical-acceptance-20260706-{8,9,10,11,12}.env` | 5/5 consecutive full cycles reached READY_FOR_NEXT_PRINT with no physical operator intervention beyond required phrases and visual verification; all records validate READY (exit 0); ~2-3.5 min per cycle (06:11-06:20 UTC). The 07-03 front-hook jam did not recur (root cause still unconfirmed - keep watching). Stage 1 complete. Flags reset to default-off at session end. S4 (evaluate-only gate integration) is next up. |
 | S4 | ready | — | — | — |
-| S5 | pending | — | — | — |
+| S4 | **DONE** | 2026-07-06 | `docs/releases/evidence/wp103-physical-acceptance-20260706-{13,14,15}.env` | 3/3 cycles with WP-077 readiness handoff + WP-078 next-print gate in evaluate-only mode. Six gate probes, all matching physical state: pre-swap always blocked (swapmod_cycle_not_ready + bed_readiness_record_missing), post-swap always ready/next_print_allowed after handoff READY_RECORDED, operator confirmed bed state at each probe. Scheduler gate (WP-079) stayed OFF per S5 scope. All flags reset to default-off at session end. S5 is next up. |
+| S5 | ready | — | — | — |
 | S6 | pending | — | — | — |
 | S7 | pending | — | — | — |
 | S8 | pending | — | — | — |
