@@ -24,14 +24,18 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    `deploy/` with pinned service images, local TLS, backup mount, runbook, and
    config tests. Future production hardening should be operator-named or folded
    into the owning capability instead of reopening this backlog item.
-3. **SwapMod enablement rollout** — runbook and staged flag-enable plan for
-   the chain (state machine → transport → readiness → next-print gate →
-   scheduler gate) on one canary printer; repeated multi-cycle physical
-   validation; then the design decision for an autonomous (not per-step
-   human-phrase) actuation path. Operator sessions run as an ordered
-   sequence (S1..S9) in `docs/runbooks/SWAPMOD_ROLLOUT_SCHEDULE.md`: no
-   fixed dates, next session whenever the operator is available, gated
-   only on the previous session's validated evidence.
+3. **SwapMod enablement rollout — COMPLETE (S1..S9 done 2026-07-08).** The
+   full chain (state machine → transport → readiness → next-print gate →
+   scheduler gate) was validated on the A1 Mini canary across supervised
+   sessions S1..S9 (`docs/runbooks/SWAPMOD_ROLLOUT_SCHEDULE.md`); the §23
+   acceptance loop and all gate safety invariants are evidenced in
+   `docs/releases/SWAPMOD_ROLLOUT_S1_S9_ACCEPTANCE_LEDGER.md`. S9 go/no-go
+   decision: **GO** to charter the autonomous (not per-step human-phrase)
+   actuation design WP. Open precondition for that WP: the S1 front-hook jam
+   root cause is still mechanically unconfirmed and must be closed with
+   evidence before autonomous actuation is enabled in steady state. The
+   autonomous-actuation design WP is a separate operator-approved item (next
+   SwapMod work); allocate its WP number per the AGENTS.md rule when starting.
 4. **Real ERPNext integration** (spec WP-04 completion) — stand up a real
    ERPNext instance, point the existing adapter at it (config override),
    validate read-only import and Draft-write against it. The adapter code is
