@@ -35,7 +35,7 @@ const MAIN_NAV_ITEMS = [
   'Settings',
 ];
 
-const SWAPMOD_NAV_ITEMS = ['Overview', 'Cycle', 'Gates', 'Evidence'];
+const SWAPMOD_NAV_ITEMS = ['Printers', 'SwapMod Settings'];
 
 const DEFAULT_ARTBOARDS = [
   route('main-printers', 'Printers', '/', 'Main app', 1440, 980, [
@@ -168,25 +168,25 @@ const DEFAULT_ARTBOARDS = [
     'Auth enablement path',
     'Safe local defaults',
   ]),
-  draftArtboard('swapmod-overview', 'SwapMod Rollout Overview', '/swapmod', 1440, 1040, [
-    'Rollout sessions S1-S9 progress and current stage',
-    'Per-session evidence status with links',
-    'Next-up session and its done-when criteria',
+  draftArtboard('swapmod-printer-card', 'Printers — SwapMod plate change', '/?swapmod=plate-change', 1440, 1040, [
+    'Plate-change control lives on each connected printer card',
+    'Button is enabled only when SwapMod is armed and the printer is idle',
+    'In-progress card shows the live step track without leaving the page',
   ]),
-  draftArtboard('swapmod-cycle', 'SwapMod Live Cycle Control', '/swapmod/cycle', 1440, 1120, [
-    'State machine READY_TO_RELEASE to READY_FOR_NEXT_PRINT',
-    'Per-step actions: GO, verify pass, verify fail, manual override recovery',
-    'Operator confirmation phrase and 10-item checklist required before every actuation',
+  draftArtboard('swapmod-confirm', 'Printers — plate change confirmation', '/?swapmod=confirm', 1440, 980, [
+    'Pressing plate change opens a confirmation gate, not an immediate motion',
+    'All 10 checklist items must be ticked by the operator',
+    'Server-provided confirmation phrase shown read-only; Confirm sends the step',
   ]),
-  draftArtboard('swapmod-gates', 'SwapMod Gate & Handoff', '/swapmod/gates', 1440, 1000, [
-    'Bed readiness handoff record state',
-    'Next-print gate verdict with blocked reasons',
-    'Scheduler gate: dispatch only after verified readiness',
+  draftArtboard('swapmod-settings-failures', 'SwapMod Settings — Failure log', '/settings?tab=swapmod#failures', 1440, 1040, [
+    'Accumulated swap failures: time, printer, step, reason, result',
+    'MANUAL_REVIEW and jam causes kept for diagnosis',
+    'Filter by printer and outcome',
   ]),
-  draftArtboard('swapmod-evidence', 'SwapMod Evidence', '/swapmod/evidence', 1440, 1040, [
-    'Per-cycle evidence records and validator result (READY or MANUAL_REVIEW)',
-    'Sequence SHA-256 and confirmation phrase audit',
-    'Default-off flag confirmation at session end',
+  draftArtboard('swapmod-settings-sequences', 'SwapMod Settings — Sequence & speed editor', '/settings?tab=swapmod#sequences', 1440, 1160, [
+    'Edit per-action parameters like feedrate/speed of the release and load sequences',
+    'Edits create a NEW reviewed version with a fresh SHA-256, never a live raw push',
+    'A new version must be approved before a supervised session can select it',
   ]),
 ];
 
@@ -537,47 +537,95 @@ function renderSwapModScreen(artboard) {
 }
 
 function swapModBody(artboard) {
-  if (artboard.slug === 'swapmod-cycle') {
-    return `${swapModStateTrack()}${swapModStepActions()}${swapModChecklist()}`;
-  }
-  if (artboard.slug === 'swapmod-gates') return swapModGatePanel();
-  if (artboard.slug === 'swapmod-evidence') return swapModEvidenceRows();
-  return swapModSessionRows();
+  if (artboard.slug === 'swapmod-printer-card') return printerCardBody();
+  if (artboard.slug === 'swapmod-confirm') return confirmModalBody();
+  if (artboard.slug === 'swapmod-settings-failures') return failureLogBody();
+  if (artboard.slug === 'swapmod-settings-sequences') return sequenceEditorBody();
+  return '';
 }
 
-function swapModStateTrack() {
-  const states = [
-    ['READY_TO_RELEASE', false],
-    ['RELEASING_PLATE', false],
-    ['VERIFY_RELEASED', true],
-    ['READY_TO_LOAD', false],
-    ['LOADING_PLATE', false],
-    ['VERIFY_LOADED', false],
-    ['READY_FOR_NEXT_PRINT', false],
-  ];
-  return `<section layer-name="State machine track" style="box-sizing:border-box;display:flex;flex-direction:column;gap:10px;width:100%;background-color:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-card);padding:18px;">
-  <div style="font-size:13px;line-height:1.4;font-weight:700;color:var(--text-primary);">Cycle state</div>
-  <div layer-name="State pills" style="box-sizing:border-box;display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;align-items:center;width:100%;">${states
-    .map(([label, active]) => pill(label, active))
-    .join('')}</div>
+function printerCardBody() {
+  return `<section layer-name="Printer grid" style="box-sizing:border-box;display:flex;flex-direction:row;flex-wrap:wrap;gap:16px;width:100%;align-items:stretch;">
+  ${printerCard('A1 Mini — canary', 'IDLE', 'armed')}
+  ${printerCard('X1C — bay 2', 'RUNNING', 'busy')}
+  ${printerCard('P1S — bay 3', 'IDLE', 'disarmed')}
 </section>`;
 }
 
-function swapModStepActions() {
-  const actions = [
-    ['GO — send RELEASE_PLATE', 'primary'],
-    ['Verify pass', 'ok'],
-    ['Verify fail', 'danger'],
-    ['Manual override recovery', 'muted'],
+function printerCard(name, state, swap) {
+  const stateColor = state === 'RUNNING' ? 'var(--accent)' : 'var(--status-ok)';
+  let control;
+  if (swap === 'armed') {
+    control = `<div layer-name="Plate change control" style="box-sizing:border-box;display:flex;flex-direction:column;gap:10px;width:100%;">
+      ${swapModButton('Plate change (SwapMod)', 'primary')}
+      <div layer-name="Inline step track" style="box-sizing:border-box;display:flex;flex-direction:row;flex-wrap:wrap;gap:6px;align-items:center;width:100%;">${[
+        ['RELEASE', true],
+        ['VERIFY', false],
+        ['LOAD', false],
+        ['VERIFY', false],
+        ['READY', false],
+      ]
+        .map(([label, active]) => pill(label, active))
+        .join('')}</div>
+      <div style="font-size:12px;line-height:1.4;color:var(--text-muted);">SwapMod armed · idle · press to start a supervised swap</div>
+    </div>`;
+  } else if (swap === 'busy') {
+    control = `<div layer-name="Plate change disabled" style="box-sizing:border-box;display:flex;flex-direction:column;gap:8px;width:100%;">
+      ${swapModButton('Plate change unavailable', 'muted')}
+      <div style="font-size:12px;line-height:1.4;color:var(--text-muted);">Printer is printing — swap is blocked until the job finishes.</div>
+    </div>`;
+  } else {
+    control = `<div layer-name="Plate change disarmed" style="box-sizing:border-box;display:flex;flex-direction:column;gap:8px;width:100%;">
+      ${swapModButton('Plate change unavailable', 'muted')}
+      <div style="font-size:12px;line-height:1.4;color:var(--text-muted);">SwapMod flags default-off — arm for a supervised window to enable.</div>
+    </div>`;
+  }
+  return `
+<article layer-name="${escapeAttr(name)} card" style="box-sizing:border-box;width:420px;flex:1;min-width:360px;display:flex;flex-direction:column;gap:14px;background-color:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-card);padding:20px;">
+  <div layer-name="Card header" style="box-sizing:border-box;display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;width:100%;">
+    <div style="font-size:16px;line-height:1.3;font-weight:700;color:var(--text-primary);">${escapeHtml(name)}</div>
+    ${pill(state, state !== 'RUNNING')}
+  </div>
+  <div layer-name="Camera placeholder" style="box-sizing:border-box;width:100%;height:150px;border-radius:var(--radius-control);background-color:var(--bg-primary);border:1px solid var(--border-color);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px;">Live view</div>
+  <div style="box-sizing:border-box;display:flex;flex-direction:row;gap:10px;align-items:center;">
+    <div style="box-sizing:border-box;width:10px;height:10px;border-radius:999px;background-color:${stateColor};flex-shrink:0;"></div>
+    <div style="font-size:13px;line-height:1.4;color:var(--text-secondary);">Bed ${state === 'RUNNING' ? 'in use' : 'clear'} · AMS ready</div>
+  </div>
+  ${control}
+</article>`.trim();
+}
+
+function confirmModalBody() {
+  const items = [
+    'operator_present',
+    'printer_visible',
+    'emergency_stop_ready',
+    'power_cutoff_ready',
+    'a1_mini_confirmed',
+    'swapmod_hardware_installed',
+    'bed_area_clear',
+    'plate_stack_ready',
+    'no_other_job_running',
+    'dry_run_gate_reviewed',
   ];
-  return `<section layer-name="Step actions" style="box-sizing:border-box;display:flex;flex-direction:column;gap:14px;width:100%;background-color:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-card);padding:18px;">
-  <div style="font-size:13px;line-height:1.4;font-weight:700;color:var(--text-primary);">Current step: RELEASE_PLATE</div>
-  <div layer-name="Action buttons" style="box-sizing:border-box;display:flex;flex-direction:row;flex-wrap:wrap;gap:12px;align-items:center;width:100%;">${actions
-    .map(([label, tone]) => swapModButton(label, tone))
-    .join('')}</div>
-  <div layer-name="Phrase preview" style="box-sizing:border-box;display:flex;flex-direction:column;gap:6px;background-color:var(--bg-primary);border:1px solid var(--border-color);border-radius:var(--radius-control);padding:12px;">
-    <div style="font-size:12px;line-height:1.4;font-weight:600;color:var(--text-muted);">Confirmation phrase (from server, read-only)</div>
-    <div style="font-size:13px;line-height:1.5;font-weight:600;color:var(--text-primary);">CONFIRM_A1_MINI_DIRECT_PLATE_CHANGE 1 &lt;cycle&gt; RELEASE_PLATE &lt;sha256&gt;</div>
+  return `<section layer-name="Confirmation overlay" style="box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;width:100%;padding:8px;">
+  <div layer-name="Confirm modal" style="box-sizing:border-box;width:720px;max-width:100%;display:flex;flex-direction:column;gap:16px;background-color:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-card);padding:24px;">
+    <div style="box-sizing:border-box;display:flex;flex-direction:column;gap:6px;">
+      <div style="font-size:12px;line-height:1.4;font-weight:600;color:var(--status-warning);">A1 Mini — canary · supervised actuation</div>
+      <div style="font-size:20px;line-height:1.25;font-weight:700;color:var(--text-primary);">Confirm plate change — RELEASE_PLATE</div>
+      <div style="font-size:14px;line-height:1.5;color:var(--text-secondary);">Tick every item after physically checking it. Nothing moves until you confirm.</div>
+    </div>
+    <div layer-name="Checklist" style="box-sizing:border-box;display:flex;flex-direction:column;gap:10px;width:100%;">${items
+      .map((item) => swapModCheckRow(item))
+      .join('')}</div>
+    <div layer-name="Phrase preview" style="box-sizing:border-box;display:flex;flex-direction:column;gap:6px;background-color:var(--bg-primary);border:1px solid var(--border-color);border-radius:var(--radius-control);padding:12px;">
+      <div style="font-size:12px;line-height:1.4;font-weight:600;color:var(--text-muted);">Confirmation phrase (from server, read-only)</div>
+      <div style="font-size:13px;line-height:1.5;font-weight:600;color:var(--text-primary);">CONFIRM_A1_MINI_DIRECT_PLATE_CHANGE 1 &lt;cycle&gt; RELEASE_PLATE &lt;sha256&gt;</div>
+    </div>
+    <div layer-name="Confirm actions" style="box-sizing:border-box;display:flex;flex-direction:row;gap:12px;align-items:center;width:100%;">
+      ${swapModButton('Confirm & send RELEASE_PLATE', 'primary')}
+      ${swapModButton('Cancel', 'muted')}
+    </div>
   </div>
 </section>`;
 }
@@ -596,27 +644,6 @@ function swapModButton(label, tone) {
   return `<div layer-name="${escapeAttr(label)} button" style="box-sizing:border-box;display:flex;align-items:center;justify-content:center;min-height:44px;border-radius:var(--radius-control);padding:0px 18px;background-color:${background};border:1px solid ${border};color:${color};font-size:14px;line-height:1.4;font-weight:700;white-space:nowrap;">${escapeHtml(label)}</div>`;
 }
 
-function swapModChecklist() {
-  const items = [
-    'operator_present',
-    'printer_visible',
-    'emergency_stop_ready',
-    'power_cutoff_ready',
-    'a1_mini_confirmed',
-    'swapmod_hardware_installed',
-    'bed_area_clear',
-    'plate_stack_ready',
-    'no_other_job_running',
-    'dry_run_gate_reviewed',
-  ];
-  return `<section layer-name="Operator checklist" style="box-sizing:border-box;display:flex;flex-direction:column;gap:12px;width:100%;background-color:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-card);padding:18px;">
-  <div style="font-size:13px;line-height:1.4;font-weight:700;color:var(--text-primary);">Operator checklist — all required before GO</div>
-  <div layer-name="Checklist items" style="box-sizing:border-box;display:flex;flex-direction:column;gap:10px;width:100%;">${items
-    .map((item) => swapModCheckRow(item))
-    .join('')}</div>
-</section>`;
-}
-
 function swapModCheckRow(label) {
   return `
 <div layer-name="Check ${escapeAttr(label)}" style="box-sizing:border-box;display:flex;flex-direction:row;gap:12px;align-items:center;width:100%;min-height:32px;">
@@ -625,74 +652,84 @@ function swapModCheckRow(label) {
 </div>`.trim();
 }
 
-function swapModGatePanel() {
-  return `<section layer-name="Gate tiles" style="box-sizing:border-box;display:flex;flex-direction:row;gap:16px;width:100%;">
-  ${statusTile('Bed readiness handoff', 'READY_RECORDED', 'var(--status-ok)')}
-  ${statusTile('Next-print gate', 'ready', 'var(--status-ok)')}
-  ${statusTile('Scheduler gate', 'blocked until verified', 'var(--status-warning)')}
+function failureLogBody() {
+  const rows = [
+    ['2026-07-03 06:11', 'A1 Mini', 'RELEASE_PLATE', 'Plate jammed mid-eject at front hook', 'MANUAL_REVIEW'],
+    ['2026-07-03 07:27', 'A1 Mini', 'RELEASE_PLATE', 'v02-01 retry-hop still failed — bed sag', 'MANUAL_REVIEW'],
+    ['2026-07-06 05:13', 'A1 Mini', 'RELEASE_PLATE', 'Failure cause not observed', 'MANUAL_REVIEW'],
+    ['2026-07-06 16:38', 'A1 Mini', 'VERIFY_RELEASED', 'Injected verify-fail (S6 drill)', 'MANUAL_REVIEW'],
+  ];
+  return `<section layer-name="Failure filters" style="box-sizing:border-box;display:flex;flex-direction:row;gap:10px;align-items:center;width:100%;">
+  ${pill('All printers', true)}
+  ${pill('A1 Mini', false)}
+  ${pill('MANUAL_REVIEW only', false)}
 </section>
-<section layer-name="Blocked reasons" style="box-sizing:border-box;display:flex;flex-direction:column;gap:10px;width:100%;background-color:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-card);padding:18px;">
-  <div style="font-size:13px;line-height:1.4;font-weight:700;color:var(--text-primary);">Blocked reasons (when gate is shut)</div>
-  <div style="box-sizing:border-box;display:flex;flex-direction:column;gap:8px;">${['swapmod_cycle_not_ready', 'bed_readiness_record_missing', 'swapmod_manual_review_required']
-    .map((reason, index) => highlightRow(index + 1, reason))
-    .join('')}</div>
-</section>`;
-}
-
-function swapModSessionRows() {
-  const sessions = [
-    ['S1', '3 consecutive full cycles', 'DONE'],
-    ['S2', 'Abort + recovery drill', 'DONE'],
-    ['S3', '5 consecutive cycles', 'DONE'],
-    ['S4', 'Gate integration (evaluate-only)', 'DONE'],
-    ['S5', 'Scheduler gate enforced', 'DONE'],
-    ['S6', 'Injected failure, no dispatch', 'DONE'],
-    ['S7', 'Full acceptance loop once', 'DONE'],
-    ['S8', 'Full loop 3x', 'DONE'],
-    ['S9', 'Acceptance review, GO decision', 'DONE'],
-  ];
-  return `<section layer-name="Session rows" style="box-sizing:border-box;display:flex;flex-direction:column;gap:0px;width:100%;background-color:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-card);overflow:hidden;">
-  <div layer-name="Sessions header" style="box-sizing:border-box;display:flex;flex-direction:row;gap:16px;align-items:center;padding:14px 16px;background-color:var(--bg-primary);border-bottom:1px solid var(--border-color);">
-    <div style="width:80px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--text-muted);">Session</div>
-    <div style="flex:1;min-width:0;font-size:12px;font-weight:700;color:var(--text-muted);">Scope</div>
-    <div style="width:120px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--text-muted);">Status</div>
+<section layer-name="Failure log" style="box-sizing:border-box;display:flex;flex-direction:column;gap:0px;width:100%;background-color:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-card);overflow:hidden;">
+  <div layer-name="Failure header" style="box-sizing:border-box;display:flex;flex-direction:row;gap:16px;align-items:center;padding:14px 16px;background-color:var(--bg-primary);border-bottom:1px solid var(--border-color);">
+    <div style="width:130px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--text-muted);">Time</div>
+    <div style="width:96px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--text-muted);">Printer</div>
+    <div style="width:150px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--text-muted);">Step</div>
+    <div style="flex:1;min-width:0;font-size:12px;font-weight:700;color:var(--text-muted);">Reason</div>
+    <div style="width:150px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--text-muted);">Result</div>
   </div>
-  ${sessions.map((row, index) => swapModSessionRow(row, index === sessions.length - 1)).join('')}
+  ${rows.map((row, index) => failureRow(row, index === rows.length - 1)).join('')}
 </section>`;
 }
 
-function swapModSessionRow([id, scope, status], last) {
+function failureRow([time, printer, step, reason, result], last) {
   return `
-<div layer-name="Session ${escapeAttr(id)}" style="box-sizing:border-box;display:flex;flex-direction:row;gap:16px;align-items:center;min-height:52px;padding:0px 16px;border-bottom:${last ? '0px solid transparent' : '1px solid var(--border-color)'};">
-  <div style="width:80px;flex-shrink:0;font-size:14px;font-weight:700;color:var(--text-primary);">${escapeHtml(id)}</div>
-  <div style="flex:1;min-width:0;font-size:14px;line-height:1.5;color:var(--text-secondary);">${escapeHtml(scope)}</div>
-  <div style="width:120px;flex-shrink:0;display:flex;justify-content:flex-start;">${pill(status, true)}</div>
+<div layer-name="Failure ${escapeAttr(time)}" style="box-sizing:border-box;display:flex;flex-direction:row;gap:16px;align-items:center;min-height:52px;padding:12px 16px;border-bottom:${last ? '0px solid transparent' : '1px solid var(--border-color)'};">
+  <div style="width:130px;flex-shrink:0;font-size:13px;color:var(--text-secondary);">${escapeHtml(time)}</div>
+  <div style="width:96px;flex-shrink:0;font-size:13px;font-weight:600;color:var(--text-primary);">${escapeHtml(printer)}</div>
+  <div style="width:150px;flex-shrink:0;font-size:13px;color:var(--text-secondary);">${escapeHtml(step)}</div>
+  <div style="flex:1;min-width:0;font-size:14px;line-height:1.5;color:var(--text-primary);">${escapeHtml(reason)}</div>
+  <div style="width:150px;flex-shrink:0;display:flex;justify-content:flex-start;">${pill(result, false)}</div>
 </div>`.trim();
 }
 
-function swapModEvidenceRows() {
-  const records = [
-    ['20260706-4', 'S1 cycle 3/3', 'READY'],
-    ['20260706-17', 'S6 injected failure', 'MANUAL_REVIEW'],
-    ['20260706-21', 'S8 loop 3', 'READY'],
+function sequenceEditorBody() {
+  const actions = [
+    ['Park extruder', 'X-14', 'F5000'],
+    ['Move plate to ejecting position', 'Y182', 'F10000'],
+    ['Lift the plate', 'Y120', 'F500'],
+    ['Jump over the front hook', 'Y115', 'F500'],
+    ['Pull the new plate', 'Y180', 'F2000'],
   ];
-  return `<section layer-name="Evidence rows" style="box-sizing:border-box;display:flex;flex-direction:column;gap:0px;width:100%;background-color:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-card);overflow:hidden;">
-  <div layer-name="Evidence header" style="box-sizing:border-box;display:flex;flex-direction:row;gap:16px;align-items:center;padding:14px 16px;background-color:var(--bg-primary);border-bottom:1px solid var(--border-color);">
-    <div style="width:160px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--text-muted);">Record</div>
-    <div style="flex:1;min-width:0;font-size:12px;font-weight:700;color:var(--text-muted);">Cycle</div>
-    <div style="width:150px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--text-muted);">Validator</div>
+  return `<section layer-name="Version banner" style="box-sizing:border-box;display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:16px;width:100%;background-color:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-card);padding:16px 18px;">
+  <div style="box-sizing:border-box;display:flex;flex-direction:column;gap:4px;">
+    <div style="font-size:13px;line-height:1.4;font-weight:700;color:var(--text-primary);">Release sequence — a1mini-swapmod-release-v02-00</div>
+    <div style="font-size:12px;line-height:1.4;color:var(--text-muted);">sha256 c7990354… · reviewed · used by supervised sessions</div>
   </div>
-  ${records.map((row, index) => swapModEvidenceRow(row, index === records.length - 1)).join('')}
+  ${pill('Reviewed', true)}
+</section>
+<section layer-name="Sequence editor" style="box-sizing:border-box;display:flex;flex-direction:column;gap:0px;width:100%;background-color:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-card);overflow:hidden;">
+  <div layer-name="Editor header" style="box-sizing:border-box;display:flex;flex-direction:row;gap:16px;align-items:center;padding:14px 16px;background-color:var(--bg-primary);border-bottom:1px solid var(--border-color);">
+    <div style="flex:1;min-width:0;font-size:12px;font-weight:700;color:var(--text-muted);">Action</div>
+    <div style="width:120px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--text-muted);">Target</div>
+    <div style="width:150px;flex-shrink:0;font-size:12px;font-weight:700;color:var(--text-muted);">Speed (feedrate)</div>
+  </div>
+  ${actions.map((row, index) => sequenceRow(row, index === actions.length - 1)).join('')}
+</section>
+<section layer-name="Editor actions" style="box-sizing:border-box;display:flex;flex-direction:column;gap:12px;width:100%;background-color:var(--bg-secondary);border:1px solid var(--status-warning);border-radius:var(--radius-card);padding:18px;">
+  <div style="font-size:13px;line-height:1.5;color:var(--text-primary);">Saving does not push G-code to a printer. It writes a NEW version (fresh SHA-256) that must be approved before a supervised session can select it. The current reviewed version stays in use until then.</div>
+  <div style="box-sizing:border-box;display:flex;flex-direction:row;gap:12px;align-items:center;width:100%;">
+    ${swapModButton('Save as new version (needs review)', 'primary')}
+    ${swapModButton('Discard changes', 'muted')}
+  </div>
 </section>`;
 }
 
-function swapModEvidenceRow([record, cycle, result], last) {
+function sequenceRow([action, target, speed], last) {
   return `
-<div layer-name="Evidence ${escapeAttr(record)}" style="box-sizing:border-box;display:flex;flex-direction:row;gap:16px;align-items:center;min-height:52px;padding:0px 16px;border-bottom:${last ? '0px solid transparent' : '1px solid var(--border-color)'};">
-  <div style="width:160px;flex-shrink:0;font-size:13px;font-weight:600;color:var(--text-primary);">${escapeHtml(record)}</div>
-  <div style="flex:1;min-width:0;font-size:14px;line-height:1.5;color:var(--text-secondary);">${escapeHtml(cycle)}</div>
-  <div style="width:150px;flex-shrink:0;display:flex;justify-content:flex-start;">${pill(result, result === 'READY')}</div>
+<div layer-name="Action ${escapeAttr(action)}" style="box-sizing:border-box;display:flex;flex-direction:row;gap:16px;align-items:center;min-height:56px;padding:10px 16px;border-bottom:${last ? '0px solid transparent' : '1px solid var(--border-color)'};">
+  <div style="flex:1;min-width:0;font-size:14px;line-height:1.5;color:var(--text-primary);">${escapeHtml(action)}</div>
+  <div style="width:120px;flex-shrink:0;font-size:14px;font-weight:600;color:var(--text-secondary);">${escapeHtml(target)}</div>
+  <div style="width:150px;flex-shrink:0;">${editableField(speed)}</div>
 </div>`.trim();
+}
+
+function editableField(value) {
+  return `<div layer-name="Field ${escapeAttr(value)}" style="box-sizing:border-box;display:flex;align-items:center;min-height:36px;border:1px solid var(--accent);border-radius:var(--radius-control);padding:0px 12px;background-color:var(--bg-primary);color:var(--text-primary);font-size:14px;font-weight:700;">${escapeHtml(value)}</div>`;
 }
 
 function navRow(label, activeLabel) {
