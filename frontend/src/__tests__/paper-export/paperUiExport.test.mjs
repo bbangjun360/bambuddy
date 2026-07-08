@@ -68,7 +68,12 @@ describe('Paper UI export', () => {
     expect(proposed.every((artboard) => artboard.section === 'Farm / SwapMod')).toBe(true);
     expect(proposed.every((artboard) => artboard.source === 'design-draft:swapmod-console')).toBe(true);
     expect(proposed.map((artboard) => artboard.path)).toEqual(
-      expect.arrayContaining(['/swapmod', '/swapmod/cycle', '/swapmod/gates', '/swapmod/evidence']),
+      expect.arrayContaining([
+        '/?swapmod=plate-change',
+        '/?swapmod=confirm',
+        '/settings?tab=swapmod#failures',
+        '/settings?tab=swapmod#sequences',
+      ]),
     );
   });
 

@@ -36,12 +36,16 @@ In scope:
 - Dry-run-by-default upload through the local Paper MCP.
 - npm scripts `paper:export`, `paper:export:dry-run`, `paper:upload`,
   `paper:upload:dry-run` and Makefile targets `test-frontend`, `test-paper-export`.
-- Proposed SwapMod operator-console design drafts (`/swapmod`, `/swapmod/cycle`,
-  `/swapmod/gates`, `/swapmod/evidence`) seeded into Paper via the same pipeline as
-  the design surface for the upcoming SwapMod console. These are net-new screens that
-  do NOT yet exist in `App.tsx`; they carry `source: 'design-draft:swapmod-console'`
-  and `proposed: true`, and are exempt from the route-parity check. The React console
-  implementation itself is a separate operator-approved WP, not this one.
+- Proposed SwapMod design drafts seeded into Paper via the same pipeline as the
+  design surface for the upcoming SwapMod control feature. Per operator direction
+  (2026-07-08) the design is NOT a standalone console but: (1) a plate-change control
+  on each connected printer card in the Printers page, (2) a confirmation gate
+  (checklist + server phrase), and (3) a SwapMod settings page holding a failure log
+  and a sequence/speed editor. Draft artboards: `/?swapmod=plate-change`,
+  `/?swapmod=confirm`, `/settings?tab=swapmod#failures`, `/settings?tab=swapmod#sequences`.
+  These are net-new screens that do NOT yet exist in `App.tsx`; they carry
+  `source: 'design-draft:swapmod-console'` and `proposed: true`, and are exempt from
+  the route-parity check. The React implementation is a separate operator-approved WP.
 
 Out of scope:
 
@@ -91,6 +95,9 @@ Out of scope:
 - [x] 2026-07-08 Commit + PR for `feature/paper-ui-export-mcp`.
 - [x] 2026-07-08 Operator-approved first real upload; Paper file
       `https://app.paper.design/file/01KX0ETDMK3N9VAM8FZM5DV0NY` (30 artboards).
+- [x] 2026-07-08 Revised SwapMod drafts per operator direction (printer-card control +
+      confirmation gate + settings failure-log + sequence/speed editor); re-uploaded to
+      Paper file `https://app.paper.design/file/01KX0H7ZKKHA09BK1HS1Z23CR2` (30 artboards).
 
 # Decisions
 
