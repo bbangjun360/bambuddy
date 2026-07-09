@@ -202,6 +202,61 @@ class SwapmodStateMachineApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.count_rows(SwapmodStateMachineCycle), 0)
         await self.assert_no_control_rows()
 
+    async def create_failed_cycle(self, cycle_key: str, *, printer_id: int) -> None:
+        await self.client.post(
+            "/api/v1/swapmod-state-machine/operator-triggers",
+            json={
+                "trigger_key": f"{cycle_key}-trigger",
+                "cycle_key": cycle_key,
+                "printer_id": printer_id,
+                "operator_intent": "START_SWAPMOD_PLATE_CHANGE",
+            },
+        )
+        await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/transport-steps",
+            json={"transport_key": f"{cycle_key}-release", "step": RELEASE_PLATE, "mock_result": "success"},
+        )
+        await self.client.post(
+            f"/api/v1/swapmod-state-machine/cycles/{cycle_key}/verifications",
+            json={
+                "verification_key": f"{cycle_key}-release-verification",
+                "verification_source": "manual",
+                "verification_result": "fail",
+            },
+        )
+
+    async def test_list_cycles_reads_safely_when_disabled(self) -> None:
+        response = await self.client.get("/api/v1/swapmod-state-machine/cycles")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["cycles"], [])
+
+    async def test_list_cycles_newest_first_with_printer_and_failure_filters(self) -> None:
+        self.enable_state_machine()
+        self.enable_transport_boundary()
+
+        await self.create_ready_cycle("list-a")  # printer 101, READY_FOR_NEXT_PRINT
+        await self.create_ready_cycle("list-b")  # printer 101, READY_FOR_NEXT_PRINT
+        await self.create_failed_cycle("list-fail", printer_id=202)  # MANUAL_REVIEW
+
+        response = await self.client.get("/api/v1/swapmod-state-machine/cycles")
+        self.assertEqual(response.status_code, 200)
+        cycles = response.json()["cycles"]
+        keys = [cycle["cycle_key"] for cycle in cycles]
+        self.assertEqual(keys[0], "list-fail")  # newest first
+        self.assertEqual(set(keys), {"list-a", "list-b", "list-fail"})
+
+        by_101 = await self.client.get("/api/v1/swapmod-state-machine/cycles?printer_id=101")
+        self.assertEqual({c["cycle_key"] for c in by_101.json()["cycles"]}, {"list-a", "list-b"})
+
+        failures = await self.client.get("/api/v1/swapmod-state-machine/cycles?manual_review_only=true")
+        failure_cycles = failures.json()["cycles"]
+        self.assertEqual([c["cycle_key"] for c in failure_cycles], ["list-fail"])
+        self.assertTrue(failure_cycles[0]["manual_review_required"])
+        self.assertIsNotNone(failure_cycles[0]["blocked_reason"])
+
+        limited = await self.client.get("/api/v1/swapmod-state-machine/cycles?limit=1")
+        self.assertEqual(len(limited.json()["cycles"]), 1)
+
     async def test_operator_trigger_is_disabled_by_default(self) -> None:
         response = await self.client.post(
             "/api/v1/swapmod-state-machine/operator-triggers",
