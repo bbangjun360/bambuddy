@@ -65,7 +65,7 @@ filters), read-only, feeding the overview and failure log.
 ## Milestones
 
 1. Backend read-only cycle listing + test. DONE 2026-07-09
-2. `swapmodApi` client + SwapMod settings tab with failure log. TODO
+2. `swapmodApi` client + SwapMod settings tab with failure log. DONE 2026-07-09
 3. Sequence/speed editor (versioned, re-hashed, reviewed). TODO — operator-approved
 4. Printer-card plate-change control + confirmation gate. TODO — operator-approved
 
@@ -77,6 +77,11 @@ filters), read-only, feeding the overview and failure log.
 - [x] 2026-07-09 Integration tests: newest-first ordering, printer filter,
       failure filter, limit, safe read when disabled; full
       `test_swapmod_state_machine_api` class green (22 tests) in the backend image.
+- [x] 2026-07-09 Frontend slice 2: `swapmodApi.listCycles` in `client.ts` and a
+      read-only SwapMod settings tab rendering the failure log (cycles with
+      `manual_review_only`, 15s poll while active). Tab label + content use i18n
+      fallback args, so no locale files change and parity stays green. `npm run
+      build` + eslint + i18n/paper vitest all pass.
 
 ## Decisions
 

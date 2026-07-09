@@ -6880,6 +6880,52 @@ export interface DaemonUpdateCheck {
   update_available: boolean;
 }
 
+// SwapMod control UI (WP-110)
+export interface SwapmodCycle {
+  id: number;
+  cycle_key: string;
+  printer_id: number | null;
+  source_print_run_id: string | null;
+  state: string;
+  dry_run: boolean;
+  ready_for_next_print: boolean;
+  manual_review_required: boolean;
+  retry_available: boolean;
+  blocked_reason: string | null;
+  current_step: string | null;
+  retry_step: string | null;
+  verification_source: string | null;
+  verification_result: string | null;
+  note: string | null;
+  seen_event_ids: string[];
+  transition_log: Array<Record<string, unknown>>;
+  transition_count: number;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SwapmodCyclesResponse {
+  cycles: SwapmodCycle[];
+}
+
+export interface SwapmodCycleListParams {
+  printerId?: number;
+  manualReviewOnly?: boolean;
+  limit?: number;
+}
+
+// Read-only SwapMod cycle listing (overview + failure log). No actuation here.
+export const swapmodApi = {
+  listCycles: (params: SwapmodCycleListParams = {}) => {
+    const query = new URLSearchParams();
+    if (params.printerId != null) query.set('printer_id', String(params.printerId));
+    if (params.manualReviewOnly) query.set('manual_review_only', 'true');
+    if (params.limit != null) query.set('limit', String(params.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<SwapmodCyclesResponse>(`/swapmod-state-machine/cycles${suffix}`);
+  },
+};
+
 // SpoolBuddy API
 export const spoolbuddyApi = {
   getDevices: () =>
