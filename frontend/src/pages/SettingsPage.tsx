@@ -37,7 +37,8 @@ import { OIDCProviderSettings } from '../components/OIDCProviderSettings';
 import { SecurityStatusCard } from '../components/SecurityStatusCard';
 import { APIBrowser } from '../components/APIBrowser';
 import { Toggle } from '../components/Toggle';
-import { virtualPrinterApi, spoolbuddyApi } from '../api/client';
+import { virtualPrinterApi, spoolbuddyApi, swapmodApi } from '../api/client';
+import type { SwapmodCycle } from '../api/client';
 import { defaultNavItems, getDefaultView, setDefaultView } from '../components/Layout';
 import { availableLanguages } from '../i18n';
 import { useToast } from '../contexts/ToastContext';
@@ -47,7 +48,7 @@ import { Palette } from 'lucide-react';
 import { registerSettingsSearch, getSettingsSearchEntries } from '../lib/settingsSearch';
 import type { UsersSubTab } from '../lib/settingsSearch';
 
-const validTabs = ['general', 'plugs', 'notifications', 'queue', 'filament', 'network', 'apikeys', 'virtual-printer', 'spoolbuddy', 'failure-detection', 'users', 'backup'] as const;
+const validTabs = ['general', 'plugs', 'notifications', 'queue', 'filament', 'network', 'apikeys', 'virtual-printer', 'spoolbuddy', 'failure-detection', 'users', 'backup', 'swapmod'] as const;
 type TabType = typeof validTabs[number];
 
 // Cross-tab search registrations for cards rendered inline in this file.
@@ -385,6 +386,14 @@ export function SettingsPage() {
     },
     enabled: activeTab === 'plugs' && !!smartPlugs && smartPlugs.length > 0,
     refetchInterval: activeTab === 'plugs' ? 10000 : false, // Refresh every 10s when on plugs tab
+  });
+
+  // WP-110 read-only SwapMod failure log (cycles that ended in manual review).
+  const { data: swapmodFailures } = useQuery({
+    queryKey: ['swapmod-failures'],
+    queryFn: () => swapmodApi.listCycles({ manualReviewOnly: true, limit: 50 }),
+    enabled: activeTab === 'swapmod',
+    refetchInterval: activeTab === 'swapmod' ? 15000 : false,
   });
 
   const { data: notificationProviders, isLoading: providersLoading } = useQuery({
@@ -1477,6 +1486,17 @@ export function SettingsPage() {
           <Database className="w-4 h-4" />
           {t('settings.tabs.backup')}
           <span className={`w-2 h-2 rounded-full ${(cloudAuthStatus?.is_authenticated && githubBackupStatus?.configured && githubBackupStatus?.enabled) || settings?.local_backup_enabled ? 'bg-green-400' : 'bg-gray-500'}`} />
+        </button>
+        <button
+          onClick={() => handleTabChange('swapmod')}
+          className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px lg:border-b-0 lg:border-l-2 lg:-ml-px lg:mb-0 lg:justify-start flex items-center gap-2 ${
+            activeTab === 'swapmod'
+              ? 'text-bambu-green border-bambu-green'
+              : 'text-bambu-gray hover:text-gray-900 dark:hover:text-white border-transparent'
+          }`}
+        >
+          <RefreshCw className="w-4 h-4" />
+          {t('settings.tabs.swapmod', 'SwapMod')}
         </button>
       </nav>
       <div className="flex-1 min-w-0">
@@ -5935,6 +5955,42 @@ export function SettingsPage() {
       {activeTab === 'failure-detection' && (
         <div id="card-failure-detection">
           <FailureDetectionSettings />
+        </div>
+      )}
+
+      {activeTab === 'swapmod' && (
+        <div className="space-y-4" id="card-swapmod-failures">
+          <div className="bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <RefreshCw className="w-5 h-5 text-bambu-green" />
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{t('settings.swapmod.title', 'SwapMod')}</h3>
+            </div>
+            <p className="text-sm text-bambu-gray">{t('settings.swapmod.failureLogDescription', 'Recent plate-change cycles that ended in manual review. Read-only.')}</p>
+          </div>
+          <div className="bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg overflow-hidden">
+            <div className="flex items-center gap-4 px-4 py-2 border-b border-bambu-dark-tertiary text-xs font-semibold text-bambu-gray">
+              <div className="w-44 flex-shrink-0">{t('settings.swapmod.colTime', 'Updated')}</div>
+              <div className="w-20 flex-shrink-0">{t('settings.swapmod.colPrinter', 'Printer')}</div>
+              <div className="w-40 flex-shrink-0">{t('settings.swapmod.colStep', 'Step')}</div>
+              <div className="flex-1 min-w-0">{t('settings.swapmod.colReason', 'Reason')}</div>
+              <div className="w-52 flex-shrink-0">{t('settings.swapmod.colState', 'State')}</div>
+            </div>
+            {(swapmodFailures?.cycles ?? []).length === 0 ? (
+              <div className="px-4 py-6 text-sm text-bambu-gray italic">{t('settings.swapmod.noFailures', 'No SwapMod failures recorded.')}</div>
+            ) : (
+              (swapmodFailures?.cycles ?? []).map((cycle: SwapmodCycle) => (
+                <div key={cycle.id} className="flex items-center gap-4 px-4 py-3 border-b border-bambu-dark-tertiary last:border-b-0 text-sm">
+                  <div className="w-44 flex-shrink-0 text-bambu-gray">{cycle.updated_at ?? '—'}</div>
+                  <div className="w-20 flex-shrink-0 text-gray-900 dark:text-white">{cycle.printer_id ?? '—'}</div>
+                  <div className="w-40 flex-shrink-0 text-bambu-gray">{cycle.current_step ?? cycle.retry_step ?? '—'}</div>
+                  <div className="flex-1 min-w-0 text-gray-900 dark:text-white">{cycle.blocked_reason ?? '—'}</div>
+                  <div className="w-52 flex-shrink-0">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-bambu-dark-tertiary text-bambu-gray">{cycle.state}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
 
