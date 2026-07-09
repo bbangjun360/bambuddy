@@ -40,6 +40,7 @@ from backend.app.services.swapmod_state_machine import (
     create_swapmod_cycle,
     create_swapmod_operator_trigger,
     get_swapmod_cycle,
+    list_swapmod_cycles,
     public_swapmod_cycle,
     swapmod_state_machine_status,
 )
@@ -231,6 +232,30 @@ async def get_swapmod_scheduler_handoff_diagnostics(
         scheduler_queue_readiness_binding_enabled=settings.farm_swapmod_scheduler_queue_readiness_binding_enabled,
         bed_automation_enabled=settings.farm_bed_automation_enabled,
     )
+
+
+@router.get("/cycles")
+async def list_swapmod_state_machine_cycles(
+    printer_id: int | None = None,
+    manual_review_only: bool = False,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+):
+    """Read-only cycle listing for the SwapMod UI (overview + failure log).
+
+    Newest first. Optional ``printer_id`` filter and ``manual_review_only`` for the
+    failure log. This is a read endpoint: it returns safely regardless of the
+    state-machine feature flag and never sends any printer command.
+    """
+    bounded_limit = max(1, min(limit, 200))
+    cycles = await list_swapmod_cycles(
+        db,
+        printer_id=printer_id,
+        manual_review_only=manual_review_only,
+        limit=bounded_limit,
+    )
+    return {"cycles": [public_swapmod_cycle(cycle) for cycle in cycles]}
 
 
 @router.post("/cycles", status_code=202)

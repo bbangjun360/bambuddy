@@ -45,9 +45,21 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    Untouched so far. Depends on 4 for the ERP payload end.
 6. **Obico phase 2** (spec WP-09) — assisted pause after shadow-mode sample
    collection. Blocked on: enough production shadow samples, which needs 2.
-7. **WP-9xx off-track tooling closure** — WP-901 Paper UI export: commit,
-   PR, human-gated first upload. Not on the acceptance path; do not let it
-   preempt items 1–6.
+7. **WP-9xx off-track tooling closure** — WP-901 Paper UI export: DONE
+   2026-07-08 (committed PR #86, human-gated first upload complete). Not on the
+   acceptance path; do not let it preempt items 1–6.
+8. **SwapMod control UI (WP-110)** — operator-approved 2026-07-09. Replace the
+   curl-driven S1..S9 flow with in-app controls: a plate-change control on each
+   connected printer card, a confirmation gate (10-item checklist + server
+   read-only phrase), and a SwapMod settings tab with a failure log and a
+   sequence/speed editor. Design iterated in Paper first (WP-901 pipeline).
+   Follow-on to the completed rollout (item 3); operability, not on the §23
+   acceptance path. SAFETY: actuation + sequence-editor changes are
+   operator-approved (draft PR); the sequence editor writes a NEW reviewed
+   version with a fresh SHA-256, never a live raw G-code push (preserves the
+   WP-076 allowlist+hash model); flags stay default-off; the UI never
+   auto-fills the checklist or phrase. Read-only monitoring (failure log,
+   overview) ships first and is routine-mergeable.
 
 ## Explicitly deferred (do not start without operator approval)
 

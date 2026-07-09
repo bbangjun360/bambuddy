@@ -171,6 +171,29 @@ async def get_swapmod_cycle(db: AsyncSession, *, cycle_key: str) -> SwapmodState
     return result.scalar_one_or_none()
 
 
+async def list_swapmod_cycles(
+    db: AsyncSession,
+    *,
+    printer_id: int | None = None,
+    manual_review_only: bool = False,
+    limit: int = 50,
+) -> list[SwapmodStateMachineCycle]:
+    """Read-only listing of SwapMod cycles, newest first.
+
+    ``manual_review_only`` narrows to cycles that ended needing attention
+    (``manual_review_required`` is set for MANUAL_REVIEW_REQUIRED, BLOCKED_TIMEOUT,
+    and BLOCKED_UNKNOWN_STATE), which is what a failure log shows.
+    """
+    stmt = select(SwapmodStateMachineCycle)
+    if printer_id is not None:
+        stmt = stmt.where(SwapmodStateMachineCycle.printer_id == printer_id)
+    if manual_review_only:
+        stmt = stmt.where(SwapmodStateMachineCycle.manual_review_required.is_(True))
+    stmt = stmt.order_by(SwapmodStateMachineCycle.id.desc()).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
 async def apply_swapmod_event(
     db: AsyncSession,
     cycle: SwapmodStateMachineCycle,
