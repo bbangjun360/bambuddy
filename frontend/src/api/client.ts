@@ -6914,7 +6914,41 @@ export interface SwapmodCycleListParams {
   limit?: number;
 }
 
-// Read-only SwapMod cycle listing (overview + failure log). No actuation here.
+export interface SwapmodCanaryStatus {
+  mode: string;
+  enabled: boolean;
+  allow_real_commands: boolean;
+  release_sequence_configured: boolean;
+  load_sequence_configured: boolean;
+  single_printer_only: boolean;
+  human_confirmation_required: boolean;
+}
+
+export interface SwapmodConfirmationPreview {
+  printer_id: number;
+  cycle_key: string;
+  step: string;
+  sequence_configured: boolean;
+  sequence_sha256: string | null;
+  required_operator_approval_phrase: string | null;
+  checklist_fields: string[];
+}
+
+export type SwapmodStep = 'RELEASE_PLATE' | 'LOAD_NEXT_PLATE';
+
+export interface SwapmodTransportStepRequest {
+  canary_key: string;
+  printer_id: number;
+  step: SwapmodStep;
+  operator_approved: boolean;
+  operator_approval_phrase: string;
+  checklist: Record<string, boolean>;
+}
+
+// Read-only cycle listing (overview + failure log) plus the supervised
+// plate-change actuation flow. Actuation always goes through the existing
+// gated endpoints: the operator ticks the checklist and the server-provided
+// phrase is shown read-only — the UI never fabricates either.
 export const swapmodApi = {
   listCycles: (params: SwapmodCycleListParams = {}) => {
     const query = new URLSearchParams();
@@ -6924,6 +6958,46 @@ export const swapmodApi = {
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return request<SwapmodCyclesResponse>(`/swapmod-state-machine/cycles${suffix}`);
   },
+
+  getCanaryStatus: () =>
+    request<SwapmodCanaryStatus>('/swapmod-a1-mini-direct-canary/status'),
+
+  confirmationPreview: (printerId: number, cycleKey: string, step: SwapmodStep) => {
+    const query = new URLSearchParams({
+      printer_id: String(printerId),
+      cycle_key: cycleKey,
+      step,
+    });
+    return request<SwapmodConfirmationPreview>(
+      `/swapmod-a1-mini-direct-canary/confirmation-preview?${query.toString()}`,
+    );
+  },
+
+  createCycle: (params: { triggerKey: string; cycleKey: string; printerId: number }) =>
+    request<SwapmodCycle>('/swapmod-state-machine/operator-triggers', {
+      method: 'POST',
+      body: JSON.stringify({
+        trigger_key: params.triggerKey,
+        cycle_key: params.cycleKey,
+        printer_id: params.printerId,
+        operator_intent: 'START_SWAPMOD_PLATE_CHANGE',
+      }),
+    }),
+
+  transportStep: (cycleKey: string, body: SwapmodTransportStepRequest) =>
+    request<SwapmodCycle>(
+      `/swapmod-a1-mini-direct-canary/cycles/${encodeURIComponent(cycleKey)}/transport-steps`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+
+  verify: (
+    cycleKey: string,
+    body: { verification_key: string; verification_source: 'manual'; verification_result: 'pass' | 'fail'; note?: string },
+  ) =>
+    request<SwapmodCycle>(
+      `/swapmod-state-machine/cycles/${encodeURIComponent(cycleKey)}/verifications`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
 };
 
 // SpoolBuddy API

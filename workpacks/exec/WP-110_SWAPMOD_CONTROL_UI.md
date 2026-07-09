@@ -67,7 +67,7 @@ filters), read-only, feeding the overview and failure log.
 1. Backend read-only cycle listing + test. DONE 2026-07-09
 2. `swapmodApi` client + SwapMod settings tab with failure log. DONE 2026-07-09
 3. Sequence/speed editor (versioned, re-hashed, reviewed). TODO — operator-approved
-4. Printer-card plate-change control + confirmation gate. TODO — operator-approved
+4. Printer-card plate-change control + confirmation gate. DRAFT 2026-07-09 — operator-approved (PR pending review + operator-present E2E)
 
 ## Progress
 
@@ -82,6 +82,16 @@ filters), read-only, feeding the overview and failure log.
       `manual_review_only`, 15s poll while active). Tab label + content use i18n
       fallback args, so no locale files change and parity stays green. `npm run
       build` + eslint + i18n/paper vitest all pass.
+- [x] 2026-07-09 Slice 4 DRAFT: read-only `GET /swapmod-a1-mini-direct-canary/
+      confirmation-preview` (returns the exact operator phrase + checklist fields
+      for a cycle+step; sends no command) + `confirmation_preview` service method +
+      2 integration tests (canary API class 6 tests green). Frontend
+      `SwapModPlateChangeControl` component (renders on a printer card only while
+      the canary is armed) drives create-cycle -> confirm gate (operator ticks the
+      10-item checklist, server phrase shown read-only) -> RELEASE -> verify ->
+      LOAD -> verify via the existing gated endpoints; verify-fail -> MANUAL_REVIEW.
+      `swapmodApi` actuation methods added. `npm run build` + eslint + i18n parity
+      green. DRAFT PR — needs operator review + operator-present E2E before merge.
 
 ## Decisions
 

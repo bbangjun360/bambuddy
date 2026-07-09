@@ -154,6 +154,32 @@ class SwapmodA1MiniDirectCanaryApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(body["allow_real_commands"])
         self.assertFalse(body["arbitrary_gcode_supported"])
 
+    async def test_confirmation_preview_returns_phrase_and_checklist(self) -> None:
+        response = await self.client.get(
+            "/api/v1/swapmod-a1-mini-direct-canary/confirmation-preview",
+            params={"printer_id": 7, "cycle_key": "preview-cycle", "step": "RELEASE_PLATE"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["sequence_configured"])
+        self.assertEqual(body["sequence_sha256"], self.release_sha)
+        self.assertEqual(
+            body["required_operator_approval_phrase"],
+            f"CONFIRM_A1_MINI_DIRECT_PLATE_CHANGE 7 preview-cycle RELEASE_PLATE {self.release_sha}",
+        )
+        self.assertIn("operator_present", body["checklist_fields"])
+        self.assertEqual(len(body["checklist_fields"]), 10)
+
+    async def test_confirmation_preview_load_step_uses_load_sha(self) -> None:
+        response = await self.client.get(
+            "/api/v1/swapmod-a1-mini-direct-canary/confirmation-preview",
+            params={"printer_id": 7, "cycle_key": "preview-cycle", "step": "LOAD_NEXT_PLATE"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["sequence_sha256"], self.load_sha)
+
     async def test_transport_step_is_disabled_by_default(self) -> None:
         await self.create_release_ready_cycle("api-direct-disabled")
 

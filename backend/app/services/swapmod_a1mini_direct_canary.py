@@ -87,6 +87,44 @@ class SwapmodA1MiniDirectCanaryService:
             "auto_retry_supported": False,
         }
 
+    def confirmation_preview(
+        self,
+        *,
+        printer_id: int,
+        cycle_key: str,
+        step: str,
+        release_sequence_sha256: str | None,
+        load_sequence_sha256: str | None,
+    ) -> dict[str, object]:
+        """Read-only: the exact confirmation phrase the operator will approve.
+
+        Lets the UI show the server-provided phrase read-only before a supervised
+        step; it never executes anything and sends no printer command. The step's
+        sequence SHA-256 is a hash of an allowlisted file, not a secret.
+        """
+        if step == "RELEASE_PLATE":
+            sha = release_sequence_sha256
+        elif step == "LOAD_NEXT_PLATE":
+            sha = load_sequence_sha256
+        else:
+            sha = None
+        phrase = (
+            required_a1mini_direct_canary_phrase(
+                printer_id=printer_id, cycle_key=cycle_key, step=step, sequence_sha256=sha
+            )
+            if sha
+            else None
+        )
+        return {
+            "printer_id": printer_id,
+            "cycle_key": cycle_key,
+            "step": step,
+            "sequence_configured": bool(sha),
+            "sequence_sha256": sha,
+            "required_operator_approval_phrase": phrase,
+            "checklist_fields": list(A1MINI_DIRECT_CHECKLIST_FIELDS),
+        }
+
     async def execute_transport_step(
         self,
         db: AsyncSession,

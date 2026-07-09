@@ -69,6 +69,27 @@ async def get_swapmod_a1mini_direct_canary_status(
     )
 
 
+@router.get("/confirmation-preview")
+async def get_swapmod_a1mini_direct_canary_confirmation_preview(
+    printer_id: int,
+    cycle_key: str,
+    step: str,
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
+):
+    """Read-only preview of the confirmation phrase + checklist for a step.
+
+    Lets the UI display the server-provided phrase read-only before the operator
+    ticks the checklist and confirms. Sends no printer command.
+    """
+    return swapmod_a1mini_direct_canary_service.confirmation_preview(
+        printer_id=printer_id,
+        cycle_key=cycle_key,
+        step=step,
+        release_sequence_sha256=settings.farm_swapmod_a1mini_direct_canary_release_sequence_sha256,
+        load_sequence_sha256=settings.farm_swapmod_a1mini_direct_canary_load_sequence_sha256,
+    )
+
+
 @router.post("/cycles/{cycle_key}/transport-steps", status_code=202)
 async def execute_swapmod_a1mini_direct_canary_transport_step(
     cycle_key: str,
