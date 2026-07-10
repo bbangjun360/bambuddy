@@ -26,6 +26,7 @@ def get_erp_client() -> ErpReadOnlyClient | None:
     return ErpReadOnlyClient(
         settings.farm_erp_base_url,
         settings.farm_erp_api_token,
+        api_prefix=settings.farm_erp_api_prefix,
         timeout=settings.farm_erp_timeout_seconds,
     )
 

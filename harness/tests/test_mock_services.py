@@ -86,6 +86,32 @@ class MockServiceTest(unittest.TestCase):
         self.assertNotIn("access_code", json.dumps(payload).lower())
         self.assertNotIn("serial", json.dumps(payload).lower())
 
+    def test_frappe_resource_paths_return_filtered_collection_shape(self):
+        event_id = "event-frappe-contract-1"
+        payload = {
+            "farm_event_id": event_id,
+            "production_request_id": 101,
+            "external_work_order_id": "WO-HARNESS-0001",
+            "production_item": "SKU-HARNESS",
+            "quantity_completed": 1,
+            "completed_at": "2026-07-10 09:00:00",
+        }
+        create_status, created = request(
+            "/api/resource/Farm Draft Result",
+            method="POST",
+            payload=payload,
+            headers={"Idempotency-Key": event_id},
+        )
+        filters = json.dumps([["farm_event_id", "=", event_id]], separators=(",", ":"))
+        lookup_status, found = request(f"/api/resource/Farm Draft Result?filters={filters}")
+
+        self.assertEqual(create_status, 200)
+        self.assertEqual(lookup_status, 200)
+        self.assertEqual(created["data"]["docstatus"], 0)
+        self.assertIsInstance(found["data"], list)
+        self.assertEqual(len(found["data"]), 1)
+        self.assertEqual(found["data"][0]["farm_event_id"], event_id)
+
     def test_erp_work_order_missing_artifact_scenario(self):
         request("/admin/scenario", method="POST", payload={"scenario": "erp_missing_artifact"})
 
