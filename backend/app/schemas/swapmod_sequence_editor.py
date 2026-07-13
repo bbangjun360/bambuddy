@@ -9,7 +9,7 @@ class SwapmodSequenceActionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action_id: str = Field(min_length=1, max_length=96, pattern=r"^[a-z0-9-]+$")
-    feedrate: int = Field(ge=1, le=30000)
+    feedrate: int = Field(ge=1, le=30000, strict=True)
 
 
 class SwapmodSequenceCandidateRequest(BaseModel):

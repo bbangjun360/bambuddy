@@ -93,8 +93,11 @@ patches:
       state-machine flag is also required. The default-off sequence editor
       re-verifies that pinned snapshot, accepts only the complete server-generated
       action ID and integer feedrate set, and exclusively writes an inactive
-      pending-review version plus a redacted audit manifest. It never modifies or
-      selects the configured active sequence.
+      pending-review version plus a redacted audit manifest. Candidate storage is
+      reopened without following links, held by directory descriptor through both
+      exclusive writes, and directory-synced. Latest manifests must retain the
+      pending/inactive contract. The editor never modifies or selects the configured
+      active sequence.
     feature_flags:
       - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ENABLED=false
       - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ALLOW_REAL_COMMANDS=false
@@ -115,6 +118,7 @@ patches:
       - npm --prefix frontend run lint
       - npm --prefix frontend run build
       - make test-swapmod-a1mini-direct-canary
+      - 29 sequence editor service, architecture, and API tests
       - ephemeral PostgreSQL concurrent direct-canary audit (one synthetic send)
       - ephemeral PostgreSQL send-time cycle row-lock audit
       - make verify-fast FRONTEND_TESTED=1

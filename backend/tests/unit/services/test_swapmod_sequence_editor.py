@@ -116,7 +116,7 @@ class SwapmodSequenceEditorServiceTest(unittest.TestCase):
                 actions=[
                     {"action_id": action["action_id"], "feedrate": action["feedrate"]} for action in release["actions"]
                 ],
-                created_by="operator\nforged-line",
+                created_by="operator\nforged-line\x1b[2J",
             )
 
         log = "\n".join(captured.output)
@@ -125,6 +125,33 @@ class SwapmodSequenceEditorServiceTest(unittest.TestCase):
         self.assertNotIn("G1 X-14", log)
         self.assertNotIn(str(self.root), log)
         self.assertNotIn("\nforged-line", log)
+        self.assertNotIn("\x1b", log)
+        manifest_path = self.root / ".bambuddy-swapmod-candidates" / f"{candidate['version_id']}.json"
+        self.assertNotIn("\x1b", json.loads(manifest_path.read_text(encoding="utf-8"))["created_by"])
+
+    def test_parser_ignores_parenthesized_comment_feedrates(self) -> None:
+        release_text = "G91\nG1 X10 (operator note F9000) F1000\nG1 Y20 (F2000 comment only)\nG90\n"
+        (self.root / "release.gcode").write_text(release_text, encoding="utf-8")
+        config = self._config()
+        config["release_sequence_sha256"] = hashlib.sha256(release_text.encode("utf-8")).hexdigest()
+        release = self.service.status_snapshot(**config)["sequences"][0]
+
+        self.assertEqual(
+            [(action["target"], action["feedrate"]) for action in release["actions"]],
+            [("X10", 1000)],
+        )
+        candidate = self.service.create_candidate(
+            **config,
+            step="RELEASE_PLATE",
+            base_sha256=config["release_sequence_sha256"],
+            actions=[{"action_id": release["actions"][0]["action_id"], "feedrate": 1500}],
+            created_by="test-operator",
+        )
+        generated = self.root / ".bambuddy-swapmod-candidates" / f"{candidate['version_id']}.gcode"
+        self.assertEqual(
+            generated.read_text(encoding="utf-8"),
+            release_text.replace("F1000", "F1500"),
+        )
 
     def test_save_preserves_crlf_and_changes_only_feedrate_digits(self) -> None:
         load = self._snapshot()["sequences"][1]
@@ -248,6 +275,38 @@ class SwapmodSequenceEditorServiceTest(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, "candidate_directory_not_allowed")
 
+    def test_directory_swap_after_validation_cannot_redirect_writes(self) -> None:
+        release = self._snapshot()["sequences"][0]
+        original_candidate_directory = sequence_editor_module._candidate_directory
+        parked_directory = self.root / ".bambuddy-swapmod-candidates-original"
+
+        with tempfile.TemporaryDirectory() as outside:
+            outside_path = Path(outside)
+
+            def swap_directory(sequence_root: str | Path | None) -> Path:
+                directory = original_candidate_directory(sequence_root)
+                directory.rename(parked_directory)
+                directory.symlink_to(outside_path, target_is_directory=True)
+                return directory
+
+            with (
+                patch.object(sequence_editor_module, "_candidate_directory", side_effect=swap_directory),
+                self.assertRaises(SwapmodSequenceEditorError) as raised,
+            ):
+                self.service.create_candidate(
+                    **self._config(),
+                    step="RELEASE_PLATE",
+                    base_sha256=self.release_sha,
+                    actions=[
+                        {"action_id": action["action_id"], "feedrate": action["feedrate"]}
+                        for action in release["actions"]
+                    ],
+                    created_by="test-operator",
+                )
+
+            self.assertEqual(raised.exception.code, "candidate_directory_not_allowed")
+            self.assertEqual(list(outside_path.iterdir()), [])
+
     def test_save_tightens_existing_candidate_directory_permissions(self) -> None:
         release = self._snapshot()["sequences"][0]
         candidate_dir = self.root / ".bambuddy-swapmod-candidates"
@@ -308,6 +367,53 @@ class SwapmodSequenceEditorServiceTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, "candidate_write_failed")
         self.assertEqual(list(candidate_dir.iterdir()), [])
         self.assertEqual((self.root / "release.gcode").read_text(encoding="utf-8"), self.release_text)
+
+    def test_directory_fsync_failure_removes_all_candidate_artifacts(self) -> None:
+        release = self._snapshot()["sequences"][0]
+        with (
+            patch.object(
+                sequence_editor_module.os,
+                "fsync",
+                side_effect=[None, None, OSError("synthetic directory fsync failure")],
+            ),
+            self.assertRaises(SwapmodSequenceEditorError) as raised,
+        ):
+            self.service.create_candidate(
+                **self._config(),
+                step="RELEASE_PLATE",
+                base_sha256=self.release_sha,
+                actions=[
+                    {"action_id": action["action_id"], "feedrate": action["feedrate"]} for action in release["actions"]
+                ],
+                created_by="test-operator",
+            )
+
+        candidate_dir = self.root / ".bambuddy-swapmod-candidates"
+        self.assertEqual(raised.exception.code, "candidate_write_failed")
+        self.assertEqual(list(candidate_dir.iterdir()), [])
+        self.assertEqual((self.root / "release.gcode").read_text(encoding="utf-8"), self.release_text)
+
+    def test_latest_candidate_ignores_manifest_with_mutated_review_contract(self) -> None:
+        release = self._snapshot()["sequences"][0]
+        candidate = self.service.create_candidate(
+            **self._config(),
+            step="RELEASE_PLATE",
+            base_sha256=self.release_sha,
+            actions=[
+                {"action_id": action["action_id"], "feedrate": action["feedrate"]} for action in release["actions"]
+            ],
+            created_by="test-operator",
+        )
+        manifest_path = self.root / ".bambuddy-swapmod-candidates" / f"{candidate['version_id']}.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["review_status"] = "APPROVED"
+        manifest["active"] = True
+        manifest["actions"][0]["target"] = "X999"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        latest = self._snapshot()["sequences"][0]["latest_candidate"]
+
+        self.assertIsNone(latest)
 
     @staticmethod
     def _nested_keys(value: object) -> set[str]:

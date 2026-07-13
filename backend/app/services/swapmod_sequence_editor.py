@@ -25,6 +25,7 @@ MAX_EDITABLE_ACTIONS = 100
 _MOVE_COMMAND = re.compile(r"^\s*G(?:0?0|0?1)(?=\s|[A-Za-z]|$)", re.IGNORECASE | re.ASCII)
 _WORD = re.compile(r"([A-Za-z])([+-]?(?:\d+(?:\.\d*)?|\.\d+))", re.ASCII)
 _VERSION_ID = re.compile(r"^[a-z0-9-]{1,96}$", re.ASCII)
+_SHA256 = re.compile(r"^[a-f0-9]{64}$", re.ASCII)
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +155,7 @@ class SwapmodSequenceEditorService:
         candidate_sha = hashlib.sha256(candidate_bytes).hexdigest()
         created_at = datetime.now(timezone.utc)
         public_actions = [action.public(feedrate=requested_feedrates[action.action_id]) for action in parsed_actions]
-        actor = (created_by or "local-auth-disabled").replace("\r", " ").replace("\n", " ")[:128]
+        actor = _sanitize_audit_actor(created_by)
         candidate = {
             "version_id": "",
             "step": step,
@@ -169,34 +170,38 @@ class SwapmodSequenceEditorService:
             "actions": public_actions,
         }
         directory = _candidate_directory(sequence_root)
-        for _attempt in range(5):
-            version_id = _new_version_id(step=step, created_at=created_at)
-            candidate["version_id"] = version_id
-            try:
-                _write_candidate_pair(
-                    directory=directory,
-                    version_id=version_id,
-                    candidate_bytes=candidate_bytes,
-                    manifest=candidate,
+        directory_fd = _open_candidate_directory(directory)
+        try:
+            for _attempt in range(5):
+                version_id = _new_version_id(step=step, created_at=created_at)
+                candidate["version_id"] = version_id
+                try:
+                    _write_candidate_pair(
+                        directory_fd=directory_fd,
+                        version_id=version_id,
+                        candidate_bytes=candidate_bytes,
+                        manifest=candidate,
+                    )
+                except FileExistsError:
+                    continue
+                except OSError as exc:
+                    raise SwapmodSequenceEditorError(
+                        "candidate_write_failed",
+                        "Candidate version could not be written",
+                    ) from exc
+                logger.info(
+                    "SwapMod sequence candidate created; version_id=%s step=%s base_sha256=%s "
+                    "candidate_sha256=%s created_by=%s review_status=%s active=false",
+                    version_id,
+                    step,
+                    actual_sha,
+                    candidate_sha,
+                    actor,
+                    SEQUENCE_REVIEW_PENDING,
                 )
-            except FileExistsError:
-                continue
-            except OSError as exc:
-                raise SwapmodSequenceEditorError(
-                    "candidate_write_failed",
-                    "Candidate version could not be written",
-                ) from exc
-            logger.info(
-                "SwapMod sequence candidate created; version_id=%s step=%s base_sha256=%s "
-                "candidate_sha256=%s created_by=%s review_status=%s active=false",
-                version_id,
-                step,
-                actual_sha,
-                candidate_sha,
-                actor,
-                SEQUENCE_REVIEW_PENDING,
-            )
-            return dict(candidate)
+                return dict(candidate)
+        finally:
+            os.close(directory_fd)
         raise SwapmodSequenceEditorError(
             "candidate_version_collision",
             "Could not allocate a unique candidate version",
@@ -280,9 +285,10 @@ def _parse_editable_actions(sequence_text: str, *, step: str) -> list[EditableSe
     label_prefix = "Release" if step == RELEASE_PLATE else "Load"
     for line_index, line in enumerate(sequence_text.splitlines(keepends=True)):
         code = line.split(";", 1)[0]
-        if not _MOVE_COMMAND.match(code):
+        executable_code = _mask_parenthesized_comments(code)
+        if not _MOVE_COMMAND.match(executable_code):
             continue
-        words = list(_WORD.finditer(code))
+        words = list(_WORD.finditer(executable_code))
         feedrate_words = [word for word in words if word.group(1).upper() == "F"]
         if len(feedrate_words) != 1:
             continue
@@ -325,6 +331,22 @@ def _parse_editable_actions(sequence_text: str, *, step: str) -> list[EditableSe
     return actions
 
 
+def _mask_parenthesized_comments(code: str) -> str:
+    """Hide comment text while preserving offsets into the original line."""
+    chars = list(code)
+    depth = 0
+    for index, char in enumerate(chars):
+        if char == "(":
+            depth += 1
+            chars[index] = " "
+        elif char == ")" and depth:
+            chars[index] = " "
+            depth -= 1
+        elif depth:
+            chars[index] = " "
+    return "".join(chars)
+
+
 def _render_candidate(
     sequence_text: str,
     actions: list[EditableSequenceAction],
@@ -353,7 +375,6 @@ def _candidate_directory(sequence_root: str | Path | None) -> Path:
         )
     try:
         directory.mkdir(mode=0o700, exist_ok=True)
-        directory.chmod(0o700)
     except OSError as exc:
         raise SwapmodSequenceEditorError(
             "candidate_directory_write_failed",
@@ -365,7 +386,32 @@ def _candidate_directory(sequence_root: str | Path | None) -> Path:
             "candidate_directory_not_allowed",
             "Candidate directory is outside the configured sequence root",
         )
-    return resolved
+    return directory
+
+
+def _open_candidate_directory(directory: Path) -> int:
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise SwapmodSequenceEditorError(
+            "candidate_directory_not_supported",
+            "Candidate storage requires no-follow directory access",
+        )
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    try:
+        directory_fd = os.open(directory, flags)
+    except OSError as exc:
+        raise SwapmodSequenceEditorError(
+            "candidate_directory_not_allowed",
+            "Candidate directory could not be opened without following links",
+        ) from exc
+    try:
+        os.fchmod(directory_fd, 0o700)
+    except OSError as exc:
+        os.close(directory_fd)
+        raise SwapmodSequenceEditorError(
+            "candidate_directory_write_failed",
+            "Candidate directory permissions could not be secured",
+        ) from exc
+    return directory_fd
 
 
 def _new_version_id(*, step: str, created_at: datetime) -> str:
@@ -376,31 +422,33 @@ def _new_version_id(*, step: str, created_at: datetime) -> str:
 
 def _write_candidate_pair(
     *,
-    directory: Path,
+    directory_fd: int,
     version_id: str,
     candidate_bytes: bytes,
     manifest: dict[str, object],
 ) -> None:
-    candidate_path = directory / f"{version_id}.gcode"
-    manifest_path = directory / f"{version_id}.json"
+    candidate_name = f"{version_id}.gcode"
+    manifest_name = f"{version_id}.json"
     candidate_created = False
     manifest_created = False
     try:
-        _write_exclusive(candidate_path, candidate_bytes)
+        _write_exclusive(directory_fd, candidate_name, candidate_bytes)
         candidate_created = True
         manifest_bytes = (json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode("utf-8")
-        _write_exclusive(manifest_path, manifest_bytes)
+        _write_exclusive(directory_fd, manifest_name, manifest_bytes)
         manifest_created = True
+        os.fsync(directory_fd)
     except BaseException:
         if manifest_created:
-            manifest_path.unlink(missing_ok=True)
+            _unlink_candidate(directory_fd, manifest_name)
         if candidate_created:
-            candidate_path.unlink(missing_ok=True)
+            _unlink_candidate(directory_fd, candidate_name)
         raise
 
 
-def _write_exclusive(path: Path, content: bytes) -> None:
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+def _write_exclusive(directory_fd: int, name: str, content: bytes) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(name, flags, 0o600, dir_fd=directory_fd)
     try:
         with os.fdopen(fd, "wb") as handle:
             fd = -1
@@ -408,14 +456,18 @@ def _write_exclusive(path: Path, content: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
     except BaseException:
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        _unlink_candidate(directory_fd, name)
         raise
     finally:
         if fd >= 0:
             os.close(fd)
+
+
+def _unlink_candidate(directory_fd: int, name: str) -> None:
+    try:
+        os.unlink(name, dir_fd=directory_fd)
+    except OSError:
+        pass
 
 
 def _latest_candidate(sequence_root: str | Path | None, *, step: str) -> dict[str, object] | None:
@@ -433,7 +485,7 @@ def _latest_candidate(sequence_root: str | Path | None, *, step: str) -> dict[st
             version_id = str(manifest.get("version_id") or "")
             if not _VERSION_ID.fullmatch(version_id) or manifest_path.stem != version_id:
                 continue
-            if manifest.get("step") != step:
+            if not _is_pending_candidate_manifest(manifest, step=step):
                 continue
             candidate_bytes = (directory / f"{version_id}.gcode").read_bytes()
             if hashlib.sha256(candidate_bytes).hexdigest() != manifest.get("sha256"):
@@ -442,6 +494,48 @@ def _latest_candidate(sequence_root: str | Path | None, *, step: str) -> dict[st
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
             continue
     return None
+
+
+def _is_pending_candidate_manifest(manifest: dict[str, object], *, step: str) -> bool:
+    if manifest.get("step") != step:
+        return False
+    if manifest.get("review_status") != SEQUENCE_REVIEW_PENDING:
+        return False
+    if manifest.get("active") is not False or manifest.get("activation_supported") is not False:
+        return False
+    if manifest.get("operator_review_required") is not True:
+        return False
+    if not isinstance(manifest.get("created_at"), str) or not isinstance(manifest.get("created_by"), str):
+        return False
+    if not _SHA256.fullmatch(str(manifest.get("base_sha256") or "")):
+        return False
+    if not _SHA256.fullmatch(str(manifest.get("sha256") or "")):
+        return False
+
+    actions = manifest.get("actions")
+    if not isinstance(actions, list) or not 1 <= len(actions) <= MAX_EDITABLE_ACTIONS:
+        return False
+    action_ids: set[str] = set()
+    for action in actions:
+        if not isinstance(action, dict):
+            return False
+        action_id = action.get("action_id")
+        feedrate = action.get("feedrate")
+        if not isinstance(action_id, str) or not _VERSION_ID.fullmatch(action_id) or action_id in action_ids:
+            return False
+        if not isinstance(action.get("label"), str) or not isinstance(action.get("target"), str):
+            return False
+        if isinstance(feedrate, bool) or not isinstance(feedrate, int):
+            return False
+        if not FEEDRATE_MIN <= feedrate <= FEEDRATE_MAX:
+            return False
+        action_ids.add(action_id)
+    return True
+
+
+def _sanitize_audit_actor(created_by: str) -> str:
+    value = created_by or "local-auth-disabled"
+    return "".join(char if char.isprintable() else " " for char in value)[:128]
 
 
 def _public_candidate_manifest(manifest: dict[str, object]) -> dict[str, object]:

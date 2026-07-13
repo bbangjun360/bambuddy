@@ -174,6 +174,26 @@ class SwapmodSequenceEditorApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 422)
         self.assertFalse((self.root / ".bambuddy-swapmod-candidates").exists())
 
+    async def test_create_candidate_rejects_string_feedrates(self) -> None:
+        direct_route.settings.farm_swapmod_a1mini_sequence_editor_enabled = True
+        status = (await self.client.get("/api/v1/swapmod-a1-mini-direct-canary/sequence-editor")).json()
+        release = status["sequences"][0]
+
+        response = await self.client.post(
+            "/api/v1/swapmod-a1-mini-direct-canary/sequence-versions",
+            json={
+                "step": "RELEASE_PLATE",
+                "base_sha256": self.release_sha,
+                "actions": [
+                    {"action_id": action["action_id"], "feedrate": str(action["feedrate"])}
+                    for action in release["actions"]
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse((self.root / ".bambuddy-swapmod-candidates").exists())
+
     async def test_create_candidate_fails_closed_while_direct_canary_is_armed(self) -> None:
         direct_route.settings.farm_swapmod_a1mini_sequence_editor_enabled = True
         status = (await self.client.get("/api/v1/swapmod-a1-mini-direct-canary/sequence-editor")).json()

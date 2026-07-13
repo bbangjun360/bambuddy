@@ -164,6 +164,20 @@ before any command can run.
       and `make verify-full FRONTEND_TESTED=1`. The rebuilt default-off app on
       18141 remained healthy and reported both real-command flags false with no
       named target.
+- [x] 2026-07-14 06:53 KST Refreshed stacked Draft PR #97 onto the second
+      transaction audit. Failure-first editor tests reproduced six boundary
+      defects: a post-validation directory link swap redirected candidate writes,
+      parenthesized-comment `F` text was exposed as speed, a mutated manifest was
+      reported as latest, string feedrates were coerced, directory entries were
+      not synced, and ANSI actor controls reached the audit record.
+- [x] 2026-07-14 07:09 KST The editor now pins candidate storage with a no-follow
+      directory descriptor through exclusive pair creation and directory fsync,
+      validates the pending/inactive manifest contract, parses only executable
+      feedrates, requires strict JSON integers, and sanitizes audit actors. All 29
+      focused backend tests, the 32-test direct-canary suite plus 27 subtests, 2
+      harness tests, 177 frontend files / 2336 tests, lint/build, shared gates,
+      isolated runtime, and desktop/mobile browser checks passed. No real command
+      ran; main port 18000 remained healthy.
 
 ## Decisions
 
@@ -213,6 +227,15 @@ before any command can run.
   sequence root. New mode-0600 candidate and manifest files use exclusive create;
   collision retries allocate another server ID, while other storage errors fail
   closed. A symbolic-link candidate directory is rejected.
+- Candidate writes reopen the directory with `O_DIRECTORY | O_NOFOLLOW`, retain
+  that descriptor through both exclusive file writes, and `fsync` the directory
+  before returning success. A link swap after validation cannot redirect output;
+  a file or directory-sync failure removes the candidate pair.
+- Parenthesized and semicolon comments are excluded before feedrate words are
+  parsed, while character offsets still refer to the immutable original text.
+  Request feedrates are strict JSON integers. Latest-candidate reads accept only
+  manifests that preserve the structured action, hash, pending-review, inactive,
+  and no-activation contract.
 - Saving records `PENDING_REVIEW` and `active=false`. A later supervised session
   can use a candidate only after out-of-band review and an explicit environment
   filename/SHA update plus restart. The application provides no candidate
@@ -242,7 +265,8 @@ before any command can run.
   disables all editor inputs and saving.
 - Candidate manifests and one structured INFO log provide version ID, step,
   base/candidate hashes, operator, review status, and inactive state. They omit
-  source text and filesystem paths.
+  source text and filesystem paths. Non-printable actor characters are replaced
+  before either artifact is written.
 - Milestone 4 final runtime browser evidence used only the isolated `farm_wp110_audit`
   harness on ports 18110/19110 with a fresh synthetic database and no printer
   records. No production credential, customer data, real printer, MQTT, FTPS, or
@@ -256,19 +280,20 @@ before any command can run.
 
 Observed on 2026-07-14 KST:
 
-- Sequence editor service/architecture/API tests: 24/24 passed, covering exact
+- Sequence editor service/architecture/API tests: 29/29 passed, covering exact
   action-set validation, stale and mismatched hashes, CRLF preservation,
   immutable source bytes, exclusive version creation, mode-0700/0600 storage,
-  symbolic-link rejection, write and partial-fsync cleanup failures, redacted
-  audit logging, forbidden raw content/path/coordinate fields, default-off
-  behavior, and armed-canary refusal.
+  symbolic-link and post-validation link-swap rejection, file and directory-fsync
+  cleanup failures, comment-aware feedrate parsing, strict integer requests,
+  pending/inactive manifest validation, redacted audit logging, forbidden raw
+  content/path/coordinate fields, default-off behavior, and armed-canary refusal.
 - `SwapModSequenceEditor.test.tsx`: 7/7 passed, covering default-off read-only
   state, structured-only rendering, full action save payload, pending/inactive
   result, armed-canary blocking, range validation, and release/load switching.
-- Existing `make test-swapmod-a1mini-direct-canary` regression: 2/2 harness and
-  27/27 backend tests passed after the pinned-sequence loader was shared with the
-  editor.
-- Full lockfile-based frontend validation passed: 177 files / 2334 tests, all 11
+- Existing `make test-swapmod-a1mini-direct-canary` regression: 2/2 harness,
+  32 backend tests, and 27 subtests passed after the pinned-sequence loader was
+  shared with the editor and the second transport audit was merged.
+- Full lockfile-based frontend validation passed: 177 files / 2336 tests, all 11
   locale files at 5584 leaves, ESLint, TypeScript, and the production Vite build.
   Only the existing large-chunk warning remains.
 - `make verify-fast FRONTEND_TESTED=1`, `make test-unit`, `make test-contract`,
@@ -354,6 +379,10 @@ Observed on 2026-07-14 KST:
 - Editor write failures leave the configured source unchanged. A candidate file
   without its matching valid manifest is ignored, and a tampered or missing
   candidate is not reported as latest. There is no automatic retry or activation.
+- A candidate-directory link swap or directory-sync failure returns no version
+  and cannot redirect output outside the validated root. Incomplete pairs are
+  removed; any remaining crash orphan stays inert because it has no valid paired
+  pending/inactive manifest.
 - Editor rollback is `FARM_SWAPMOD_A1MINI_SEQUENCE_EDITOR_ENABLED=false` plus a
   restart. Existing candidates remain inert audit artifacts; the active
   filename/hash settings never change during a save.

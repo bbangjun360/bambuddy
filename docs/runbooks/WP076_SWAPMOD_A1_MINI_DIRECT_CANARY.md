@@ -54,19 +54,24 @@ settings permission. The editor returns only server-generated action IDs,
 targets, and numeric feedrates. It never accepts or returns sequence text, a
 filesystem path, a coordinate override, or a printer command.
 
-Only a `G0`/`G1` line containing exactly one positive integer `F` word in the
-range 1..30000 is editable. A save must submit the complete server-provided
-action set and the current pinned base SHA-256. Bambuddy re-reads and verifies
-the pinned source, replaces only those numeric `F` spans, and leaves every other
-byte and the configured source file unchanged.
+Only a `G0`/`G1` line containing exactly one executable positive integer `F`
+word in the range 1..30000 is editable. Feedrate-like text inside semicolon or
+parenthesized comments is ignored. A save must submit strict JSON integers, the
+complete server-provided action set, and the current pinned base SHA-256.
+Bambuddy re-reads and verifies the pinned source, replaces only those numeric
+`F` spans, and leaves every other byte and the configured source file unchanged.
 
-Each save creates a new mode-0700 candidate directory entry with a mode-0600
-`.gcode` file and a mode-0600 JSON audit manifest. Creation is exclusive, so an
-existing version is never overwritten. The API returns a server-generated
-version ID and fresh SHA-256, but no path or sequence text. The manifest and
-structured application log record the version ID, step, base hash, candidate
-hash, operator, `PENDING_REVIEW` status, and `active=false` without recording
-sequence content.
+Each save creates a new mode-0600 `.gcode` file and mode-0600 JSON audit
+manifest under the mode-0700 candidate directory. Bambuddy reopens that
+directory with no-follow semantics, holds the directory descriptor through both
+exclusive writes, and syncs the directory entry before reporting success. A
+link swap cannot redirect writes outside the trusted root, and a failed pair is
+removed. An existing version is never overwritten. The API returns a
+server-generated version ID and fresh SHA-256, but no path or sequence text. The
+manifest and structured application log record the version ID, step, base hash,
+candidate hash, printable operator, `PENDING_REVIEW` status, and `active=false`
+without recording sequence content. The status endpoint ignores a latest
+manifest whose hash, structured actions, or pending/inactive contract is invalid.
 
 Saving is not approval or activation. There is no approval, activation,
 selection, upload, or transport endpoint for candidate versions. To use a
@@ -146,6 +151,9 @@ For candidate editing, stop without saving if the editor flag is off, either
 direct canary flag is armed, the base hash is stale, the pinned file fails hash
 or UTF-8 verification, the action set differs from the server snapshot, a
 feedrate is outside 1..30000, or candidate storage cannot be created exclusively.
+Also stop if the candidate directory is a link, cannot be opened without
+following links, cannot be directory-synced, or a latest manifest fails its
+pending/inactive integrity checks.
 
 ## Rollback
 
