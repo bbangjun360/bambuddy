@@ -40,10 +40,10 @@ default_filament_cost=<KRW/kg>
 energy_cost_per_kwh=<KRW/kWh>
 ```
 
-If currency is not `KRW`, a required rate is not positive, or the policy
-version is empty, Bambuddy retains the canonical print-log row but skips the
-cost snapshot and writes a `farm_cost_ledger_snapshot_skipped` warning. It
-never relabels another currency as KRW.
+If currency is not `KRW`, a required rate is not a finite positive number, or
+the policy version is empty, Bambuddy retains the canonical print-log row but
+skips the cost snapshot and writes a `farm_cost_ledger_snapshot_skipped`
+warning. It never relabels another currency as KRW.
 
 ## Calculations
 
@@ -60,7 +60,9 @@ variance = actual_total - estimated_total
 
 The run's observed material cost and grams determine its effective material
 rate when both are present. Otherwise the configured default filament rate is
-used. Money is rounded to two decimal places at the API boundary.
+used. Each money component is rounded to two decimal places before deriving
+the row total. Summary totals aggregate those same rounded row values, so the
+summary reconciles exactly to the operator-visible rows.
 
 `actual_total_cost` and `variance_cost` are `null` when material, energy, or
 runtime is missing. The row lists `missing_actual_components`, and the summary

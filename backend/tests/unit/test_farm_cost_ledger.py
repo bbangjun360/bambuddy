@@ -155,3 +155,27 @@ async def test_non_krw_configuration_skips_snapshot_without_losing_print_log(
 
     assert await db_session.get(PrintLogEntry, entry.id) is not None
     assert await db_session.scalar(select(func.count(FarmCostLedgerSnapshot.id))) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "setting_name",
+    (
+        "farm_cost_ledger_machine_rate_per_hour_krw",
+        "farm_cost_ledger_estimated_power_kw",
+    ),
+)
+async def test_nonfinite_policy_rate_skips_snapshot_without_losing_print_log(
+    db_session,
+    monkeypatch,
+    setting_name,
+):
+    _enable_policy(monkeypatch)
+    await _configure_krw(db_session)
+    monkeypatch.setattr(settings, setting_name, float("inf"))
+
+    entry = await write_log_entry(db_session, status="completed", cost=500.0)
+    await db_session.commit()
+
+    assert await db_session.get(PrintLogEntry, entry.id) is not None
+    assert await db_session.scalar(select(func.count(FarmCostLedgerSnapshot.id))) == 0

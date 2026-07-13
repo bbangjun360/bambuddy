@@ -143,6 +143,56 @@ async def test_ledger_reconciles_original_failed_and_reprint_costs(
 
 
 @pytest.mark.asyncio
+async def test_ledger_summary_reconciles_to_rounded_row_amounts(
+    async_client,
+    db_session,
+    printer_factory,
+    archive_factory,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "farm_actual_cost_ledger_enabled", True)
+    printer = await printer_factory()
+    archive = await archive_factory(printer.id, with_run=False)
+
+    for attempt_number in (1, 2):
+        await _seed_run(
+            db_session,
+            archive_id=archive.id,
+            printer_id=printer.id,
+            status="completed",
+            attempt_number=attempt_number,
+            actual_material_cost=0.004,
+            actual_energy_cost=0.0,
+            actual_energy_kwh=0.0,
+            duration_seconds=0,
+            estimated_total_cost=0.0,
+        )
+    await _seed_run(
+        db_session,
+        archive_id=archive.id,
+        printer_id=printer.id,
+        status="completed",
+        attempt_number=3,
+        actual_material_cost=0.005,
+        actual_energy_cost=0.005,
+        actual_energy_kwh=0.0,
+        duration_seconds=0,
+        estimated_total_cost=0.0,
+    )
+
+    response = await async_client.get("/api/v1/farm-cost-ledger?limit=10")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["actual_material_cost"] for item in body["items"]] == [0.01, 0.0, 0.0]
+    assert [item["actual_energy_cost"] for item in body["items"]] == [0.01, 0.0, 0.0]
+    assert [item["actual_total_cost"] for item in body["items"]] == [0.02, 0.0, 0.0]
+    assert body["summary"]["actual_material_cost"] == sum(item["actual_material_cost"] for item in body["items"])
+    assert body["summary"]["actual_energy_cost"] == sum(item["actual_energy_cost"] for item in body["items"])
+    assert body["summary"]["actual_total_cost"] == sum(item["actual_total_cost"] for item in body["items"])
+
+
+@pytest.mark.asyncio
 async def test_ledger_filters_reprints_and_marks_missing_energy_incomplete(
     async_client,
     db_session,

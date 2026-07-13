@@ -4,8 +4,10 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from math import isfinite
+from typing import Any
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import Numeric, and_, case, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
@@ -39,11 +41,11 @@ class CostPolicy:
         errors: list[str] = []
         if self.currency != "KRW":
             errors.append("currency_not_krw")
-        if self.energy_rate_per_kwh <= 0:
+        if not isfinite(self.energy_rate_per_kwh) or self.energy_rate_per_kwh <= 0:
             errors.append("energy_rate_not_positive")
-        if self.estimated_power_kw <= 0:
+        if not isfinite(self.estimated_power_kw) or self.estimated_power_kw <= 0:
             errors.append("estimated_power_not_positive")
-        if self.machine_rate_per_hour <= 0:
+        if not isfinite(self.machine_rate_per_hour) or self.machine_rate_per_hour <= 0:
             errors.append("machine_rate_not_positive")
         if not self.version:
             errors.append("policy_version_missing")
@@ -57,7 +59,7 @@ def _as_nonnegative_float(value: str | float | None) -> float | None:
         parsed = float(value)
     except (TypeError, ValueError):
         return None
-    return parsed if parsed >= 0 else None
+    return parsed if isfinite(parsed) and parsed >= 0 else None
 
 
 def _money(value: float | Decimal | None) -> float | None:
@@ -73,6 +75,11 @@ def _sum_money(*values: float | None) -> float | None:
     if any(value is None for value in values):
         return None
     return _money(sum(Decimal(str(value)) for value in values if value is not None))
+
+
+def _sql_money(value: Any) -> Any:
+    """Round one ledger row before SQL aggregation on SQLite and PostgreSQL."""
+    return func.round(cast(value, Numeric(24, 8)), 2)
 
 
 async def _load_policy(db: AsyncSession, entry: PrintLogEntry) -> CostPolicy:
@@ -187,6 +194,8 @@ def _build_item(
     snapshot: FarmCostLedgerSnapshot,
     run: PrintLogEntry,
 ) -> FarmCostLedgerItem:
+    actual_material_cost = _money(run.cost)
+    actual_energy_cost = _money(run.energy_cost)
     actual_machine_cost = None
     if run.duration_seconds is not None:
         actual_machine_cost = _money(run.duration_seconds / 3600.0 * snapshot.machine_rate_per_hour)
@@ -199,7 +208,7 @@ def _build_item(
     if actual_machine_cost is None:
         missing.append("machine_time")
 
-    actual_total_cost = _sum_money(run.cost, run.energy_cost, actual_machine_cost)
+    actual_total_cost = _sum_money(actual_material_cost, actual_energy_cost, actual_machine_cost)
     variance_cost = None
     if actual_total_cost is not None and snapshot.estimated_total_cost is not None:
         variance_cost = _money(actual_total_cost - snapshot.estimated_total_cost)
@@ -225,9 +234,9 @@ def _build_item(
         estimated_total_cost=snapshot.estimated_total_cost,
         actual_filament_grams=run.filament_used_grams,
         actual_duration_seconds=run.duration_seconds,
-        actual_material_cost=_money(run.cost),
+        actual_material_cost=actual_material_cost,
         actual_energy_kwh=run.energy_kwh,
-        actual_energy_cost=_money(run.energy_cost),
+        actual_energy_cost=actual_energy_cost,
         actual_machine_cost=actual_machine_cost,
         actual_total_cost=actual_total_cost,
         variance_cost=variance_cost,
@@ -279,10 +288,12 @@ async def list_cost_ledger(
     )
     items = [_build_item(snapshot, run) for snapshot, run in rows.all()]
 
+    actual_material = _sql_money(PrintLogEntry.cost)
+    actual_energy = _sql_money(PrintLogEntry.energy_cost)
     actual_machine = case(
         (
             PrintLogEntry.duration_seconds.isnot(None),
-            PrintLogEntry.duration_seconds / 3600.0 * FarmCostLedgerSnapshot.machine_rate_per_hour,
+            _sql_money(PrintLogEntry.duration_seconds / 3600.0 * FarmCostLedgerSnapshot.machine_rate_per_hour),
         ),
         else_=None,
     )
@@ -294,7 +305,7 @@ async def list_cost_ledger(
     actual_total = case(
         (
             actual_components_complete,
-            PrintLogEntry.cost + PrintLogEntry.energy_cost + actual_machine,
+            actual_material + actual_energy + actual_machine,
         ),
         else_=None,
     )
@@ -304,7 +315,7 @@ async def list_cost_ledger(
                 actual_components_complete,
                 FarmCostLedgerSnapshot.estimated_total_cost.isnot(None),
             ),
-            actual_total - FarmCostLedgerSnapshot.estimated_total_cost,
+            _sql_money(actual_total - FarmCostLedgerSnapshot.estimated_total_cost),
         ),
         else_=None,
     )
@@ -328,16 +339,20 @@ async def list_cost_ledger(
                     "reprint_run_count"
                 ),
                 func.sum(case((incomplete, 1), else_=0)).label("incomplete_run_count"),
-                func.sum(func.coalesce(FarmCostLedgerSnapshot.estimated_material_cost, 0)).label(
+                func.sum(func.coalesce(_sql_money(FarmCostLedgerSnapshot.estimated_material_cost), 0)).label(
                     "estimated_material_cost"
                 ),
-                func.sum(func.coalesce(FarmCostLedgerSnapshot.estimated_energy_cost, 0)).label("estimated_energy_cost"),
-                func.sum(func.coalesce(FarmCostLedgerSnapshot.estimated_machine_cost, 0)).label(
+                func.sum(func.coalesce(_sql_money(FarmCostLedgerSnapshot.estimated_energy_cost), 0)).label(
+                    "estimated_energy_cost"
+                ),
+                func.sum(func.coalesce(_sql_money(FarmCostLedgerSnapshot.estimated_machine_cost), 0)).label(
                     "estimated_machine_cost"
                 ),
-                func.sum(func.coalesce(FarmCostLedgerSnapshot.estimated_total_cost, 0)).label("estimated_total_cost"),
-                func.sum(func.coalesce(PrintLogEntry.cost, 0)).label("actual_material_cost"),
-                func.sum(func.coalesce(PrintLogEntry.energy_cost, 0)).label("actual_energy_cost"),
+                func.sum(func.coalesce(_sql_money(FarmCostLedgerSnapshot.estimated_total_cost), 0)).label(
+                    "estimated_total_cost"
+                ),
+                func.sum(func.coalesce(actual_material, 0)).label("actual_material_cost"),
+                func.sum(func.coalesce(actual_energy, 0)).label("actual_energy_cost"),
                 func.sum(func.coalesce(actual_machine, 0)).label("actual_machine_cost"),
                 func.sum(func.coalesce(actual_total, 0)).label("actual_total_cost"),
                 func.sum(func.coalesce(variance, 0)).label("variance_cost"),

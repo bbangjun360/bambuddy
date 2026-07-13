@@ -116,6 +116,13 @@ the existing print-log/statistics tests.
   alternate-port `make test-integration`, `make verify-full`, and Ruff passed.
 - [x] 2026-07-13 20:17 KST: Published draft PR #95 targeting `farm-main`;
   additive schema and the shared print-log hook await explicit operator approval.
+- [x] 2026-07-13 22:55 KST: Pre-approval audit reproduced row/summary
+  rounding drift and acceptance of non-finite policy rates, added regressions,
+  and applied minimal fail-closed fixes. Focused regression passed 39 tests;
+  PostgreSQL reconciled the boundary rows to `0.02 KRW` exactly.
+- [x] 2026-07-13 22:58 KST: Final `make verify-fast`, `make test-unit`,
+  `make test-contract`, alternate-port `make test-integration`, and
+  `make verify-full` passed. The isolated app and main port 18000 were healthy.
 
 # Decisions
 
@@ -136,6 +143,12 @@ the existing print-log/statistics tests.
 - Treat missing material, energy, or runtime as incomplete: component totals
   remain visible, but total cost and variance stay null rather than converting
   absent evidence to zero.
+- Round each displayed money component before deriving a row total, and sum
+  those same rounded row values in the summary. Raw binary-float aggregates
+  must not disagree with the operator-visible rows.
+- Accept only finite positive electricity, estimated-power, and machine-hour
+  policy values. A non-finite rate skips the optional snapshot while the
+  canonical print-log transaction remains intact.
 
 # Harness Changes
 
@@ -143,7 +156,8 @@ the existing print-log/statistics tests.
 - Integration fixtures create linked original, failed, cancelled, and reprint
   `PrintLogEntry` rows and snapshots.
 - Failure tests cover disabled flag, non-KRW configuration, missing actual
-  energy/material values, orphan rows, unauthorized reads, and pagination.
+  energy/material values, non-finite policy rates, orphan rows, unauthorized
+  reads, and pagination.
 
 # Implementation
 
@@ -219,11 +233,12 @@ additive, default-off KRW estimate snapshot and a read-only per-run actual cost
 API with separate original, failed, cancelled, and reprint buckets. Snapshot
 failures are isolated from the canonical print log.
 
-The final focused regression passed 36 tests. Shared unit, contract,
+The final focused regression passed 39 tests. Shared unit, contract,
 integration, verify-fast, and verify-full gates passed. A clean PostgreSQL
 runtime created the additive table, preserved separate failed/reprint rows,
-reconciled `10346.80 KRW` actual total, and emitted no application error logs.
-Desktop and mobile Chromium checks were nonblank and error-free.
+reconciled both the `10346.80 KRW` scenario and the `0.02 KRW` rounding
+boundary, and emitted no application error logs. Desktop and mobile Chromium
+checks were nonblank and error-free.
 
 Draft PR #95 is published and review-ready but remains draft pending explicit
 operator approval because it adds schema and a shared print-log hook. Later
