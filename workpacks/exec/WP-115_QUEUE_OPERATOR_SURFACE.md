@@ -132,6 +132,15 @@ baseline passed `make verify-fast` and all 26 focused QueuePage tests.
   2,319/2,319 with all locales in parity. ESLint, build, `verify-fast`,
   isolated `verify-full`, visual checks, and the Chrome accessibility tree
   audit passed.
+- [x] 2026-07-14 05:17 KST: Merged `origin/farm-main` commit `24196873`
+  into the draft after UI-01 landed. Queue source merged without conflict;
+  only the generated JavaScript asset and `static/index.html` required a
+  lockfile-based rebuild. Merge commit: `21901a7d`.
+- [x] 2026-07-14 05:31 KST: Revalidated the combined branch. Queue and
+  Settings focused tests passed 80/80; the full frontend passed 2,321/2,321
+  with all locales in parity. ESLint, build, `verify-fast`, isolated
+  `verify-full`, desktop/mobile CDP checks, accessibility-tree checks, and
+  mobile fixed-control intersection checks all passed.
 
 ## Decisions
 
@@ -223,6 +232,15 @@ Observed results on 2026-07-14:
   below 28 CSS px, and History switched the shared panel to
   `aria-labelledby="queue-tab-history"` with `Sort: History`.
 
+Refresh validation on 2026-07-14 used the isolated
+`farm_wp115_merge_20260714` stack on ports 18145/19145. Bambuddy root,
+`/health`, API docs, and mock health returned 200. Desktop 1440x1000 and mobile
+390x844 retained two compact active rows with zero page overflow, row or
+landmark overlap, clipped controls, image failures, failed responses, console
+errors, or runtime exceptions. Keyboard tab focus followed Queue/History
+selection, and the fixed bug-report button intersected zero rows or commands
+at both the mobile top and bottom scroll positions.
+
 Observable scenario: with one printing, one pending, and one completed synthetic
 job, the active Queue view shows the running and pending work plus summary load;
 History exposes the completed row; switching views, filtering, sorting, and
@@ -261,4 +279,6 @@ also removed a mobile command-overlay collision and restored the accessible
 name of an icon-only failure-recovery action. The second audit also named each
 compact selection, reorder, archive, and sort control and restored stable target
 dimensions. The remaining gate is operator visual approval of the draft PR;
-no merge is attempted before it.
+no merge is attempted before it. The 2026-07-14 `farm-main` refresh preserved
+that behavior and restored a clean merge base without changing the approval
+gate.
