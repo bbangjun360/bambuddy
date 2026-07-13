@@ -1,6 +1,7 @@
 # Upstream Impact Report: Bambuddy v0.2.4.9
 
-Status: validation complete; Draft PR and operator review required
+Status: operator-approved source integration merged through PR #92; production
+rollout gates remain
 
 ## Revisions
 
@@ -28,6 +29,17 @@ Official release notes:
 
 - https://github.com/maziggy/bambuddy/releases/tag/v0.2.4.8
 - https://github.com/maziggy/bambuddy/releases/tag/v0.2.4.9
+
+## Freshness Check
+
+Checked against upstream release metadata on 2026-07-14:
+
+- v0.2.4.9 remains the latest stable release.
+- `v0.2.5b2-daily.20260713` at
+  `4d5dbe8d276ad190d2b806330743970bc6b31fe7` is a prerelease and remains
+  outside this integration's approved scope.
+- `upstream/main` at `6fdd701a849dcd8ae9a3619f26b552bf4ef0975f`
+  is not an approved integration target.
 
 ## Custom Overlap
 
@@ -131,10 +143,11 @@ Reasons:
 
 ## Remaining Operator-Gated Work
 
+- The source integration received explicit operator approval and merged through
+  PR #92 as `9ec919affb12f52b3e66382a4ec494ab4fd3e164` on 2026-07-13.
 - No production deployment or physical printer command was executed.
 - Rehearse database backup and restore on staging before accepting migrations.
 - Audit custom groups and API keys for queue:create, WEBSOCKET_CONNECT, and new
   maintenance/project/archive scopes.
 - Exercise queue cancellation and the plate-clear hold with simulated printers,
   then perform any hardware canary only under the named-device checklist.
-- Keep the integration PR in Draft until the operator reviews this R4 evidence.

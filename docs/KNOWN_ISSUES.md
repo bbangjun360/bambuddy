@@ -20,6 +20,15 @@ local workarounds between sessions.
 
 ## FIXED
 
+### PROCESS-06R Upstream integration docs stayed Draft after merge — FIXED 2026-07-14
+
+- Was: operator-approved upstream PR #92 merged v0.2.4.9 into `farm-main`, but
+  its ExecPlan still left publication unchecked and the impact report still
+  described the integration PR as awaiting review.
+- Fix: `FIX_COMMIT` records the merged state in both documents and adds a
+  2026-07-14 freshness check. v0.2.4.9 remains the latest stable release;
+  v0.2.5b2 daily builds remain prerelease and outside the approved scope.
+
 ### UI-01 Settings requests protected 2FA status when auth is disabled — FIXED 2026-07-14
 
 - Was: opening Settings with authentication disabled still requested
