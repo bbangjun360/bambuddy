@@ -144,7 +144,7 @@ class SwapmodSequenceEditorApiTest(unittest.IsolatedAsyncioTestCase):
                 "base_sha256": self.release_sha,
                 "actions": [],
                 "raw_gcode": "G1 X1 F1",
-                "sequence_path": "/tmp/unsafe.gcode",
+                "sequence_path": "/forbidden/client/path.gcode",
             },
         )
 
