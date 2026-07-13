@@ -421,7 +421,7 @@ class Handler(BaseHTTPRequestHandler):
             response(self, HTTPStatus.OK, payload)
             return
 
-        if path == "/erp/api/resource/Work Order":
+        if path in {"/api/resource/Work Order", "/erp/api/resource/Work Order"}:
             if maybe_fault(self):
                 return
             with LOCK:
@@ -429,9 +429,19 @@ class Handler(BaseHTTPRequestHandler):
             response(self, HTTPStatus.OK, {"data": [erp_work_order_payload("WO-HARNESS-0001", scenario)]})
             return
 
-        if path == "/erp/api/resource/Farm Draft Result":
+        if path in {"/api/resource/Farm Draft Result", "/erp/api/resource/Farm Draft Result"}:
             query = parse_qs(parsed.query)
             event_id = (query.get("farm_event_id") or [None])[0]
+            if not event_id:
+                try:
+                    filters = json.loads((query.get("filters") or ["[]"])[0])
+                except json.JSONDecodeError:
+                    response(self, HTTPStatus.BAD_REQUEST, {"error": "invalid filters"})
+                    return
+                for item in filters if isinstance(filters, list) else []:
+                    if isinstance(item, list) and len(item) == 3 and item[:2] == ["farm_event_id", "="]:
+                        event_id = item[2]
+                        break
             with LOCK:
                 scenario = STATE["scenario"]
             if scenario == "erp_expired_token" or self.headers.get("Authorization") == "token expired-token":
@@ -443,13 +453,16 @@ class Handler(BaseHTTPRequestHandler):
                 response(self, HTTPStatus.BAD_REQUEST, {"error": "missing farm_event_id"})
                 return
             document = lookup_erp_draft_document(event_id, scenario)
+            if path.startswith("/api/"):
+                response(self, HTTPStatus.OK, {"data": [] if document is None else [document]})
+                return
             if document is None:
                 response(self, HTTPStatus.NOT_FOUND, {"error": "draft not found"})
                 return
             response(self, HTTPStatus.OK, {"data": document})
             return
 
-        match = re.fullmatch(r"/erp/api/resource/Work Order/([^/]+)", path)
+        match = re.fullmatch(r"/(?:erp/)?api/resource/Work Order/([^/]+)", path)
         if match:
             with LOCK:
                 scenario = STATE["scenario"]
@@ -539,14 +552,14 @@ class Handler(BaseHTTPRequestHandler):
             response(self, HTTPStatus.OK, {"scenario": scenario})
             return
 
-        match = re.fullmatch(r"/erp/api/resource/Farm Draft Result/([^/]+)/submit", path)
+        match = re.fullmatch(r"/(?:erp/)?api/resource/Farm Draft Result/([^/]+)/submit", path)
         if match:
             with LOCK:
                 STATE["erp_submit_calls"] += 1
             response(self, HTTPStatus.METHOD_NOT_ALLOWED, {"error": "submit disabled in harness"})
             return
 
-        if path == "/erp/api/resource/Farm Draft Result":
+        if path in {"/api/resource/Farm Draft Result", "/erp/api/resource/Farm Draft Result"}:
             with LOCK:
                 scenario = STATE["scenario"]
             if scenario == "erp_expired_token" or self.headers.get("Authorization") == "token expired-token":

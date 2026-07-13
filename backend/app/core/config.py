@@ -6,7 +6,7 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 
 # Application version - single source of truth
-APP_VERSION = "0.2.4.7"
+APP_VERSION = "0.2.4.9"
 GITHUB_REPO = "maziggy/bambuddy"
 BUG_REPORT_RELAY_URL = os.environ.get("BUG_REPORT_RELAY_URL", "https://bambuddy.cool/api/bug-report")
 
@@ -93,7 +93,9 @@ class Settings(BaseSettings):
     # scenarios opt in explicitly. This integration reads Work Orders only.
     farm_erp_import_enabled: bool = False
     farm_erp_base_url: str = "http://mock-services:9099"
+    farm_erp_api_prefix: str = "/api"
     farm_erp_api_token: str | None = None
+    farm_erp_timezone: str = "Asia/Seoul"
     farm_erp_timeout_seconds: float = 5.0
 
     # WP-040 ERP draft write. Disabled by default; creates Draft-only

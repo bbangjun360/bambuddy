@@ -9,9 +9,10 @@ failure log and a per-action sequence/speed editor. Sessions S1..S9 proved the
 backend chain by hand; this WP surfaces it safely. Design iterated in Paper first
 via the WP-901 pipeline.
 
-This slice's observable outcome: `GET /api/v1/swapmod-state-machine/cycles` returns
-SwapMod cycles newest-first (with `printer_id`, `manual_review_only`, `limit`
-filters), read-only, feeding the overview and failure log.
+The current Draft PR's observable outcome is the supervised printer-card control.
+It remains absent unless both canary flags are armed and the card represents a
+connected, active A1 Mini that the current operator may control. Bambuddy remains
+the final authority and repeats every safety check before any command can run.
 
 ## Read these files
 
@@ -46,12 +47,15 @@ filters), read-only, feeding the overview and failure log.
 
 ## Done when
 
-- Slice 1 (this PR): `GET /cycles` exists with ordering/filters/limit, is read-only
-  and flag-safe, and the integration test class is green (22 tests).
-- Slices 2-4: failure log + overview render from the list endpoint; the sequence
-  editor produces reviewed re-hashed versions (never a live push); the printer-card
-  control drives the existing gated actuation flow with the operator ticking the
-  checklist and the server-provided phrase shown read-only, flags default-off.
+- `GET /cycles` exists with ordering/filters/limit, is read-only and flag-safe.
+- The failure log renders from that endpoint.
+- The printer-card control stays hidden unless all UI eligibility checks pass,
+  drives only the existing gated actuation flow, requires every server checklist
+  item, and displays the server phrase read-only.
+- Focused backend and frontend tests, the repository verification gates, startup
+  smoke, and desktop/mobile browser checks pass with both canary flags default-off.
+- The Draft PR is current with `farm-main`; physical E2E and merge still require an
+  operator-present approval session.
 
 ## Architecture boundaries
 
@@ -92,6 +96,14 @@ filters), read-only, feeding the overview and failure log.
       LOAD -> verify via the existing gated endpoints; verify-fail -> MANUAL_REVIEW.
       `swapmodApi` actuation methods added. `npm run build` + eslint + i18n parity
       green. DRAFT PR — needs operator review + operator-present E2E before merge.
+- [x] 2026-07-13 22:09 KST Refreshed Draft PR #90 onto `origin/farm-main`
+      `e82b0488`, resolving the WP-113 printer-card composition and generated
+      static-asset conflicts. Added a six-test UI characterization suite. A red
+      eligibility test exposed that armed controls also rendered for disconnected,
+      read-only, and non-A1 Mini cards; the component now requires canary flags,
+      connection, active/control permission, and A1 Mini model eligibility. Only
+      eligible cards poll canary status, and repeated cards receive unique control
+      IDs. No real printer or actuator command was sent.
 
 ## Decisions
 
@@ -103,20 +115,61 @@ filters), read-only, feeding the overview and failure log.
 - Ship read-only monitoring before any actuation UI so the risky slices land small,
   as operator-approved draft PRs.
 
+## Implementation and harness changes
+
+- Manual conflict resolution was limited to `PrintersPage.tsx`, generated
+  `static/index.html`, and the generated JavaScript asset. Vite regenerated the
+  static bundle from the resolved source.
+- The refresh adds no production dependency, migration, service contract, feature
+  flag, permission, or authentication change. The existing read-only confirmation
+  preview and existing gated actuation calls are unchanged by the refresh.
+- Runtime browser evidence used only the isolated `farm_wp110_refresh` harness and
+  a synthetic inactive A1 Mini record (`192.0.2.0/24` TEST-NET). No production
+  credential, customer data, real printer, MQTT, FTPS, or raw G-code path was used.
+
 ## Validation
 
-```bash
-docker run --rm --network none -e LOG_TO_FILE=false \
-  -e DATA_DIR=/tmp/bambuddy-wp110-tests -e LOG_DIR=/tmp/bambuddy-wp110-tests/logs \
-  -e PYTHONDONTWRITEBYTECODE=1 -v "$(pwd)":/workspace:ro -w /workspace \
-  --entrypoint python farm_wp030-bambuddy:latest \
-  -m unittest backend.tests.integration.test_swapmod_state_machine_api
-```
+Observed on 2026-07-13 KST:
 
-Expected: 22 tests OK.
+- Pre-merge baseline: frontend 159 files / 2123 tests; `make verify-fast` ran 182
+  harness tests twice plus 2 characterization tests.
+- `SwapModPlateChangeControl.test.tsx`: 6/6 passed, including five hidden/inert
+  conditions and the complete checklist/phrase/failure-to-MANUAL_REVIEW path.
+- `PrintersPage.test.tsx`: 65/65 passed.
+- Full frontend: 176 files / 2320 tests; all 11 locales matched at 5584 leaves;
+  ESLint and production Vite build passed (existing large-chunk warning only).
+- `make test-swapmod-a1mini-direct-canary`: 2/2 harness mock tests and 16/16
+  backend service/architecture/API tests passed.
+- `make verify-fast FRONTEND_TESTED=1`: 190 harness tests twice plus 2
+  characterization tests passed.
+- `make verify-full FRONTEND_TESTED=1` against isolated ports 18110/19110 passed,
+  including smoke health and 2 scenarios. Bambuddy started healthy.
+- Headless Chrome at 1440x1000 and 390x844 passed: synthetic printer card present,
+  SwapMod control absent by default, no horizontal overflow, landmark overlap,
+  clipped visible control, failed image, browser error, failed response, or failed
+  load.
+
+## Failure and recovery
+
+- UI preview/list failures remain read-only failures. Existing backend gates reject
+  invalid actuation attempts; verification failure terminates in `MANUAL_REVIEW`.
+- Do not automatically retry or resume an uncertain physical bed action. An
+  operator must inspect the printer before any new attempt.
+- Rollback is the Draft PR merge commit; there is no migration or persistent schema
+  change to reverse. Both canary flags remain default-off.
+
+## Outcomes
+
+- PR #90 is intentionally Draft and excluded from delegated routine merge because
+  it contains physical-actuation UI and safety-gate-adjacent behavior.
+- Required next gate: explicit operator approval plus operator-present physical E2E
+  using the WP-076 checklist. Simulation and browser success are not physical
+  safety evidence.
+- Bambuddy remains the sole command authority. No arbitrary G-code endpoint exists
+  or is introduced by this Work Package.
 
 ## Risks and human gates
 
-- Slices 3-4 trigger real actuation and edit control sequences → operator-approved
-  draft PRs, flags default-off, no auto-filled checklist/phrase, no raw G-code push.
-  This slice is read-only and routine-mergeable.
+- Slice 3 edits reviewed sequences and slice 4 can trigger real actuation. Keep the
+  PR Draft, flags default-off, checklist and phrase server-owned, and raw G-code
+  unavailable until the operator-present gate is complete.

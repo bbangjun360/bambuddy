@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import shutil
 import unittest
 from pathlib import Path
 
@@ -122,17 +123,27 @@ class PlateChange3mfPostprocessArchitectureTest(unittest.TestCase):
         self.assertNotRegex(block_match.group("block"), re.compile(r"(?m)^\s*[GMT]\d+"))
 
     def test_no_raw_3mf_or_gcode_sample_files_are_tracked(self) -> None:
-        result = subprocess.run(
-            ["git", "ls-files"],
-            cwd=REPO,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        if shutil.which("git") and (REPO / ".git").exists():
+            result = subprocess.run(
+                ["git", "ls-files"],
+                cwd=REPO,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            candidates = result.stdout.splitlines()
+        else:
+            candidates = (
+                str(path.relative_to(REPO))
+                for path in REPO.rglob("*")
+                if path.is_file()
+                and path.relative_to(REPO).parts
+                and path.relative_to(REPO).parts[0] not in {"data", "logs", "archive"}
+            )
         forbidden = [
             path
-            for path in result.stdout.splitlines()
+            for path in candidates
             if path.lower().endswith((".3mf", ".gcode", ".gcode.3mf"))
         ]
 

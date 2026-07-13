@@ -46,13 +46,14 @@ interface FilamentHoverCardProps {
   spoolman?: SpoolmanConfig;
   inventory?: InventoryConfig;
   configureSlot?: ConfigureSlotConfig;
+  actions?: ReactNode;
 }
 
 /**
  * A hover card that displays filament details when hovering over AMS slots.
  * Replaces the basic browser tooltip with a styled popover.
  */
-export function FilamentHoverCard({ data, children, disabled, className = '', spoolman, inventory, configureSlot }: FilamentHoverCardProps) {
+export function FilamentHoverCard({ data, children, disabled, className = '', spoolman, inventory, configureSlot, actions }: FilamentHoverCardProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [isVisible, setIsVisible] = useState(false);
@@ -176,6 +177,7 @@ export function FilamentHoverCard({ data, children, disabled, className = '', sp
   return (
     <div
       ref={triggerRef}
+      data-testid="filament-slot"
       className={`relative ${className}`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -190,7 +192,7 @@ export function FilamentHoverCard({ data, children, disabled, className = '', sp
       {isVisible && createPortal(
         <div
           ref={cardRef}
-          className="fixed z-[60] animate-in fade-in-0 zoom-in-95 duration-150"
+          className="fixed z-[60]"
           style={{
             top: coords?.top ?? -9999,
             left: coords?.left ?? -9999,
@@ -393,7 +395,7 @@ export function FilamentHoverCard({ data, children, disabled, className = '', sp
                             e.stopPropagation();
                             inventory.onUnassignSpool?.();
                           }}
-                          className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium rounded transition-colors bg-red-500/20 hover:bg-red-500/30 text-red-400"
+                          className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-medium rounded transition-colors bg-red-100 dark:bg-red-500/20 hover:bg-red-200 dark:hover:bg-red-500/30 text-red-700 dark:text-red-400"
                         >
                           <Unlink className="w-3.5 h-3.5" />
                           {t('inventory.unassignSpool')}
@@ -432,6 +434,11 @@ export function FilamentHoverCard({ data, children, disabled, className = '', sp
                     <Settings2 className="w-3.5 h-3.5" />
                     {t('ams.configure')}
                   </button>
+                </div>
+              )}
+              {actions && (
+                <div className="pt-2 mt-2 border-t border-bambu-dark-tertiary space-y-1">
+                  {actions}
                 </div>
               )}
             </div>
@@ -481,7 +488,7 @@ export function FilamentHoverCard({ data, children, disabled, className = '', sp
                     spoolman?.onUnlinkSpool?.();
                     setShowUnlinkConfirm(false);
                   }}
-                  className="flex-1 px-3 py-2 text-sm font-medium rounded transition-colors bg-red-500/20 hover:bg-red-500/30 text-red-400"
+                  className="flex-1 px-3 py-2 text-sm font-medium rounded transition-colors bg-red-100 dark:bg-red-500/20 hover:bg-red-200 dark:hover:bg-red-500/30 text-red-700 dark:text-red-400"
                 >
                   {t('inventory.unassignSpool')}
                 </button>
@@ -499,6 +506,7 @@ interface EmptySlotHoverCardProps {
   className?: string;
   configureSlot?: ConfigureSlotConfig;
   onAssignSpool?: () => void;
+  actions?: ReactNode;
   // #1322 follow-up: distinguish firmware-confirmed empty (state 9/10) from
   // a user reset where the firmware still has a spool registered. "reset"
   // surfaces the user-cleared label; undefined / "physical" keeps the
@@ -506,7 +514,7 @@ interface EmptySlotHoverCardProps {
   kind?: 'physical' | 'reset';
 }
 
-export function EmptySlotHoverCard({ children, className = '', configureSlot, onAssignSpool, kind }: EmptySlotHoverCardProps) {
+export function EmptySlotHoverCard({ children, className = '', configureSlot, onAssignSpool, actions, kind }: EmptySlotHoverCardProps) {
   const { t } = useTranslation();
   const [isVisible, setIsVisible] = useState(false);
   // Screen-space coords for the portaled card — same pattern as
@@ -570,7 +578,7 @@ export function EmptySlotHoverCard({ children, className = '', configureSlot, on
       {isVisible && createPortal(
         <div
           ref={cardRef}
-          className="fixed z-[60] animate-in fade-in-0 zoom-in-95 duration-150"
+          className="fixed z-[60]"
           style={{
             top: coords?.top ?? -9999,
             left: coords?.left ?? -9999,
@@ -587,7 +595,7 @@ export function EmptySlotHoverCard({ children, className = '', configureSlot, on
               {kind === 'reset' ? t('ams.emptySlotReset') : t('ams.emptySlot')}
             </div>
             {/* Configure slot button */}
-            {(configureSlot?.enabled || onAssignSpool) && (
+            {(configureSlot?.enabled || onAssignSpool || actions) && (
               <div className="px-2 pb-2 space-y-1">
                 {configureSlot?.enabled && (
                   <button
@@ -610,6 +618,11 @@ export function EmptySlotHoverCard({ children, className = '', configureSlot, on
                     <Package className="w-3.5 h-3.5" />
                     {t('inventory.assignSpool')}
                   </button>
+                )}
+                {actions && (
+                  <div className="pt-1 mt-1 border-t border-bambu-dark-tertiary space-y-1">
+                    {actions}
+                  </div>
                 )}
               </div>
             )}

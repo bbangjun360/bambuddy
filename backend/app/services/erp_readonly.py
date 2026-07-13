@@ -54,10 +54,15 @@ class ErpReadOnlyClient:
         base_url: str,
         api_token: str | None,
         *,
+        api_prefix: str = "/api",
         timeout: float = 5.0,
         http_client: httpx.AsyncClient | None = None,
     ):
+        normalized_prefix = api_prefix.strip().strip("/")
+        if not normalized_prefix:
+            raise ValueError("ERP API prefix must not be empty")
         self.base_url = base_url.rstrip("/")
+        self.api_prefix = f"/{normalized_prefix}"
         self.api_token = api_token
         self.timeout = timeout
         self._client = http_client or httpx.AsyncClient(timeout=timeout)
@@ -75,7 +80,7 @@ class ErpReadOnlyClient:
 
     async def fetch_work_order(self, work_order_id: str) -> dict[str, Any]:
         encoded = quote(work_order_id, safe="")
-        url = f"{self.base_url}/erp/api/resource/Work%20Order/{encoded}"
+        url = f"{self.base_url}{self.api_prefix}/resource/Work%20Order/{encoded}"
         try:
             response = await self._client.get(url, headers=self._headers(), timeout=self.timeout)
         except httpx.TimeoutException as exc:

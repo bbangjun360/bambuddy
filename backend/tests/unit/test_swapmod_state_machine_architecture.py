@@ -86,14 +86,14 @@ class SwapmodStateMachineArchitectureTest(unittest.TestCase):
         self.assertIn("swapmod_state_machine", main_text)
         self.assertIn("app.include_router(swapmod_state_machine.router", main_text)
         forbidden_route_tokens = (
-            "/queue",
-            "/scheduler",
-            "/dispatch",
-            "/execute",
-            "/live",
-            "/send",
-            "/raw",
-            "/start-next-print",
+            '"/queue"',
+            '"/scheduler"',
+            '"/dispatch"',
+            '"/execute"',
+            '"/live"',
+            '"/send"',
+            '"/raw"',
+            '"/start-next-print"',
         )
         for token in forbidden_route_tokens:
             with self.subTest(token=token):

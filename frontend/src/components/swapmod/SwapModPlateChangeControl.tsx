@@ -22,21 +22,35 @@ type Phase =
   | 'done'
   | 'manual-review';
 
-export function SwapModPlateChangeControl({ printer }: { printer: Printer }) {
+interface SwapModPlateChangeControlProps {
+  printer: Printer;
+  isConnected: boolean;
+  canControl: boolean;
+  isA1Mini: boolean;
+}
+
+export function SwapModPlateChangeControl({
+  printer,
+  isConnected,
+  canControl,
+  isA1Mini,
+}: SwapModPlateChangeControlProps) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>('idle');
   const [cycleKey, setCycleKey] = useState<string | null>(null);
   const [preview, setPreview] = useState<SwapmodConfirmationPreview | null>(null);
   const [checks, setChecks] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const eligible = isConnected && canControl && isA1Mini;
 
   const canaryStatus = useQuery({
     queryKey: ['swapmod-canary-status'],
     queryFn: () => swapmodApi.getCanaryStatus(),
     refetchInterval: 15000,
+    enabled: eligible,
   });
 
-  const armed = !!canaryStatus.data?.enabled && !!canaryStatus.data?.allow_real_commands;
+  const armed = eligible && !!canaryStatus.data?.enabled && !!canaryStatus.data?.allow_real_commands;
 
   const allChecked = useMemo(
     () => !!preview && preview.checklist_fields.length > 0 && preview.checklist_fields.every((f) => checks[f]),
@@ -120,14 +134,15 @@ export function SwapModPlateChangeControl({ printer }: { printer: Printer }) {
     onError: (e: Error) => setError(e.message),
   });
 
-  // The control only appears while the canary is armed for a supervised window.
+  // The backend repeats every gate; these checks also keep ineligible cards inert.
   if (!armed) return null;
 
   const busy = startCycle.isPending || sendStep.isPending || sendVerify.isPending;
 
   return (
     <div
-      id="card-swapmod-plate-change"
+      id={`card-swapmod-plate-change-${printer.id}`}
+      data-testid="card-swapmod-plate-change"
       className="mt-3 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary p-3"
     >
       <div className="flex items-center gap-2 mb-2">

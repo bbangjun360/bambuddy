@@ -35,3 +35,23 @@ ERPNext owns commercial and accounting data. Bambuddy owns print execution.
 - request timeout after document creation
 - duplicate completion event
 - reconciliation mismatch
+
+## Real ERPNext Contract
+
+WP-111 validates the existing adapter against the standard Frappe Resource API:
+
+- site root from FARM_ERP_BASE_URL
+- Resource API prefix from FARM_ERP_API_PREFIX (default /api)
+- token header value from FARM_ERP_API_TOKEN
+- Frappe Datetime conversion in FARM_ERP_TIMEZONE (default Asia/Seoul)
+- Work Order read at /api/resource/Work Order/{name}
+- Draft lookup with JSON filters and fields
+- lookup-before-create plus lookup-after-timeout using unique farm_event_id
+
+Both FARM_ERP_IMPORT_ENABLED and FARM_ERP_DRAFT_POSTING_ENABLED remain disabled
+by default. The live contract rejects duplicate lookup results and any
+non-Draft response. ERPNext submission, inventory, accounting, and printer
+control remain out of scope.
+
+Use docs/runbooks/ERPNEXT_SANDBOX_VALIDATION.md for the disposable ERPNext
+bootstrap, synthetic data, live probe, rollback, and production handoff gates.

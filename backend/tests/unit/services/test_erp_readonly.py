@@ -33,9 +33,29 @@ class ErpReadOnlyClientTest(unittest.IsolatedAsyncioTestCase):
         payload = await client.fetch_work_order("WO-FAKE-0001")
 
         self.assertEqual(payload["name"], "WO-FAKE-0001")
-        self.assertEqual(seen["url"], "http://erp.test/erp/api/resource/Work%20Order/WO-FAKE-0001")
+        self.assertEqual(seen["url"], "http://erp.test/api/resource/Work%20Order/WO-FAKE-0001")
         self.assertEqual(seen["authorization"], "token fake-token")
         await http_client.aclose()
+
+    async def test_client_supports_explicit_legacy_mock_api_prefix(self) -> None:
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["url"] = str(request.url)
+            return httpx.Response(200, json={"data": {"name": "WO-FAKE-0001", "production_item": "SKU-FAKE", "qty": 1}})
+
+        http_client = _client_for(handler)
+        client = ErpReadOnlyClient("http://erp.test", None, api_prefix="/erp/api", http_client=http_client)
+
+        await client.fetch_work_order("WO-FAKE-0001")
+
+        self.assertEqual(seen["url"], "http://erp.test/erp/api/resource/Work%20Order/WO-FAKE-0001")
+        await http_client.aclose()
+
+    def test_client_rejects_empty_api_prefix(self) -> None:
+        for api_prefix in ("", "/", " // "):
+            with self.subTest(api_prefix=api_prefix), self.assertRaises(ValueError):
+                ErpReadOnlyClient("http://erp.test", None, api_prefix=api_prefix)
 
     async def test_client_classifies_upstream_http_errors_without_leaking_token(self) -> None:
         cases = [

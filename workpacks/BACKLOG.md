@@ -36,13 +36,16 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    evidence before autonomous actuation is enabled in steady state. The
    autonomous-actuation design WP is a separate operator-approved item (next
    SwapMod work); allocate its WP number per the AGENTS.md rule when starting.
-4. **Real ERPNext integration** (spec WP-04 completion) — stand up a real
-   ERPNext instance, point the existing adapter at it (config override),
-   validate read-only import and Draft-write against it. The adapter code is
-   done; only the mock has ever been the target.
+4. **Real ERPNext integration — completed by WP-111** (spec WP-04 completion).
+   The standard Frappe Resource API contract, token authentication, Work Order
+   read, Draft-only result creation, timeout recovery, and external idempotency
+   were validated against ERPNext v16.26.2 on 2026-07-10. The reproducible
+   sandbox/bootstrap/live probe and production handoff gates are documented in
+   docs/runbooks/ERPNEXT_SANDBOX_VALIDATION.md. Durable production provisioning
+   and least-privilege credentials remain operator deployment work.
 5. **Actual cost ledger** (spec WP-05) — estimate snapshot vs actual
    material/energy/machine-time, failed/reprint cost separation, KRW.
-   Untouched so far. Depends on 4 for the ERP payload end.
+   Untouched so far. The ERP payload dependency is unblocked by WP-111.
 6. **Obico phase 2** (spec WP-09) — assisted pause after shadow-mode sample
    collection. Blocked on: enough production shadow samples, which needs 2.
 7. **WP-9xx off-track tooling closure** — WP-901 Paper UI export: DONE
@@ -60,12 +63,19 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    WP-076 allowlist+hash model); flags stay default-off; the UI never
    auto-fills the checklist or phrase. Read-only monitoring (failure log,
    overview) ships first and is routine-mergeable.
+9. **Operator UI redesign — started by WP-112** — operator-approved 2026-07-13
+   after upstream v0.2.4.9 integration. WP-112 changes only the shared operator
+   shell and was visually approved and merged as PR #93. WP-113 PR #94 was
+   visually approved on 2026-07-13 and changes only the printer fleet surface:
+   status summary, responsive tools, and printer-card scan hierarchy. Queue,
+   library/inventory, and settings redesigns follow as separate observable Work
+   Packages after operators review each preceding slice; no page workflow,
+   printer command, or backend contract is changed by WP-112 or WP-113.
 
 ## Explicitly deferred (do not start without operator approval)
 
 - ERP Stage C–E (automatic queue, auto-submit) — spec gates these on a full
   reconciliation cycle and finance approval.
-- UI redesign (spec WP-12) — only after operators have used the system.
 - Multi-fork governance apparatus (spec WP-00 full form: fork catalog,
   farm-contracts, components.lock) — right-size later; current single-repo
   reality does not need it.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import unittest
+from datetime import datetime, timezone
 
 import httpx
 
@@ -13,6 +15,7 @@ from backend.app.services.erp_draft_write import (
     DraftWriteClientResult,
     ErpDraftWriteClient,
     ErpDraftWriteError,
+    format_frappe_datetime,
 )
 
 
@@ -48,14 +51,46 @@ def draft_response(event_id: str = "evt-unit-0001", *, name: str = "FDR-UNIT-000
 
 
 class ErpDraftWriteClientTest(unittest.IsolatedAsyncioTestCase):
+    def test_frappe_datetime_uses_configured_timezone_and_database_format(self) -> None:
+        completed_at = datetime(2026, 7, 10, 0, 0, 0, tzinfo=timezone.utc)
+        value = format_frappe_datetime(completed_at, timezone_name="Asia/Seoul")
+        self.assertEqual(value, "2026-07-10 09:00:00")
+
+    def test_frappe_datetime_treats_naive_input_as_utc(self) -> None:
+        value = format_frappe_datetime(datetime(2026, 7, 10, 0, 0, 0), timezone_name="Asia/Seoul")
+        self.assertEqual(value, "2026-07-10 09:00:00")
+
+    def test_frappe_datetime_rejects_unknown_timezone(self) -> None:
+        with self.assertRaises(ValueError):
+            format_frappe_datetime(datetime.now(timezone.utc), timezone_name="Synthetic/Invalid")
+
+    async def test_client_rejects_mismatched_event_and_idempotency_keys_without_request(self) -> None:
+        def handler(_request: httpx.Request) -> httpx.Response:
+            raise AssertionError("ERP request must not be sent")
+
+        http_client = _client_for(handler)
+        client = ErpDraftWriteClient("http://erp.test", "synthetic-secret-token", http_client=http_client)
+
+        with self.assertRaises(ErpDraftWriteError) as ctx:
+            await client.create_or_lookup_draft_result(draft_payload(), idempotency_key="different-event")
+
+        self.assertEqual(ctx.exception.code, ERP_DRAFT_INVALID_PAYLOAD)
+        self.assertFalse(ctx.exception.retryable)
+        await http_client.aclose()
+
     async def test_client_creates_draft_with_idempotency_key_and_token_header(self) -> None:
-        seen = {}
+        seen = {"methods": []}
 
         def handler(request: httpx.Request) -> httpx.Response:
-            seen["method"] = request.method
+            seen["methods"].append(request.method)
             seen["url"] = str(request.url)
             seen["authorization"] = request.headers.get("authorization")
             seen["idempotency"] = request.headers.get("idempotency-key")
+            if request.method == "GET":
+                seen["filters"] = json.loads(request.url.params["filters"])
+                seen["fields"] = json.loads(request.url.params["fields"])
+                seen["limit"] = request.url.params["limit_page_length"]
+                return httpx.Response(200, json={"data": []})
             return httpx.Response(200, json=draft_response())
 
         http_client = _client_for(handler)
@@ -68,22 +103,47 @@ class ErpDraftWriteClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.document.docstatus, 0)
         self.assertTrue(result.created)
         self.assertFalse(result.recovered_after_timeout)
-        self.assertEqual(seen["method"], "POST")
-        self.assertEqual(seen["url"], "http://erp.test/erp/api/resource/Farm%20Draft%20Result")
+        self.assertEqual(seen["methods"], ["GET", "POST"])
+        self.assertEqual(seen["url"], "http://erp.test/api/resource/Farm%20Draft%20Result")
         self.assertEqual(seen["authorization"], "token synthetic-secret-token")
         self.assertEqual(seen["idempotency"], "evt-unit-0001")
+        self.assertEqual(seen["filters"], [["farm_event_id", "=", "evt-unit-0001"]])
+        self.assertIn("docstatus", seen["fields"])
+        self.assertEqual(seen["limit"], "2")
+        await http_client.aclose()
+
+    async def test_existing_frappe_collection_result_avoids_create(self) -> None:
+        calls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request.method)
+            return httpx.Response(200, json={"data": [draft_response()["data"]]})
+
+        http_client = _client_for(handler)
+        client = ErpDraftWriteClient("http://erp.test", "synthetic-secret-token", http_client=http_client)
+
+        result = await client.create_or_lookup_draft_result(draft_payload(), idempotency_key="evt-unit-0001")
+
+        self.assertEqual(calls, ["GET"])
+        self.assertFalse(result.created)
+        self.assertEqual(result.document.name, "FDR-UNIT-0001")
         await http_client.aclose()
 
     async def test_timeout_after_create_uses_lookup_without_second_create(self) -> None:
         calls: list[str] = []
+        lookup_count = 0
 
         def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal lookup_count
             if request.method == "POST":
                 calls.append("post")
                 raise httpx.ReadTimeout("read timed out")
             calls.append("get")
-            self.assertIn("farm_event_id=evt-timeout-0001", str(request.url))
-            return httpx.Response(200, json=draft_response("evt-timeout-0001", name="FDR-UNIT-0002"))
+            lookup_count += 1
+            self.assertEqual(json.loads(request.url.params["filters"]), [["farm_event_id", "=", "evt-timeout-0001"]])
+            if lookup_count == 1:
+                return httpx.Response(200, json={"data": []})
+            return httpx.Response(200, json={"data": [draft_response("evt-timeout-0001", name="FDR-UNIT-0002")["data"]]})
 
         http_client = _client_for(handler)
         client = ErpDraftWriteClient("http://erp.test", "synthetic-secret-token", http_client=http_client)
@@ -93,10 +153,35 @@ class ErpDraftWriteClientTest(unittest.IsolatedAsyncioTestCase):
             idempotency_key="evt-timeout-0001",
         )
 
-        self.assertEqual(calls, ["post", "get"])
+        self.assertEqual(calls, ["get", "post", "get"])
         self.assertEqual(result.document.name, "FDR-UNIT-0002")
         self.assertFalse(result.created)
         self.assertTrue(result.recovered_after_timeout)
+        await http_client.aclose()
+
+    async def test_timeout_followup_preserves_nonretryable_lookup_error(self) -> None:
+        calls = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return httpx.Response(200, json={"data": []})
+            if request.method == "POST":
+                raise httpx.ReadTimeout("read timed out")
+            return httpx.Response(401, json={"error": "expired token"})
+
+        http_client = _client_for(handler)
+        client = ErpDraftWriteClient("http://erp.test", "synthetic-secret-token", http_client=http_client)
+
+        with self.assertRaises(ErpDraftWriteError) as ctx:
+            await client.create_or_lookup_draft_result(
+                draft_payload("evt-timeout-auth"),
+                idempotency_key="evt-timeout-auth",
+            )
+
+        self.assertEqual(ctx.exception.code, ERP_DRAFT_AUTH_FAILED)
+        self.assertFalse(ctx.exception.retryable)
         await http_client.aclose()
 
     async def test_client_classifies_retryable_and_auth_errors_without_leaking_token(self) -> None:
@@ -141,7 +226,9 @@ class ErpDraftWriteClientTest(unittest.IsolatedAsyncioTestCase):
         await http_client.aclose()
 
     async def test_invalid_erp_payload_is_safe_failure(self) -> None:
-        def handler(_request: httpx.Request) -> httpx.Response:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET":
+                return httpx.Response(200, json={"data": []})
             return httpx.Response(200, json={"data": {"name": "FDR-BAD"}})
 
         http_client = _client_for(handler)
@@ -152,6 +239,21 @@ class ErpDraftWriteClientTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ctx.exception.code, ERP_DRAFT_INVALID_PAYLOAD)
         self.assertEqual(ctx.exception.http_status, 422)
+        self.assertFalse(ctx.exception.retryable)
+        await http_client.aclose()
+
+    async def test_multiple_frappe_lookup_results_are_unsafe_failure(self) -> None:
+        def handler(_request: httpx.Request) -> httpx.Response:
+            document = draft_response()["data"]
+            return httpx.Response(200, json={"data": [document, {**document, "name": "FDR-UNIT-0002"}]})
+
+        http_client = _client_for(handler)
+        client = ErpDraftWriteClient("http://erp.test", "synthetic-secret-token", http_client=http_client)
+
+        with self.assertRaises(ErpDraftWriteError) as ctx:
+            await client.lookup_draft_result("evt-unit-0001")
+
+        self.assertEqual(ctx.exception.code, ERP_DRAFT_INVALID_PAYLOAD)
         self.assertFalse(ctx.exception.retryable)
         await http_client.aclose()
 
