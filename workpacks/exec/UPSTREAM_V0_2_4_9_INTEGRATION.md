@@ -70,7 +70,11 @@ Out of scope:
 - [x] 2026-07-13: Passed focused scheduler gates, 7,053 backend tests, 2,305
   frontend tests, 2,405 live-container integration tests, make verify-fast,
   make test-contract, make verify-full, and desktop/mobile browser checks.
-- [ ] Publish operator-gated Draft PR.
+- [x] 2026-07-13: Published operator-gated Draft PR #92. The operator approved
+  it and GitHub merged it into `farm-main` as `9ec919af`.
+- [x] 2026-07-14: Refreshed upstream release metadata. v0.2.4.9 remains the
+  latest stable release. `v0.2.5b2-daily.20260713` is a prerelease and remains
+  outside this integration's approved scope.
 
 # Decisions
 
@@ -130,18 +134,21 @@ Run:
   or bypass a physical-bed hold.
 - Auto-migrated upstream columns require a staging backup/restore rehearsal.
 - Permission changes can affect custom operator groups and API keys.
-- This integration PR must remain Draft and requires explicit operator approval
-  after all evidence is available. It is never self-merged.
+- PR #92 received explicit operator approval before merge. Production rollout,
+  migration rehearsal, permission review, and any physical canary remain
+  separately operator-gated.
 
 # Outcomes
 
-The source integration and local validation are complete. Bambuddy starts from
-the merged production image, serves its root, health, and API documentation
-endpoints, and preserves the farm scheduler handoff guard. Missing
+The source integration was operator-approved and merged into `farm-main` through
+PR #92. Bambuddy starts from the merged production image, serves its root,
+health, and API documentation endpoints, and preserves the farm scheduler
+handoff guard. Missing
 require_plate_clear configuration remains fail-closed across backend behavior,
 the settings contract, and the UI; explicitly stored false remains supported.
 
 No deployment, database migration, or physical command was executed. Staging
 backup/restore rehearsal, permission review, simulated cancellation and
 plate-clear exercises, and any later named-printer canary remain operator-gated.
-The integration stays R4 and must remain a Draft PR until explicit approval.
+The integrated release remains R4 for rollout even though the source PR was
+approved and merged.
