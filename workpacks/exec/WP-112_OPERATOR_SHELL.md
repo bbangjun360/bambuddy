@@ -92,7 +92,8 @@ business workflow.
   shell in a healthy production-image container.
 - [x] 2026-07-13: Full frontend validation passes 2,309 tests across 175 files,
   with all 11 locales in parity with English.
-- [ ] Publish the Draft PR and attach the validation summary.
+- [x] 2026-07-13: Published Draft PR #93 with the validation and merge-policy
+  exclusion summary.
 - [ ] Obtain operator visual review before taking the PR out of Draft.
 
 ## Done when
