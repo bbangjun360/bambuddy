@@ -233,6 +233,36 @@ describe('QueuePage', () => {
       expect(queueTab).toHaveAttribute('aria-selected', 'false');
       expect(historyTab).toHaveAttribute('aria-selected', 'true');
     });
+
+    it('reserves a mobile gutter between job rows and the fixed bug report button', async () => {
+      render(<QueuePage />);
+
+      await screen.findByText('Test Print 1');
+      const rows = screen.getAllByTestId('queue-job-row');
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row).toHaveClass('mr-14', 'sm:mr-0');
+      }
+    });
+
+    it('keeps the mobile resume-after-failure icon button accessibly named', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => {
+          return HttpResponse.json([
+            {
+              ...mockQueueItems[0],
+              status: 'skipped',
+              error_message: 'Previous print failed or was aborted',
+            },
+          ]);
+        })
+      );
+      render(<QueuePage />);
+
+      const resumeButton = await screen.findByRole('button', { name: 'Resume after failure' });
+      expect(resumeButton).toHaveAttribute('aria-label', 'Resume after failure');
+      expect(resumeButton).toHaveAttribute('title', 'Resume after failure');
+    });
   });
 
   describe('queue items display', () => {

@@ -395,7 +395,7 @@ function SortableQueueItem({
       data-testid="queue-job-row"
       data-density="compact"
       className={`
-        group relative rounded-md border border-l-2 bg-bambu-dark-secondary transition-colors duration-150
+        group relative mr-14 rounded-md border border-l-2 bg-bambu-dark-secondary transition-colors duration-150 sm:mr-0
         ${
           isPrinting ? 'border-l-blue-500' :
           isPending ? 'border-l-yellow-500' :
@@ -670,7 +670,10 @@ function SortableQueueItem({
         </div>
 
         {/* Status badge + Actions */}
-        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center sm:gap-1"
+          onClick={(e) => e.stopPropagation()}
+        >
           <StatusBadge status={item.status} waitingReason={item.waiting_reason} printerState={printerState} t={t} />
 
           <div className="flex items-center gap-0.5 sm:gap-1">
@@ -871,7 +874,7 @@ function SortableBatchRow({
       ref={setNodeRef}
       style={style}
       data-density="compact"
-      className={`overflow-hidden rounded-md border border-l-2 border-bambu-dark-tertiary border-l-cyan-400 bg-bambu-dark-secondary ${
+      className={`mr-14 overflow-hidden rounded-md border border-l-2 border-bambu-dark-tertiary border-l-cyan-400 bg-bambu-dark-secondary sm:mr-0 ${
         isDragging ? 'z-50 opacity-60 shadow-lg' : ''
       }`}
     >
@@ -953,7 +956,7 @@ function SortableBatchRow({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex shrink-0 items-center gap-1">
           {onUngroup && (
             <Button
               variant="ghost"
@@ -2025,6 +2028,8 @@ export function QueuePage() {
               </div>
               <button
                 type="button"
+                aria-label={t('queue.resumeAfterFailure.button')}
+                title={t('queue.resumeAfterFailure.button')}
                 onClick={() => setResumeConfirm({ printerId, printerName, skippedCount })}
                 className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-orange-500/40 bg-orange-500/15 px-2.5 text-sm text-orange-100 transition-colors hover:bg-orange-500/25"
               >

@@ -113,6 +113,14 @@ baseline passed `make verify-fast` and all 26 focused QueuePage tests.
 - [x] 2026-07-13 21:23 KST: Published draft PR #96 for operator visual review
   at https://github.com/bbangjun360/bambuddy/pull/96; the isolated preview
   remains available at http://127.0.0.1:18115/queue.
+- [x] 2026-07-13 23:35 KST: Pre-approval browser audit reproduced the fixed
+  bug-report button covering a mobile Queue cancel control and the icon-only
+  resume-after-failure button losing its accessible name. Added regressions,
+  reserved a mobile row gutter, and restored the translated button label.
+- [x] 2026-07-13 23:35 KST: Focused Queue tests passed 30/30; the full frontend
+  passed 2,318/2,318 with 11 locales in parity. ESLint, build, `verify-fast`,
+  `verify-full`, desktop/mobile browser checks, and card/control intersection
+  checks passed; main port 18000 remained healthy.
 
 ## Decisions
 
@@ -124,6 +132,11 @@ baseline passed `make verify-fast` and all 26 focused QueuePage tests.
   stock imagery to an operational queue.
 - Keep tabs for Active, History, Timeline, and Pipelines because they already
   partition distinct workflows and have stable deep links.
+- Reserve the fixed bug-report button's horizontal footprint on mobile Queue
+  and batch rows, not only bottom padding. This keeps cards and command targets
+  outside the overlay at every scroll position while preserving desktop width.
+- Give the mobile icon-only resume-after-failure control an explicit translated
+  accessible name and tooltip because its visible text is hidden below `sm`.
 
 ## Harness Changes
 
@@ -133,6 +146,9 @@ baseline passed `make verify-fast` and all 26 focused QueuePage tests.
 - Browser verification used the isolated `farm_wp115` Compose project on
   ports 18115/19115. Its inactive synthetic printer used no real serial, IP,
   access code, printer connection, production credential, or customer data.
+- A CDP coordinate audit checks the global fixed bug-report button against
+  visible Queue row and command rectangles at 390x844; both intersection sets
+  are empty after the fix.
 
 ## Implementation
 
@@ -163,17 +179,18 @@ make verify-full FRONTEND_TESTED=1
 
 Observed results on 2026-07-13:
 
-- Focused QueuePage: 28/28 tests passed, including semantic tabs, arrow-key
-  focus movement, compact rows, filters, history, and existing action controls.
-- Full frontend: 175 files and 2,316 tests passed; all 11 locales matched; ESLint
+- Focused QueuePage: 30/30 tests passed, including semantic tabs, arrow-key
+  focus movement, compact rows, mobile overlay clearance, accessible icon-only
+  actions, filters, history, and existing action controls.
+- Full frontend: 175 files and 2,318 tests passed; all 11 locales matched; ESLint
   and the TypeScript/Vite production build passed.
 - Shared gates: `make verify-fast FRONTEND_TESTED=1` and isolated
   `make verify-full FRONTEND_TESTED=1` passed, including clean-start smoke.
 - Browser: 1440x1000 and 390x844 showed two compact active rows, loaded real
   repository thumbnails, no page overflow or component overlap, no clipped
   controls, and no failed requests or browser errors. Queue/History keyboard
-  switching retained focus. At mobile scroll bottom, the final row and fixed
-  bug-report control had zero intersection.
+  switching retained focus. At mobile top and scroll bottom, visible Queue
+  rows, commands, and the fixed bug-report control had zero intersection.
 
 Observable scenario: with one printing, one pending, and one completed synthetic
 job, the active Queue view shows the running and pending work plus summary load;
@@ -208,5 +225,7 @@ new dependency, feature-flag default change, auth change, printer command
 change, or safety-gate change. No new logs or metrics are required because all
 failure paths still use the existing query, mutation, API, and browser
 diagnostics. Rollback is the source plus generated-asset revert. Bambuddy was
-built and started successfully in the isolated harness. The remaining gate is
-operator visual approval of the draft PR; no merge is attempted before it.
+built and started successfully in the isolated harness. The pre-approval audit
+also removed a mobile command-overlay collision and restored the accessible
+name of an icon-only failure-recovery action. The remaining gate is operator
+visual approval of the draft PR; no merge is attempted before it.
