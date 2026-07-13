@@ -32,3 +32,28 @@ patches:
       - make verify-fast
       - python3 harness/scripts/check_workpack.py workpacks/exec/WP-082_SWAPMOD_SCHEDULER_HANDOFF_CHAIN.md
       - git diff --check
+  - id: upstream-v0.2.4.9-fail-closed-plate-clear-default
+    date: 2026-07-13
+    workpack: workpacks/exec/UPSTREAM_V0_2_4_9_INTEGRATION.md
+    files:
+      - backend/app/services/print_scheduler.py
+      - backend/app/schemas/settings.py
+      - frontend/src/pages/SettingsPage.tsx
+    upstream_area: Scheduler plate-clear setting defaults
+    reason: >-
+      Upstream v0.2.4.9 changes an unset require_plate_clear setting to false,
+      which conflicts with the farm invariant that no next print starts until
+      bed readiness is verified.
+    behavior: >-
+      An absent require_plate_clear setting resolves to true in the scheduler,
+      settings schema, and Settings UI. An explicitly stored false value remains
+      supported, so this patch changes only the missing-setting default.
+    rollback: >-
+      Revert this ledger entry and the three default-value changes only after an
+      operator explicitly changes the farm bed-readiness invariant. No database
+      migration is required.
+    validation:
+      - python3 -m unittest harness.tests.test_upstream_scheduler_safety
+      - docker compose -f docker-compose.test.yml run --rm backend-test
+      - npm --prefix frontend run test:run
+      - make verify-full FRONTEND_TESTED=1

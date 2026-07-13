@@ -59,11 +59,13 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client';
 import { SliceModal } from '../components/SliceModal';
+import { RunWithPipelineModal } from '../components/RunWithPipelineModal';
 import { openInSlicer, type SlicerType } from '../utils/slicer';
 import { formatDateTime, formatDateOnly, parseUTCDate, type TimeFormat, formatDuration } from '../utils/date';
 import { getCurrencySymbol } from '../utils/currency';
 import { getBedTypeInfo } from '../utils/bedType';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { usePageFileDrop } from '../hooks/usePageFileDrop';
 import type { Archive, PrintLogEntry, ProjectListItem } from '../api/client';
 import { Card, CardContent } from '../components/Card';
 import { Button } from '../components/Button';
@@ -182,6 +184,7 @@ function ArchiveCard({
   const navigate = useNavigate();
   const [showReprint, setShowReprint] = useState(false);
   const [showSliceModal, setShowSliceModal] = useState(false);
+  const [showRunPipeline, setShowRunPipeline] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   // #1343: when true, the delete also drops the row from Quick Stats. Default
   // off — soft delete preserves the archive's filament/time/cost contribution.
@@ -203,7 +206,6 @@ function ArchiveCard({
   const [showQRCode, setShowQRCode] = useState(false);
   const [showPhotos, setShowPhotos] = useState(false);
   const [showProjectPage, setShowProjectPage] = useState(false);
-  const [showSchedule, setShowSchedule] = useState(false);
   const [showDeleteSource3mfConfirm, setShowDeleteSource3mfConfirm] = useState(false);
   const [showDeleteF3dConfirm, setShowDeleteF3dConfirm] = useState(false);
   const [showDeleteTimelapseConfirm, setShowDeleteTimelapseConfirm] = useState(false);
@@ -403,18 +405,17 @@ function ArchiveCard({
     // For source files: show Slice as the primary action
     ...(isGcodeFile ? [
       {
-        label: t('archives.menu.print'),
+        label: t('common.print'),
         icon: <Printer className="w-4 h-4" />,
         onClick: () => setShowReprint(true),
-        disabled: !archive.file_path || !canModify('archives', 'reprint', archive.created_by_id),
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.permission.noReprint') : undefined,
-      },
-      {
-        label: t('archives.menu.schedule'),
-        icon: <Calendar className="w-4 h-4" />,
-        onClick: () => setShowSchedule(true),
-        disabled: !archive.file_path || !hasPermission('queue:create'),
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : undefined,
+        disabled: !archive.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', archive.created_by_id),
+        title: !archive.file_path
+          ? t('archives.card.noFileForReprint')
+          : !hasPermission('queue:create')
+            ? t('archives.permission.noAddToQueue')
+            : !canModify('archives', 'reprint', archive.created_by_id)
+              ? t('archives.permission.noReprint')
+              : undefined,
       },
       {
         label: t('archives.menu.openInBambuStudio'),
@@ -439,6 +440,19 @@ function ArchiveCard({
           }
         },
       },
+      // Run-with-pipeline (#1425 PR B follow-up). Sources from archive's
+      // source 3MF (or file_path fallback). Only when slicer-api is on.
+      ...(useSlicerApi
+        ? [{
+            label: t('library.runWithPipeline.actionLabel'),
+            icon: <Play className="w-4 h-4" />,
+            onClick: () => setShowRunPipeline(true),
+            disabled: !hasPermission('pipelines:run'),
+            title: !hasPermission('pipelines:run')
+              ? t('library.runWithPipeline.noPermission')
+              : undefined,
+          }]
+        : []),
     ]),
     {
       label: archive.external_url ? t('archives.menu.externalLink') : t('archives.menu.viewOnMakerWorld'),
@@ -959,7 +973,7 @@ function ArchiveCard({
             className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
               isSlicedFile(archive)
                 ? 'bg-bambu-green/20 text-bambu-green'
-                : 'bg-orange-500/20 text-orange-400'
+                : 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400'
             }`}
             title={
               isSlicedFile(archive)
@@ -1025,8 +1039,8 @@ function ArchiveCard({
                   archive.time_accuracy >= 95 && archive.time_accuracy <= 105
                     ? 'bg-bambu-green/20 text-bambu-green'
                     : archive.time_accuracy > 105
-                      ? 'bg-blue-500/20 text-blue-400'
-                      : 'bg-orange-500/20 text-orange-400'
+                      ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400'
+                      : 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400'
                 }`}>
                   {archive.time_accuracy > 100 ? '+' : ''}{(archive.time_accuracy - 100).toFixed(0)}%
                 </span>
@@ -1099,7 +1113,7 @@ function ArchiveCard({
           <div className="flex flex-wrap items-center gap-1.5 mb-3">
             {archive.notes && (
               <div
-                className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded text-xs"
+                className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 rounded text-xs"
                 title={archive.notes}
               >
                 <StickyNote className="w-3 h-3" />
@@ -1143,22 +1157,11 @@ function ArchiveCard({
                 size="sm"
                 className="flex-1 min-w-0 overflow-hidden"
                 onClick={() => setShowReprint(true)}
-                disabled={!archive.file_path || !canModify('archives', 'reprint', archive.created_by_id)}
-                title={!archive.file_path ? t('archives.card.noFileForReprint') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.card.noPermissionReprint') : undefined}
+                disabled={!archive.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', archive.created_by_id)}
+                title={!archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.card.noPermissionReprint') : undefined}
               >
                 <Printer className="w-3 h-3 flex-shrink-0" />
-                <span className="hidden xl:inline truncate">{t('archives.card.reprint')}</span>
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="flex-1 min-w-0 overflow-hidden"
-                onClick={() => setShowSchedule(true)}
-                disabled={!archive.file_path || !hasPermission('queue:create')}
-                title={!archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : t('archives.card.schedulePrint')}
-              >
-                <Calendar className="w-3 h-3 flex-shrink-0" />
-                <span className="hidden xl:inline truncate">{t('archives.card.schedule')}</span>
+                <span className="hidden xl:inline truncate">{t('common.print')}</span>
               </Button>
               <Button
                 variant="secondary"
@@ -1237,7 +1240,7 @@ function ArchiveCard({
             disabled={!canModify('archives', 'delete', archive.created_by_id)}
             title={!canModify('archives', 'delete', archive.created_by_id) ? t('archives.card.noPermissionDelete') : t('archives.card.delete')}
           >
-            <Trash2 className="w-3 h-3 sm:w-4 sm:h-4 text-red-400" />
+            <Trash2 className="w-3 h-3 sm:w-4 sm:h-4 text-red-600 dark:text-red-400" />
           </Button>
         </div>
       </CardContent>
@@ -1274,7 +1277,7 @@ function ArchiveCard({
       {/* Reprint Modal */}
       {showReprint && (
         <PrintModal
-          mode="reprint"
+          mode="create"
           archiveId={archive.id}
           archiveName={archive.print_name || archive.filename}
           onClose={() => setShowReprint(false)}
@@ -1286,6 +1289,15 @@ function ArchiveCard({
         <SliceModal
           source={{ kind: 'archive', id: archive.id, filename: archive.print_name || archive.filename || 'model' }}
           onClose={() => setShowSliceModal(false)}
+        />
+      )}
+
+      {/* Run-with-Pipeline Modal (#1425 PR B). Sources from archive — backend
+          reads source_3mf_path, falls back to file_path. */}
+      {showRunPipeline && (
+        <RunWithPipelineModal
+          source={{ kind: 'archive', id: archive.id, filename: archive.print_name || archive.filename || 'model' }}
+          onClose={() => setShowRunPipeline(false)}
         />
       )}
 
@@ -1313,8 +1325,8 @@ function ArchiveCard({
             <div
               className={
                 (deleteImpactQuery.data?.currently_printing ?? 0) > 0
-                  ? 'text-sm text-red-400 mb-2'
-                  : 'text-sm text-amber-400 mb-2'
+                  ? 'text-sm text-red-600 dark:text-red-400 mb-2'
+                  : 'text-sm text-amber-600 dark:text-amber-400 mb-2'
               }
             >
               {(deleteImpactQuery.data?.currently_printing ?? 0) > 0
@@ -1503,15 +1515,6 @@ function ArchiveCard({
         />
       )}
 
-      {showSchedule && (
-        <PrintModal
-          mode="add-to-queue"
-          archiveId={archive.id}
-          archiveName={archive.print_name || archive.filename}
-          onClose={() => setShowSchedule(false)}
-        />
-      )}
-
       {/* Hidden file input for source 3MF upload */}
       <input
         ref={source3mfInputRef}
@@ -1603,7 +1606,7 @@ function ArchiveListRow({
   const navigate = useNavigate();
   const [showReprint, setShowReprint] = useState(false);
   const [showSliceModal, setShowSliceModal] = useState(false);
-  const [showSchedule, setShowSchedule] = useState(false);
+  const [showRunPipeline, setShowRunPipeline] = useState(false);
   const [showTimelapse, setShowTimelapse] = useState(false);
   const [showTimelapseSelect, setShowTimelapseSelect] = useState(false);
   const [availableTimelapses, setAvailableTimelapses] = useState<Array<{ name: string; path: string; size: number; mtime: string | null }>>([]);
@@ -1784,18 +1787,17 @@ function ArchiveListRow({
   const contextMenuItems: ContextMenuItem[] = [
     ...(isGcodeFile ? [
       {
-        label: t('archives.menu.print'),
+        label: t('common.print'),
         icon: <Printer className="w-4 h-4" />,
         onClick: () => setShowReprint(true),
-        disabled: !archive.file_path || !canModify('archives', 'reprint', archive.created_by_id),
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.permission.noReprint') : undefined,
-      },
-      {
-        label: t('archives.menu.schedule'),
-        icon: <Calendar className="w-4 h-4" />,
-        onClick: () => setShowSchedule(true),
-        disabled: !archive.file_path || !hasPermission('queue:create'),
-        title: !archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : undefined,
+        disabled: !archive.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', archive.created_by_id),
+        title: !archive.file_path
+          ? t('archives.card.noFileForReprint')
+          : !hasPermission('queue:create')
+            ? t('archives.permission.noAddToQueue')
+            : !canModify('archives', 'reprint', archive.created_by_id)
+              ? t('archives.permission.noReprint')
+              : undefined,
       },
       {
         label: t('archives.menu.openInBambuStudio'),
@@ -1820,6 +1822,19 @@ function ArchiveListRow({
           }
         },
       },
+      // Run-with-pipeline (#1425 PR B follow-up). Sources from archive's
+      // source 3MF (or file_path fallback). Only when slicer-api is on.
+      ...(useSlicerApi
+        ? [{
+            label: t('library.runWithPipeline.actionLabel'),
+            icon: <Play className="w-4 h-4" />,
+            onClick: () => setShowRunPipeline(true),
+            disabled: !hasPermission('pipelines:run'),
+            title: !hasPermission('pipelines:run')
+              ? t('library.runWithPipeline.noPermission')
+              : undefined,
+          }]
+        : []),
     ]),
     {
       label: archive.external_url ? t('archives.menu.externalLink') : t('archives.menu.viewOnMakerWorld'),
@@ -2124,7 +2139,7 @@ function ArchiveListRow({
                 title={t('archives.card.openFolder', { name: linkedFolders[0].name })}
                 onClick={(e) => e.stopPropagation()}
               >
-                <FolderOpen className="w-3.5 h-3.5 text-yellow-400" />
+                <FolderOpen className="w-3.5 h-3.5 text-yellow-600 dark:text-yellow-400" />
               </Link>
             )}
           </div>
@@ -2184,8 +2199,8 @@ function ArchiveListRow({
               variant="ghost"
               size="sm"
               onClick={() => setShowReprint(true)}
-              disabled={!canModify('archives', 'reprint', archive.created_by_id)}
-              title={!canModify('archives', 'reprint', archive.created_by_id) ? t('archives.card.noPermissionReprint') : t('archives.card.reprint')}
+              disabled={!archive.file_path || !hasPermission('queue:create') || !canModify('archives', 'reprint', archive.created_by_id)}
+              title={!archive.file_path ? t('archives.card.noFileForReprint') : !hasPermission('queue:create') ? t('archives.permission.noAddToQueue') : !canModify('archives', 'reprint', archive.created_by_id) ? t('archives.card.noPermissionReprint') : t('common.print')}
               className="text-bambu-green hover:text-bambu-green-light hover:bg-bambu-green/10"
             >
               <Play className="w-4 h-4" />
@@ -2240,7 +2255,7 @@ function ArchiveListRow({
             disabled={!canModify('archives', 'delete', archive.created_by_id)}
             title={!canModify('archives', 'delete', archive.created_by_id) ? t('archives.card.noPermissionDelete') : t('archives.card.delete')}
           >
-            <Trash2 className="w-4 h-4 text-red-400" />
+            <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
           </Button>
           <Button
             variant="ghost"
@@ -2288,7 +2303,7 @@ function ArchiveListRow({
       {/* Reprint Modal */}
       {showReprint && (
         <PrintModal
-          mode="reprint"
+          mode="create"
           archiveId={archive.id}
           archiveName={archive.print_name || archive.filename}
           onClose={() => setShowReprint(false)}
@@ -2300,6 +2315,15 @@ function ArchiveListRow({
         <SliceModal
           source={{ kind: 'archive', id: archive.id, filename: archive.print_name || archive.filename || 'model' }}
           onClose={() => setShowSliceModal(false)}
+        />
+      )}
+
+      {/* Run-with-Pipeline Modal (#1425 PR B). Sources from archive — backend
+          reads source_3mf_path, falls back to file_path. */}
+      {showRunPipeline && (
+        <RunWithPipelineModal
+          source={{ kind: 'archive', id: archive.id, filename: archive.print_name || archive.filename || 'model' }}
+          onClose={() => setShowRunPipeline(false)}
         />
       )}
 
@@ -2327,8 +2351,8 @@ function ArchiveListRow({
             <div
               className={
                 (deleteImpactQuery.data?.currently_printing ?? 0) > 0
-                  ? 'text-sm text-red-400 mb-2'
-                  : 'text-sm text-amber-400 mb-2'
+                  ? 'text-sm text-red-600 dark:text-red-400 mb-2'
+                  : 'text-sm text-amber-600 dark:text-amber-400 mb-2'
               }
             >
               {(deleteImpactQuery.data?.currently_printing ?? 0) > 0
@@ -2504,16 +2528,6 @@ function ArchiveListRow({
         />
       )}
 
-      {/* Schedule Modal */}
-      {showSchedule && (
-        <PrintModal
-          mode="add-to-queue"
-          archiveId={archive.id}
-          archiveName={archive.print_name || archive.filename}
-          onClose={() => setShowSchedule(false)}
-        />
-      )}
-
       {/* Hidden file input for source 3MF upload */}
       <input
         ref={source3mfInputRef}
@@ -2618,7 +2632,6 @@ export function ArchivesPage() {
   );
   const [showUpload, setShowUpload] = useState(false);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
-  const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   // Install-step-4 nudge — covers the slicer-side variant of "Store sent files
   // on external storage" that the connection diagnostic can't detect (printer
@@ -3122,34 +3135,20 @@ export function ArchivesPage() {
 
   const hasTopFilters = search || filterPrinter || filterMaterial || filterFavorites || hideFailed || hideDuplicates || filterTag || filterFileType !== 'all';
 
-  // Drag & drop handlers for page-wide upload
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    if (e.dataTransfer.types.includes('Files')) {
-      setIsDraggingOver(true);
-    }
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    // Only hide if leaving the page (not entering a child)
-    if (e.currentTarget === e.target) {
-      setIsDraggingOver(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingOver(false);
-
-    const droppedFiles = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.3mf'));
-    if (droppedFiles.length > 0) {
-      setUploadFiles(droppedFiles);
+  // Page-wide drag-and-drop upload (#1510). The hook covers the three cancel
+  // paths the previous inline implementation missed (drag-out-of-window, Escape,
+  // dragend outside any drop target). Disabled while the upload modal is open
+  // so drags into the modal's own drop zone don't bubble up and flash the page
+  // overlay behind it.
+  const { isDraggingOver, dragHandlers } = usePageFileDrop({
+    disabled: showUpload,
+    extensions: ['.3mf'],
+    onFiles: (files) => {
+      setUploadFiles(files);
       setShowUpload(true);
-    } else if (e.dataTransfer.files.length > 0) {
-      showToast(t('archives.page.only3mfSupported'), 'warning');
-    }
-  }, [showToast, t]);
+    },
+    onRejected: () => showToast(t('archives.page.only3mfSupported'), 'warning'),
+  });
 
   // Keyboard shortcuts
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -3190,16 +3189,14 @@ export function ArchivesPage() {
   return (
     <div
       className="p-4 md:p-8 relative"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      {...dragHandlers}
     >
       {/* Drag & Drop Overlay */}
       {isDraggingOver && (
         <div className="fixed inset-0 z-50 bg-bambu-dark/90 flex items-center justify-center pointer-events-none">
           <div className="border-4 border-dashed border-bambu-green rounded-xl p-12 text-center">
             <Upload className="w-16 h-16 mx-auto mb-4 text-bambu-green" />
-            <p className="text-2xl font-semibold text-white mb-2">Drop .3mf files here</p>
+            <p className="text-2xl font-semibold text-white mb-2">{t('archives.page.dropFilesHere')}</p>
             <p className="text-bambu-gray">{t('archives.releaseToUpload')}</p>
           </div>
         </div>
@@ -3275,19 +3272,19 @@ export function ArchivesPage() {
       )}
 
       {no3MFWarning?.has_fallback && !no3MFWarningDismissed && (
-        <div className="mb-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+        <div className="mb-6 rounded-lg border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-amber-200">
+            <div className="text-sm font-medium text-amber-900 dark:text-amber-200">
               {t('archives.no3mfBanner.title')}
             </div>
-            <div className="text-xs text-amber-200/80 mt-1">
+            <div className="text-xs text-amber-800/90 dark:text-amber-200/80 mt-1">
               {t('archives.no3mfBanner.body')}{' '}
               <a
-                href="https://bambuddy.cool/wiki/getting-started/#step-4-enable-store-sent-files-on-external-storage"
+                href="https://wiki.bambuddy.cool/getting-started/#step-4-enable-store-sent-files-on-external-storage"
                 target="_blank"
                 rel="noreferrer"
-                className="underline hover:text-amber-100 inline-flex items-center gap-1"
+                className="underline hover:text-amber-900 dark:hover:text-amber-100 inline-flex items-center gap-1"
               >
                 {t('archives.no3mfBanner.docsLink')}
                 <ExternalLink className="w-3 h-3" />
@@ -3296,7 +3293,7 @@ export function ArchivesPage() {
           </div>
           <button
             onClick={dismissNo3MFWarning}
-            className="text-amber-200/60 hover:text-amber-200 flex-shrink-0 p-1 -m-1"
+            className="text-amber-800/70 dark:text-amber-200/60 hover:text-amber-900 dark:hover:text-amber-200 flex-shrink-0 p-1 -m-1"
             title={t('archives.no3mfBanner.dismissLabel')}
             aria-label={t('archives.no3mfBanner.dismissLabel')}
           >
@@ -3545,7 +3542,7 @@ export function ArchivesPage() {
               onClick={() => setFilterFavorites(!filterFavorites)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors flex-shrink-0 ${
                 filterFavorites
-                  ? 'bg-yellow-500/20 border-yellow-500 text-yellow-400'
+                  ? 'bg-yellow-100 dark:bg-yellow-500/20 border-yellow-500 text-yellow-700 dark:text-yellow-400'
                   : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
               }`}
               title={filterFavorites ? t('archives.showAll') : t('archives.showFavoritesOnly')}
@@ -3557,7 +3554,7 @@ export function ArchivesPage() {
               onClick={() => setHideFailed(!hideFailed)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors flex-shrink-0 ${
                 hideFailed
-                  ? 'bg-red-500/20 border-red-500 text-red-400'
+                  ? 'bg-red-100 dark:bg-red-500/20 border-red-500 text-red-700 dark:text-red-400'
                   : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
               }`}
               title={hideFailed ? t('archives.showFailedPrints') : t('archives.hideFailedPrints')}
@@ -3569,7 +3566,7 @@ export function ArchivesPage() {
               onClick={() => setHideDuplicates(!hideDuplicates)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors flex-shrink-0 ${
                 hideDuplicates
-                  ? 'bg-purple-500/20 border-purple-500 text-purple-400'
+                  ? 'bg-purple-100 dark:bg-purple-500/20 border-purple-500 text-purple-700 dark:text-purple-400'
                   : 'bg-bambu-dark border-bambu-dark-tertiary text-bambu-gray hover:text-white'
               }`}
               title={t('archives.hideDuplicates')}
@@ -3917,11 +3914,11 @@ export function ArchivesPage() {
                           <td className="px-4 py-3 text-bambu-gray-light">{entry.created_by_username || '—'}</td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              entry.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-                              entry.status === 'failed' ? 'bg-red-500/20 text-red-400' :
-                              entry.status === 'stopped' ? 'bg-yellow-500/20 text-yellow-400' :
-                              entry.status === 'cancelled' ? 'bg-orange-500/20 text-orange-400' :
-                              entry.status === 'skipped' ? 'bg-blue-500/20 text-blue-400' :
+                              entry.status === 'completed' ? 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-400' :
+                              entry.status === 'failed' ? 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-400' :
+                              entry.status === 'stopped' ? 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-400' :
+                              entry.status === 'cancelled' ? 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400' :
+                              entry.status === 'skipped' ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400' :
                               'bg-gray-500/20 text-gray-400'
                             }`}>
                               {entry.status}
@@ -3991,7 +3988,7 @@ export function ArchivesPage() {
                                     ? t('archives.log.deleteEntryTitle')
                                     : t('archives.permission.noDelete')
                                 }
-                                className="text-bambu-gray hover:text-red-400 disabled:opacity-40 disabled:hover:text-bambu-gray transition-colors"
+                                className="text-bambu-gray hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40 disabled:hover:text-bambu-gray transition-colors"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>

@@ -49,15 +49,17 @@ logger = logging.getLogger(__name__)
 # entries also satisfy "not in the allowlist", so they fail closed regardless.
 #
 # Mapping rationale (see wiki/features/api-keys.md):
-#   can_read_status     → every ``*_READ`` + camera + stats + system + websocket
-#   can_queue           → queue write ops + archive reprint
-#   can_control_printer → physical printer + smart-plug control
-#   can_manage_library  → library upload/own + MakerWorld import (separate
-#                         trust level from queue management, hence its own flag)
-#   admin-only          → unmapped (default-deny); covers all create/update/
-#                         delete of admin resources, settings writes, user/
-#                         group/api-key/backup admin ops, discovery scan,
-#                         cloud auth, library ALL-ownership perms, purges
+#   can_read_status       → every ``*_READ`` + camera + stats + system + websocket
+#   can_queue             → queue write ops + archive reprint
+#   can_control_printer   → physical printer + smart-plug control
+#   can_manage_library    → library upload/own + MakerWorld import (separate
+#                           trust level from queue management, hence its own flag)
+#   can_manage_inventory  → spool/catalog/forecast writes + SpoolBuddy kiosk writes
+#   can_manage_maintenance→ per-printer maintenance log/reset + type-catalog CRUD
+#   admin-only            → unmapped (default-deny); covers all create/update/
+#                           delete of admin resources, settings writes, user/
+#                           group/api-key/backup admin ops, discovery scan,
+#                           cloud auth, library ALL-ownership perms, purges
 _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
     # can_read_status — read-only access to status, history, and configuration
     Permission.PRINTERS_READ: "can_read_status",
@@ -88,6 +90,7 @@ _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
     Permission.EXTERNAL_LINKS_READ: "can_read_status",
     Permission.FIRMWARE_READ: "can_read_status",
     Permission.AMS_HISTORY_READ: "can_read_status",
+    Permission.PRINTER_SENSOR_HISTORY_READ: "can_read_status",
     Permission.STATS_READ: "can_read_status",
     Permission.STATS_FILTER_BY_USER: "can_read_status",
     Permission.SYSTEM_READ: "can_read_status",
@@ -111,13 +114,21 @@ _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
     Permission.PRINTERS_AMS_RFID: "can_control_printer",
     Permission.PRINTERS_CLEAR_PLATE: "can_control_printer",
     Permission.SMART_PLUGS_CONTROL: "can_control_printer",
-    # can_manage_library — file-manager scope (upload/rename/delete OWN library
+    # can_manage_library — file-manager scope (upload/rename/delete library
     # entries + MakerWorld import which downloads files into the library).
-    # Bulk/ALL-ownership library ops (UPDATE_ALL / DELETE_ALL / PURGE) stay
-    # admin-only because they cross the user boundary.
+    # OWN and ALL ownership variants map to the same scope so the
+    # `require_ownership_permission` checker (which gates on `all_perm`)
+    # passes the API key through. This matches `can_queue` and the
+    # archives/inventory scopes — API keys have no per-row ownership identity
+    # (line 1663), so splitting OWN/ALL across allowlist/denylist made the
+    # whole library curation surface unreachable for API keys (#1832).
+    # LIBRARY_PURGE stays admin-only as a genuinely destructive op that
+    # bypasses the soft-delete window.
     Permission.LIBRARY_UPLOAD: "can_manage_library",
     Permission.LIBRARY_UPDATE_OWN: "can_manage_library",
+    Permission.LIBRARY_UPDATE_ALL: "can_manage_library",
     Permission.LIBRARY_DELETE_OWN: "can_manage_library",
+    Permission.LIBRARY_DELETE_ALL: "can_manage_library",
     Permission.MAKERWORLD_IMPORT: "can_manage_library",
     # can_manage_inventory — inventory write scope. Covers the documented
     # spool/catalog/forecast write surface AND the SpoolBuddy kiosk endpoints
@@ -129,6 +140,44 @@ _APIKEY_SCOPE_BY_PERMISSION: dict[Permission, str] = {
     Permission.INVENTORY_UPDATE: "can_manage_inventory",
     Permission.INVENTORY_DELETE: "can_manage_inventory",
     Permission.INVENTORY_FORECAST_WRITE: "can_manage_inventory",
+    # can_manage_maintenance — carved out of the admin denylist so HA-style
+    # automations can log "cleaned nozzle" / reset a maintenance counter via
+    # `POST /maintenance/items/{item_id}/perform` without granting broader
+    # printer control or settings write (#1832 follow-up). Also covers the
+    # per-printer maintenance CRUD (assign/remove items, edit intervals) and
+    # the type-catalog CRUD — the type catalog is a config surface (system
+    # types are auto-seeded, custom types are user-defined), so grouping it
+    # with the item writes matches the operator mental model of "keys that
+    # log maintenance can also manage what gets tracked." MAINTENANCE_READ
+    # stays under can_read_status.
+    Permission.MAINTENANCE_CREATE: "can_manage_maintenance",
+    Permission.MAINTENANCE_UPDATE: "can_manage_maintenance",
+    Permission.MAINTENANCE_DELETE: "can_manage_maintenance",
+    # can_manage_archives — print-history curation. Carved out of the admin
+    # denylist so automations can prune old prints via API key (#1888): the
+    # archive delete/update routes gate on
+    # ``require_ownership_permission(ARCHIVES_*_ALL, ARCHIVES_*_OWN)``, which
+    # resolves the ALL permission for API keys (no per-row ownership identity,
+    # same as can_queue / can_manage_library), so OWN and ALL map to the same
+    # scope. ARCHIVES_PURGE stays admin-only (see denylist) as a genuinely
+    # destructive op that drops the stats contribution, mirroring LIBRARY_PURGE.
+    # ARCHIVES_REPRINT_* stays under can_queue (it enqueues a print).
+    Permission.ARCHIVES_CREATE: "can_manage_archives",
+    Permission.ARCHIVES_UPDATE_OWN: "can_manage_archives",
+    Permission.ARCHIVES_UPDATE_ALL: "can_manage_archives",
+    Permission.ARCHIVES_DELETE_OWN: "can_manage_archives",
+    Permission.ARCHIVES_DELETE_ALL: "can_manage_archives",
+    # can_manage_projects — project curation. Carved out of the admin denylist
+    # so automations can create projects and batch-add archives via API key
+    # (#1893). The project mutation routes gate on plain
+    # ``RequirePermissionIfAuthEnabled(Permission.PROJECTS_*)`` (no OWN/ALL
+    # ownership split — projects have no per-row ownership permission), so the
+    # three CRUD permissions map directly to the one scope. Membership edits
+    # (e.g. add-archives-to-project) gate on PROJECTS_UPDATE, so they're covered.
+    # PROJECTS_READ stays under can_read_status (unchanged).
+    Permission.PROJECTS_CREATE: "can_manage_projects",
+    Permission.PROJECTS_UPDATE: "can_manage_projects",
+    Permission.PROJECTS_DELETE: "can_manage_projects",
     # can_access_cloud — narrow opt-in scope, gated by the router-level
     # ``_cloud_api_key_gate`` and additionally enforced here so the route-
     # level ``cloud_caller(Permission.CLOUD_AUTH)`` dep also fails closed
@@ -176,24 +225,29 @@ _APIKEY_DENIED_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.PRINTERS_CREATE,
         Permission.PRINTERS_UPDATE,
         Permission.PRINTERS_DELETE,
-        Permission.ARCHIVES_CREATE,
-        Permission.ARCHIVES_UPDATE_OWN,
-        Permission.ARCHIVES_UPDATE_ALL,
-        Permission.ARCHIVES_DELETE_OWN,
-        Permission.ARCHIVES_DELETE_ALL,
+        # ARCHIVES_CREATE / _UPDATE_OWN / _UPDATE_ALL / _DELETE_OWN /
+        # _DELETE_ALL moved to the allowlist under `can_manage_archives`
+        # (#1888) — split between allow/deny made the whole archive-management
+        # surface unreachable for API keys via `require_ownership_permission`
+        # (same regression class as the library/maintenance carve-outs in
+        # #1832). ARCHIVES_PURGE stays denied as a genuinely destructive op
+        # that drops the print's stats contribution.
         Permission.ARCHIVES_PURGE,
-        Permission.LIBRARY_UPDATE_ALL,
-        Permission.LIBRARY_DELETE_ALL,
+        # LIBRARY_UPDATE_ALL / LIBRARY_DELETE_ALL moved to the allowlist
+        # under `can_manage_library` (#1832) — split between allow/deny made
+        # the whole library curation surface unreachable for API keys via
+        # `require_ownership_permission`. Purge stays denied as a genuinely
+        # destructive op.
         Permission.LIBRARY_PURGE,
-        Permission.PROJECTS_CREATE,
-        Permission.PROJECTS_UPDATE,
-        Permission.PROJECTS_DELETE,
+        # PROJECTS_CREATE / _UPDATE / _DELETE moved to the allowlist under
+        # `can_manage_projects` (#1893) — they were denied for every API key,
+        # making the project-management surface (create, add-archives, delete)
+        # unreachable, same regression class as the archives/library carve-outs.
         Permission.FILAMENTS_CREATE,
         Permission.FILAMENTS_UPDATE,
         Permission.FILAMENTS_DELETE,
-        Permission.MAINTENANCE_CREATE,
-        Permission.MAINTENANCE_UPDATE,
-        Permission.MAINTENANCE_DELETE,
+        # MAINTENANCE_CREATE / MAINTENANCE_UPDATE / MAINTENANCE_DELETE moved
+        # to the allowlist under `can_manage_maintenance` (#1832 follow-up).
         Permission.KPROFILES_CREATE,
         Permission.KPROFILES_UPDATE,
         Permission.KPROFILES_DELETE,
@@ -210,6 +264,13 @@ _APIKEY_DENIED_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.SMART_PLUGS_DELETE,
         # Network scanning — operator only (no API-key scope for this).
         Permission.DISCOVERY_SCAN,
+        # Slicer Pipelines (#1425) — admin authoring + the print-spending Run
+        # action. PR A only ships CRUD; PR B / PR C may move PIPELINES_RUN onto
+        # `can_queue` (it queues prints) once the run dispatch lands. PR A keeps
+        # all three denied so they fail closed for any API-key surface.
+        Permission.PIPELINES_READ,
+        Permission.PIPELINES_WRITE,
+        Permission.PIPELINES_RUN,
     }
 )
 
@@ -421,9 +482,41 @@ def _get_jwt_secret() -> str:
 SECRET_KEY = _get_jwt_secret()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours (M-2: reduced from 7 days)
+# Hard ceiling for the admin-configurable session policy (#1706). 30 days
+# matches the Pydantic le=720 on AppSettings.session_max_hours; defense in
+# depth so a tampered settings row can't request an absurd lifetime.
+SESSION_MAX_HOURS_HARD_CEILING = 720
 
 # HTTP Bearer token
 security = HTTPBearer(auto_error=False)
+
+
+async def resolve_session_max_minutes(db: AsyncSession) -> int:
+    """Return the session-lifetime ceiling (minutes) honoured by login routes.
+
+    Reads ``session_max_hours`` from the settings table (#1706), clamps to
+    [1h, 720h], and falls back to the audit-default 24h if the row is
+    missing, blank, or unparseable.
+
+    DB errors are NOT caught here — login is already in a DB transaction and
+    a broken DB must abort the login rather than silently extend or shrink
+    the session lifetime.
+    """
+    default_minutes = ACCESS_TOKEN_EXPIRE_MINUTES
+    result = await db.execute(select(Settings).where(Settings.key == "session_max_hours"))
+    row = result.scalar_one_or_none()
+    if row is None or not row.value:
+        return default_minutes
+    try:
+        hours = int(row.value)
+    except (TypeError, ValueError):
+        return default_minutes
+    if hours < 1:
+        return default_minutes
+    if hours > SESSION_MAX_HOURS_HARD_CEILING:
+        hours = SESSION_MAX_HOURS_HARD_CEILING
+    return hours * 60
+
 
 # --- Slicer download tokens ---
 # Short-lived, single-use tokens for slicer protocol handlers that can't send
@@ -649,7 +742,9 @@ def _is_token_fresh(iat: int | float | None, user: User) -> bool:
     Used to invalidate all sessions after a password reset/change (M-R7-B).
     All tokens without an iat claim are unconditionally rejected — every token
     issued by this server carries iat, so absence means the token is forged or
-    from a pre-iat code path whose max TTL (24 h) has long since expired.
+    from a pre-iat code path whose max TTL at the time (24 h) has long since
+    expired. The post-#1706 admin-set ceiling does not relax this — an iat-less
+    token still cannot have been issued by current code.
     """
     if iat is None:
         return False

@@ -24,6 +24,11 @@
 </p>
 
 <p align="center">
+  <sub><strong>Backed by</strong></sub><br>
+  <a href="https://northpole3dprinting.com/"><img src="static/img/sponsors/northpole-3d-printing.jpg" alt="North Pole 3D Printing" height="60"></a>
+</p>
+
+<p align="center">
   <a href="https://demo.bambuddy.cool"><strong>🎮 Try the Live Demo</strong></a> •
   <a href="#-features">Features</a> •
   <a href="#-screenshots">Screenshots</a> •
@@ -106,6 +111,20 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 
 ---
 
+## 🧩 NEW: Slicer Pipelines — Save a Recipe, Reuse in One Click
+
+**Stop re-picking the same printer + process + filament + bed-type combination every slice.** Save a Slicer **Pipeline** once from the Slice dialog, then apply the whole bundle to any file with a single click — from File Manager, Archives, or MakerWorld imports.
+
+- 🧩 **One-click reuse** — A pipeline captures the entire Slice modal selection (printer + process + per-AMS-slot filaments + bed type) and surfaces as **Run with pipeline → \<name\>** on every sliceable row.
+- 🎯 **Specific printer or printer class** — Pin a pipeline to one printer, or to a *class* (e.g. *any X1C*) and let the queue scheduler pick the first available match. Identical-fleet farms get a single recipe instead of one-per-printer.
+- 🪢 **Multi-copy fanout** — Slice once, dispatch up to N copies. With class targeting the copies fan out across the matching printers in parallel — **Spread** (fastest wall-clock), **Single printer** (minimise colour-change overhead), or **First N** (one to each).
+- 📊 **Runs dashboard** — A new **Pipelines** tab on the Print Queue page lists every run with colour-coded status badges (queued / slicing / dispatching / in-progress / completed / partial-failure / failed / cancelled), per-copy detail on expand, filter dropdowns (Pipeline / Status / Target), and a **Retry failed** button that re-runs only the copies that didn't complete — successful copies are never re-printed.
+- 🔒 **Permission-gated** — Three permissions (`pipelines:read` / `pipelines:write` / `pipelines:run`) let you split authoring the recipe from spending filament with it.
+
+👉 **[Slicer Pipelines Guide →](https://wiki.bambuddy.cool/features/slicer-pipelines/)**
+
+---
+
 ## Why Bambuddy?
 
 - **Own your data** — All print history stored locally, no cloud dependency
@@ -137,6 +156,7 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 ### 📊 Monitoring & Control
 - Real-time printer status via WebSocket
 - Live camera streaming (MJPEG) & snapshots with multi-viewer support — most Bambu printers only allow one upstream connection, so Bambuddy fans out a single shared stream to all browser tabs / cards / overlays
+- **Cam Wall view** — Toggle the Printers page from cards into a responsive grid of camera tiles for at-a-glance monitoring across the whole farm. On-screen tiles stream live up to a configurable cap (default 4) so RPi installs stay sustainable; the rest fall back to periodic snapshot polling, and off-screen tiles pause entirely. Per-user settings (live cap, snapshot interval); click any tile to open the floating viewer or the dedicated camera window depending on your existing camera-view preference
 - **Long-lived camera tokens** for Home Assistant / Frigate / kiosks — mint a token from Settings → API Keys, paste it once, capped at 365 days, revocable at any time (no infinite tokens — leaked permanent tokens are unsafe by design)
 - **Streaming overlay for OBS** - Embeddable page with camera + status for live streaming (`/overlay/:printerId`), configurable FPS (`?fps=30`), status-only mode (`?camera=false`)
 - External camera support (MJPEG, RTSP, HTTP snapshot, USB/V4L2) with layer-based timelapse
@@ -145,20 +165,25 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 - Printer control (stop, pause, resume, chamber light, print speed, **airduct mode** for P2S/H2*, **temperature setpoints** for nozzle / bed / **chamber heater** on H2C/H2D/H2DPro/H2S/X2D, **Z-jog / XY-jog / extruder jog**, customizable temperature & fan presets under Settings → Workflow)
 - **Status badges on printer card**: SD Card (green / red), Enclosure Door (green / yellow — X1/P1S/P2S/H2*), Airduct Mode (cooling / heating)
 - **Force Refresh** menu item — request a full status push from the printer without reconnecting
+- **Maintenance Mode** — put a printer "out of service" without removing it. Toggle from the card's three-dot menu, the in-card amber banner, or the Edit Printer dialog; the printer disconnects MQTT, drops out of queue dispatch, the scheduler, model-based filament lookups, metrics, and notifications until you take it out again. The card stays visible (amber wrench banner + Exit button) so the printer never disappears from your dashboard. Useful for parallel Bambuddy installs sharing the same hardware, printers under repair or awaiting parts, and temporary suspension.
 - Bulk printer actions (multi-select cards, then stop/pause/resume/clear all — select by state or location)
 - Printer search and filters — live search by name/model/location/serial plus status and location dropdown filters (WebSocket-reactive, mobile-friendly)
 - Resizable printer cards (S/M/L/XL)
 - Skip objects during print
 - AMS slot RFID re-read
 - **AMS slot Load / Unload from the printer card** — Hover any AMS slot or external spool, click the menu button, and load that tray or unload the currently-loaded one without going to the touchscreen; supports dual-extruder H2D (Ext-L / Ext-R drive their own nozzle)
+- **AMS Filament Backup status + control with pair view** — Mirrors BambuStudio's per-printer "AMS Filament Backup" auto-switch (when a spool runs out, the printer rolls over to a same-preset, same-colour spool in another slot). A small badge in the Filaments section header on each printer card shows the live state (blue circular-arrow icon = ON, dim = OFF, "?" = A1 family with no `cfg` field yet); click to open the AMS Filament Backup modal — a BambuStudio Auto Refill-style ring graphic per backup pair, with the filament colour as the ring fill and member slot labels (e.g. `A·1`, `B·3`) on contrast-aware pills around the band. Dual-extruder printers (H2D / H2C / X2D) carry an `R` / `L` badge per ring because the firmware can't cross extruders. State syncs in real time whether you toggled from Bambuddy, BambuStudio, or the printer's touchscreen. Bambuddy's "insufficient filament" check is **backup-aware**: when Backup is ON, the deficit check pools remaining grams across same-`(preset, colour)` spools on the printer, so the warning doesn't fire spuriously when the firmware will swap to a peer mid-print (#1762). Bambuddy's **Prefer Lowest Remaining Filament** sort also respects the toggle — when Backup is OFF the dispatcher skips the prefer-lowest sort entirely so it won't reach for a near-empty spool the printer can't roll off of.
 - AMS slot configuration (model-filtered presets, K profiles, color picker, pre-population for configured slots)
 - AMS info card (hover for serial number, firmware version) with custom friendly names that persist across printers
-- **AMS remote drying** — Start, monitor, and stop drying sessions for AMS 2 Pro and AMS-HT directly from the Printers page with filament-based temperature/duration presets, optional spool rotation; automatic PSU detection and HMS power error reporting
+- **AMS remote drying** — Start, monitor, and stop drying sessions for AMS 2 Pro and AMS-HT directly from the Printers page with filament-based temperature/duration presets, optional spool rotation; automatic PSU detection and HMS power error reporting. Rotate-spool toggle is disabled per-AMS when any tray has filament threaded into the feed tube (the AMS mechanism is locked there — rotating would jam the filament)
 - **Queue auto-drying** — Automatically dry filament between scheduled prints when humidity exceeds threshold; configurable presets per filament type, optional blocking mode
 - **Ambient drying** — Automatically keep filament dry on idle printers based on humidity, regardless of whether prints are queued
+- **Continue drying while printing** — On capable hardware (H2D 01.03.00.00+, H2C / H2S / P2S / H2D Pro 01.02.00.00+, X2D / A2L 01.01.00.00+, X1C 01.11.02.00+), auto-drying can keep running during a print. Default off, opt-in toggle in Settings → Print Queue. Drying temperature is automatically capped 5°C below the idle preset (floor 40°C) to protect spools inside the hot enclosure
 - Configurable drying presets per filament type (temperature & duration for AMS 2 Pro and AMS-HT)
+- **Per-filament humidity threshold** — Set a different humidity trigger per filament type (e.g. Nylon at 20%, PLA at 60%, ASA at 30%) instead of one global value. Mixed-material AMS units use the most-restrictive threshold across the loaded spools so a single PLA + Nylon unit triggers at Nylon's level. Drives both the auto-drying scheduler and the hourly humidity alarm so the two can never disagree on whether a unit is "too humid"
 - Dual external spool support for H2D (Ext-L / Ext-R)
-- HMS error monitoring with history and clear errors
+- **HMS error monitoring with one-click actions** — Live HMS error log with history and the same Resume / Stop / Continue / Retry / Check Assistant / Don't Remind Me action buttons BambuStudio shows. Click and the matching MQTT command goes back to the printer — no more walking to the device just to dismiss a paused-print dialog. Catalog covers every Bambu model (X1 / P1 / A1 / H2 series); buttons are translated in all 11 supported locales
+- **Heater history charts** — Bambuddy logs nozzle, bed, and chamber readings every minute and surfaces them via a tiny chart icon on each heater tile in the printer card. Click for a per-heater modal with current / average / min / max stats, target overlay, and a 6h / 24h / 48h / 7d time range — works on read-only chamber sensors (X1C / P2S) too. AMS humidity and temperature get the same treatment (already shipped).
 - Print success rates & trends
 - Filament usage tracking
 - Cost analytics & failure analysis
@@ -167,7 +192,7 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 - CSV/Excel export
 
 ### ⏰ Scheduling & Automation
-- **Background print dispatch** — FTP uploads and print-start commands run in the background with real-time WebSocket progress toasts (per-job upload bars, status badges, cancel button)
+- **Unified dispatch through the queue** — Every print Bambuddy starts (File Manager, archive reprint, printer-card upload-and-print, scheduled queue items) flows through the same queue scheduler, so each print is visible on the queue page, attributable to the user that started it, deficit-checked, and cancellable from one place. FTP uploads and print-start commands run in the background with real-time WebSocket progress toasts (per-job upload bars, status badges, cancel button). Installations with custom groups or API keys: the immediate-print actions now require the `queue:create` permission alongside the existing `printers:control` — see [the permissions guide](https://wiki.bambuddy.cool/admin/permissions/) if you've granted control without queue-create
 - Print queue with three tabs (Queue / History / Timeline), multi-select drag-and-drop, batch grouping, and a Gantt-style timeline
 - Multi-printer selection (send to multiple printers at once)
 - Batch grouping — multi-plate prints auto-group into a collapsible row; any 2+ selected items can be grouped manually via "Group as batch", with ungroup on the batch parent
@@ -184,6 +209,7 @@ Optional but recommended — drop the [`slicer-api/` Compose stack](slicer-api/R
 - Queue Only mode (stage without auto-start)
 - Clear plate confirmation between queued prints (can be disabled in settings for farm workflows)
 - Auto-print G-code injection (per-model start/end snippets for Farmloop, SwapMod, AutoClear, Printflow 3D — toggle per queue item)
+- **Preheat & Heat Soak before queued prints** — Heat the bed (and the chamber, on supported printers) and hold at temperature between FTP upload and print start. Per-print Inherit / On / Off override in the Print Options panel; per-filament chamber-target map under Settings → Workflow so PA wants 50°C, ABS 45°C, PETG-CF 40°C, PLA 0°C (skips chamber phase automatically). Hardware-aware: H-series / X2D / X1E actively heat the chamber via M141; X1C / P2S rely on bed radiation with a chamber-sensor wait; P1S / P1P / A1 family have no chamber sensor so only the soak timer applies. The cooling/heating airduct flap on H-series / X2D / P2S auto-switches to match the resolved chamber target — preheat for ABS opens nothing and recirculates warm air; preheat for PLA opens the exhaust and vents — so engineering filaments actually reach target instead of fighting the open flap, and PLA prints don't inherit a previously-hot recirculation. M191 (wait-for-chamber-temp) isn't honoured by Bambu firmware, so doing this at the orchestration layer is the only place it works
 - Smart plug integration (Tasmota, Home Assistant, MQTT, REST/Webhook)
 - REST smart plugs: Control any device with an HTTP API (openHAB, ioBroker, FHEM, Node-RED) with separate power/energy URLs and unit multipliers
 - MQTT smart plugs: Subscribe to Zigbee2MQTT, Shelly, or any MQTT topic for energy monitoring
@@ -639,8 +665,8 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Run
-uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+# Run (--loop asyncio avoids a uvloop TLS bug that can truncate VP FTP uploads)
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --loop asyncio
 ```
 
 Open **http://localhost:8000** and add your printer!

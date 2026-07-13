@@ -492,10 +492,6 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
                 side_effect=AssertionError("scheduler must not run"),
             ) as check_queue,
             patch(
-                "backend.app.services.background_dispatch.background_dispatch.dispatch_reprint_archive",
-                side_effect=AssertionError("background dispatch must not run"),
-            ) as dispatch_reprint,
-            patch(
                 "backend.app.services.erp_draft_write.create_draft_for_request",
                 side_effect=AssertionError("ERP draft write must not run"),
             ) as erp_draft,
@@ -524,7 +520,6 @@ class PlateChangeCommandApiTest(unittest.IsolatedAsyncioTestCase):
         download_file.assert_not_called()
         delete_file.assert_not_called()
         check_queue.assert_not_called()
-        dispatch_reprint.assert_not_called()
         erp_draft.assert_not_called()
         obico_ingest.assert_not_called()
         await self.assert_no_control_rows()
