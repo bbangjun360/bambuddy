@@ -168,6 +168,10 @@ the existing print-log/statistics tests.
   scenarios). Chromium desktop/mobile checks were nonblank with no overflow,
   error overlay, console error, or failed response. Main port 18000 remained
   healthy and the rebuilt 18114 app log contained no startup error.
+- [x] 2026-07-14 08:02 KST: Merged current `origin/farm-main` at `24196873`
+  without conflicts, leaving the branch zero commits behind. Post-merge focused
+  regression again passed 74 tests plus 12 subtests; `make verify-fast`, rebuilt
+  PostgreSQL `make verify-full`, and desktop/mobile Chromium checks all passed.
 
 # Decisions
 
@@ -352,6 +356,9 @@ Final shared gates passed with 194 harness tests, two characterization tests,
 and two scenarios. The rebuilt PostgreSQL app served the ledger and setup UI on
 18114 without server, browser, console, or network errors; the main deployment
 on 18000 remained healthy throughout.
+
+After merging `origin/farm-main` at `24196873`, the same focused, fast, full,
+PostgreSQL, and browser checks passed again on the combined HEAD.
 
 Draft PR #95 is published and review-ready but remains draft pending explicit
 operator approval because it adds schema and a shared print-log hook. Later
