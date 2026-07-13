@@ -116,7 +116,8 @@ Do not read `docs/archive/FULL_SPEC_v1.1.md` for this Work Package.
 - [x] 2026-07-13: Chrome fixture checks at 1440x1000 and 390x844 rendered one
   idle, paused, problem, and offline card, opened the compact Filters menu,
   showed no horizontal overflow, and reported zero console or HTTP failures.
-- [ ] Publish the Draft PR.
+- [x] 2026-07-13: Published Draft PR #94 for operator visual review; merge remains
+  blocked until approval is recorded in the operator channel.
 
 ## Decisions
 
@@ -241,7 +242,7 @@ fixture-backed desktop/mobile browser inspection. The browser run had four
 distinct card states, working compact Filters, no horizontal overflow, and zero
 console or failed HTTP responses.
 
-This remains Draft pending operator visual approval. After approval and merge,
+This remains Draft PR #94 pending operator visual approval. After approval and merge,
 the next UI redesign Work Package should address the print queue as the next
 operator workflow named in `workpacks/BACKLOG.md`; library/inventory and settings
 remain later independent slices.

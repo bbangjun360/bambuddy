@@ -65,8 +65,8 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    overview) ships first and is routine-mergeable.
 9. **Operator UI redesign — started by WP-112** — operator-approved 2026-07-13
    after upstream v0.2.4.9 integration. WP-112 changes only the shared operator
-   shell and was visually approved and merged as PR #93. WP-113 is the next
-   approved slice and changes only the printer fleet surface: status summary,
+   shell and was visually approved and merged as PR #93. WP-113 is Draft PR #94
+   and changes only the printer fleet surface: status summary,
    responsive tools, and printer-card scan hierarchy. Queue,
    library/inventory, and settings redesigns follow as separate observable Work
    Packages after operators review each preceding slice; no page workflow,
