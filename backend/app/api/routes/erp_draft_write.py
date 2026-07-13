@@ -28,6 +28,7 @@ def get_erp_draft_client() -> ErpDraftWriteClient | None:
     return ErpDraftWriteClient(
         settings.farm_erp_base_url,
         settings.farm_erp_api_token,
+        api_prefix=settings.farm_erp_api_prefix,
         timeout=settings.farm_erp_timeout_seconds,
     )
 
@@ -66,6 +67,7 @@ async def create_draft_write(
             quantity_completed=body.quantity_completed,
             completed_at=body.completed_at,
             client=erp_client,
+            erp_timezone=settings.farm_erp_timezone,
         )
         await db.commit()
         await db.refresh(record)

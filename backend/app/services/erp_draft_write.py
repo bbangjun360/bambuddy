@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from sqlalchemy import select
@@ -34,6 +36,16 @@ RECONCILIATION_MATCHED = "MATCHED"
 RECONCILIATION_MISMATCH = "MISMATCH"
 
 DOCTYPE = "Farm Draft Result"
+DRAFT_LOOKUP_FIELDS = [
+    "name",
+    "docstatus",
+    "status",
+    "farm_event_id",
+    "production_request_id",
+    "external_work_order_id",
+    "production_item",
+    "quantity_completed",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +100,15 @@ class ErpDraftWriteClient:
         base_url: str,
         api_token: str | None,
         *,
+        api_prefix: str = "/api",
         timeout: float = 5.0,
         http_client: httpx.AsyncClient | None = None,
     ):
+        normalized_prefix = api_prefix.strip().strip("/")
+        if not normalized_prefix:
+            raise ValueError("ERP API prefix must not be empty")
         self.base_url = base_url.rstrip("/")
+        self.api_prefix = f"/{normalized_prefix}"
         self.api_token = api_token
         self.timeout = timeout
         self._client = http_client or httpx.AsyncClient(timeout=timeout)
@@ -110,9 +127,25 @@ class ErpDraftWriteClient:
         return headers
 
     def _resource_url(self) -> str:
-        return f"{self.base_url}/erp/api/resource/{quote(DOCTYPE, safe='')}"
+        return f"{self.base_url}{self.api_prefix}/resource/{quote(DOCTYPE, safe='')}"
 
     async def create_or_lookup_draft_result(self, payload: dict[str, Any], *, idempotency_key: str) -> DraftWriteClientResult:
+        farm_event_id = _nonempty_str(payload.get("farm_event_id"))
+        if not farm_event_id or farm_event_id != idempotency_key:
+            raise ErpDraftWriteError(
+                ERP_DRAFT_INVALID_PAYLOAD,
+                "ERP draft farm_event_id must match the idempotency key",
+                http_status=422,
+                retryable=False,
+            )
+        try:
+            document = await self.lookup_draft_result(farm_event_id)
+        except ErpDraftWriteError as exc:
+            if exc.code != ERP_DRAFT_NOT_FOUND:
+                raise
+        else:
+            return DraftWriteClientResult(document=document, created=False, recovered_after_timeout=False)
+
         try:
             document = await self.create_draft_result(payload, idempotency_key=idempotency_key)
             return DraftWriteClientResult(document=document, created=True, recovered_after_timeout=False)
@@ -120,9 +153,11 @@ class ErpDraftWriteClient:
             if exc.code != ERP_DRAFT_TIMEOUT:
                 raise
             try:
-                document = await self.lookup_draft_result(str(payload.get("farm_event_id") or idempotency_key))
-            except ErpDraftWriteError:
-                raise exc
+                document = await self.lookup_draft_result(farm_event_id)
+            except ErpDraftWriteError as lookup_exc:
+                if lookup_exc.retryable:
+                    raise exc
+                raise
             return DraftWriteClientResult(document=document, created=False, recovered_after_timeout=True)
 
     async def create_draft_result(self, payload: dict[str, Any], *, idempotency_key: str) -> DraftDocument:
@@ -140,10 +175,15 @@ class ErpDraftWriteClient:
         return self._document_from_response(response)
 
     async def lookup_draft_result(self, farm_event_id: str) -> DraftDocument:
+        params = {
+            "filters": json.dumps([["farm_event_id", "=", farm_event_id]], separators=(",", ":")),
+            "fields": json.dumps(DRAFT_LOOKUP_FIELDS, separators=(",", ":")),
+            "limit_page_length": "2",
+        }
         try:
             response = await self._client.get(
                 self._resource_url(),
-                params={"farm_event_id": farm_event_id},
+                params=params,
                 headers=self._headers(),
                 timeout=self.timeout,
             )
@@ -151,9 +191,9 @@ class ErpDraftWriteClient:
             raise ErpDraftWriteError(ERP_DRAFT_TIMEOUT, "ERP draft lookup timed out", http_status=504, retryable=True) from exc
         except httpx.HTTPError as exc:
             raise ErpDraftWriteError(ERP_DRAFT_UPSTREAM_ERROR, "ERP draft lookup failed", http_status=502, retryable=True) from exc
-        return self._document_from_response(response)
+        return self._document_from_collection_response(response)
 
-    def _document_from_response(self, response: httpx.Response) -> DraftDocument:
+    def _envelope_from_response(self, response: httpx.Response) -> dict[str, Any]:
         if response.status_code in (401, 403):
             raise ErpDraftWriteError(ERP_DRAFT_AUTH_FAILED, "ERP draft authentication failed", http_status=401, retryable=False)
         if response.status_code == 429:
@@ -169,9 +209,30 @@ class ErpDraftWriteClient:
             envelope = response.json()
         except ValueError as exc:
             raise ErpDraftWriteError(ERP_DRAFT_INVALID_PAYLOAD, "ERP draft returned non-JSON payload", http_status=422, retryable=False) from exc
-        if not isinstance(envelope, dict) or not isinstance(envelope.get("data"), dict):
+        if not isinstance(envelope, dict) or "data" not in envelope:
             raise ErpDraftWriteError(ERP_DRAFT_INVALID_PAYLOAD, "ERP draft returned invalid envelope", http_status=422, retryable=False)
-        return validate_draft_document(envelope["data"])
+        return envelope
+
+    def _document_from_response(self, response: httpx.Response) -> DraftDocument:
+        data = self._envelope_from_response(response).get("data")
+        if not isinstance(data, dict):
+            raise ErpDraftWriteError(ERP_DRAFT_INVALID_PAYLOAD, "ERP draft returned invalid document", http_status=422, retryable=False)
+        return validate_draft_document(data)
+
+    def _document_from_collection_response(self, response: httpx.Response) -> DraftDocument:
+        data = self._envelope_from_response(response).get("data")
+        if not isinstance(data, list):
+            raise ErpDraftWriteError(ERP_DRAFT_INVALID_PAYLOAD, "ERP draft lookup returned invalid collection", http_status=422, retryable=False)
+        if not data:
+            raise ErpDraftWriteError(ERP_DRAFT_NOT_FOUND, "ERP draft document not found", http_status=404, retryable=True)
+        if len(data) != 1 or not isinstance(data[0], dict):
+            raise ErpDraftWriteError(
+                ERP_DRAFT_INVALID_PAYLOAD,
+                "ERP draft lookup did not return exactly one document",
+                http_status=422,
+                retryable=False,
+            )
+        return validate_draft_document(data[0])
 
 
 def validate_draft_document(payload: dict[str, Any]) -> DraftDocument:
@@ -205,21 +266,27 @@ def _review_safe(source: ErpProductionRequest) -> bool:
     return source.status == REVIEW_REQUIRED and source.executable is False and source.library_file_id is not None
 
 
-def _completed_at_iso(value: datetime | None) -> str:
+def format_frappe_datetime(value: datetime | None, *, timezone_name: str) -> str:
+    try:
+        erp_timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Unknown ERP timezone: {timezone_name}") from exc
+
     stamp = value or datetime.now(timezone.utc)
     if stamp.tzinfo is None:
         stamp = stamp.replace(tzinfo=timezone.utc)
-    return stamp.isoformat()
+    stamp = stamp.astimezone(erp_timezone)
+    return stamp.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _payload_for(source: ErpProductionRequest, *, event_uuid: str, quantity_completed: int, completed_at: datetime | None) -> dict[str, Any]:
+def _payload_for(source: ErpProductionRequest, *, event_uuid: str, quantity_completed: int, completed_at: datetime | None, timezone_name: str) -> dict[str, Any]:
     return {
         "farm_event_id": event_uuid,
         "production_request_id": source.id,
         "external_work_order_id": source.external_work_order_id,
         "production_item": source.production_item,
         "quantity_completed": quantity_completed,
-        "completed_at": _completed_at_iso(completed_at),
+        "completed_at": format_frappe_datetime(completed_at, timezone_name=timezone_name),
     }
 
 
@@ -259,6 +326,7 @@ async def create_draft_for_request(
     quantity_completed: int,
     completed_at: datetime | None,
     client: ErpDraftWriteClient,
+    erp_timezone: str = "Asia/Seoul",
 ) -> ErpDraftWriteRecord:
     source = await db.get(ErpProductionRequest, source_request_id)
     if source is None:
@@ -286,7 +354,13 @@ async def create_draft_for_request(
         logger.info("ERP draft write blocked", extra={"event_uuid": event_uuid, "source_request_id": source.id})
         return record
 
-    payload = _payload_for(source, event_uuid=event_uuid, quantity_completed=quantity_completed, completed_at=completed_at)
+    payload = _payload_for(
+        source,
+        event_uuid=event_uuid,
+        quantity_completed=quantity_completed,
+        completed_at=completed_at,
+        timezone_name=erp_timezone,
+    )
     record.status = DRAFT_WRITE_PENDING
     record.retryable = False
     record.dead_letter = False
