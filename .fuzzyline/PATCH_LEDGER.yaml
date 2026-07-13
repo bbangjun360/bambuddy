@@ -77,7 +77,10 @@ patches:
       Mini canary while both default-off flags are armed. It creates no cycle
       until all server-provided checklist items are checked, trusts only
       acknowledged server states, and stops for manual review on command
-      failure, uncertain response, stale state, or another unresolved cycle.
+      failure, uncertain response, stale state, or another unresolved cycle. The
+      backend serializes each named-printer claim, refreshes state under the lock,
+      commits an active transition before transport, and hashes and sends one
+      immutable sequence snapshot.
     feature_flags:
       - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ENABLED=false
       - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ALLOW_REAL_COMMANDS=false
@@ -85,13 +88,15 @@ patches:
     rollback: >-
       Disable either direct-canary flag and revert the WP-110 Draft PR. The
       target-printer setting is additive, no migration exists, and uncertain
-      cycles are never resumed automatically.
+      cycles are never resumed or reset automatically; an already active cycle
+      remains subject to manual reconciliation.
     validation:
       - npm --prefix frontend run test -- --run src/__tests__/components/SwapModPlateChangeControl.test.tsx
       - npm --prefix frontend run test -- --run
       - npm --prefix frontend run lint
       - npm --prefix frontend run build
       - make test-swapmod-a1mini-direct-canary
+      - ephemeral PostgreSQL concurrent direct-canary audit (one synthetic send)
       - make verify-fast FRONTEND_TESTED=1
       - make verify-full FRONTEND_TESTED=1
       - git diff --check

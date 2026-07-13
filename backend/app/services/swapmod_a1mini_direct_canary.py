@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.swapmod_state_machine import SwapmodStateMachineCycle
@@ -24,6 +25,9 @@ from backend.app.services.swapmod_state_machine import (
 A1MINI_DIRECT_CANARY_MODE = "A1_MINI_DIRECT_CANARY"
 DIRECT_COMMAND_SENT = "COMMAND_SENT"
 DIRECT_COMMAND_FAILED = "COMMAND_FAILED"
+DIRECT_CANARY_ADVISORY_LOCK_NAMESPACE = 11004
+
+logger = logging.getLogger(__name__)
 
 A1MINI_DIRECT_CHECKLIST_FIELDS = (
     "operator_present",
@@ -170,10 +174,13 @@ class SwapmodA1MiniDirectCanaryService:
             )
         if step not in {RELEASE_PLATE, LOAD_NEXT_PLATE}:
             raise SwapmodA1MiniDirectCanaryError("unsupported_step", "unsupported A1 Mini direct canary step")
-        if int(cycle.printer_id or printer_id) != int(printer_id):
-            raise SwapmodA1MiniDirectCanaryError("printer_id_mismatch", "cycle printer does not match request")
         if not _is_a1_mini(printer_model):
             raise SwapmodA1MiniDirectCanaryError("printer_model_not_a1_mini", "direct canary requires A1 Mini")
+
+        await _acquire_direct_canary_execution_lock(db, printer_id=printer_id)
+        await db.refresh(cycle)
+        if cycle.printer_id is None or int(cycle.printer_id) != int(printer_id):
+            raise SwapmodA1MiniDirectCanaryError("printer_id_mismatch", "cycle printer does not match request")
 
         required_state = READY_TO_RELEASE if step == RELEASE_PLATE else READY_TO_LOAD
         if cycle.state != required_state:
@@ -191,7 +198,7 @@ class SwapmodA1MiniDirectCanaryService:
         if not operator_approved:
             raise SwapmodA1MiniDirectCanaryError("operator_approval_missing", "operator approval is required")
 
-        sequence_path, sequence_sha256 = _select_sequence(
+        sequence_text, sequence_sha256 = _select_sequence(
             step=step,
             sequence_root=sequence_root,
             release_sequence_file=release_sequence_file,
@@ -209,7 +216,6 @@ class SwapmodA1MiniDirectCanaryService:
             raise SwapmodA1MiniDirectCanaryError("operator_phrase_mismatch", "operator phrase does not match")
 
         _require_known_idle_printer_state(transport.get_status(printer_id))
-        sequence_text = sequence_path.read_text(encoding="utf-8")
         line_count = len(sequence_text.splitlines())
 
         event_prefix = f"a1mini-direct:{canary_key}"
@@ -224,8 +230,22 @@ class SwapmodA1MiniDirectCanaryService:
             step=step,
             note="A1 Mini direct canary transport started",
         )
+        # Persist an active state before crossing the physical command boundary.
+        # A crash or later DB failure then blocks retry instead of restoring READY.
+        await db.commit()
 
-        command_sent = transport.send_gcode(printer_id, sequence_text)
+        transport_raised = False
+        try:
+            command_sent = transport.send_gcode(printer_id, sequence_text)
+        except Exception:  # noqa: BLE001 - any transport exception leaves physical outcome uncertain
+            transport_raised = True
+            command_sent = False
+            logger.exception(
+                "A1 Mini direct canary transport raised; printer_id=%s cycle_key=%s step=%s",
+                printer_id,
+                cycle.cycle_key,
+                step,
+            )
         if not command_sent:
             cycle = await apply_swapmod_event(
                 db,
@@ -233,8 +253,13 @@ class SwapmodA1MiniDirectCanaryService:
                 TIMEOUT,
                 event_id=f"{event_prefix}:send-failed",
                 step=step,
-                note="A1 Mini direct canary command send failed; manual review required",
+                note=(
+                    "A1 Mini direct canary transport outcome uncertain; manual review required"
+                    if transport_raised
+                    else "A1 Mini direct canary command send failed; manual review required"
+                ),
             )
+            await db.commit()
             payload = public_swapmod_cycle(cycle)
             payload.update(
                 {
@@ -261,6 +286,7 @@ class SwapmodA1MiniDirectCanaryService:
             step=step,
             note="A1 Mini direct canary command sent; verification required",
         )
+        await db.commit()
         payload = public_swapmod_cycle(cycle)
         payload.update(
             {
@@ -278,6 +304,30 @@ class SwapmodA1MiniDirectCanaryService:
             }
         )
         return payload
+
+
+async def _acquire_direct_canary_execution_lock(db: AsyncSession, *, printer_id: int) -> None:
+    """Serialize the named canary claim before re-reading its cycle state."""
+    dialect = db.get_bind().dialect.name
+    if dialect == "sqlite":
+        # The route has already opened a read transaction. End it, then claim
+        # SQLite's cross-process writer lock before refreshing the cycle.
+        await db.commit()
+        await db.execute(text("BEGIN IMMEDIATE"))
+        return
+    if dialect == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(:namespace, :printer_id)"),
+            {
+                "namespace": DIRECT_CANARY_ADVISORY_LOCK_NAMESPACE,
+                "printer_id": int(printer_id),
+            },
+        )
+        return
+    raise SwapmodA1MiniDirectCanaryError(
+        "database_dialect_not_supported",
+        "A1 Mini direct canary requires SQLite or PostgreSQL transaction locking",
+    )
 
 
 async def _require_only_recent_unresolved_cycle(
@@ -318,7 +368,7 @@ def _select_sequence(
     release_sequence_sha256: str | None,
     load_sequence_file: str | None,
     load_sequence_sha256: str | None,
-) -> tuple[Path, str]:
+) -> tuple[str, str]:
     if step == RELEASE_PLATE:
         configured_file = release_sequence_file
         configured_sha = release_sequence_sha256
@@ -337,10 +387,20 @@ def _select_sequence(
     if not path.is_file():
         raise SwapmodA1MiniDirectCanaryError("sequence_not_found", "direct canary sequence file was not found")
 
-    actual_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    try:
+        sequence_bytes = path.read_bytes()
+    except OSError as exc:
+        raise SwapmodA1MiniDirectCanaryError(
+            "sequence_read_failed", "direct canary sequence file could not be read"
+        ) from exc
+    actual_sha = hashlib.sha256(sequence_bytes).hexdigest()
     if actual_sha != configured_sha:
         raise SwapmodA1MiniDirectCanaryError("sequence_sha256_mismatch", "direct canary sequence SHA-256 mismatch")
-    return path, actual_sha
+    try:
+        sequence_text = sequence_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SwapmodA1MiniDirectCanaryError("sequence_not_utf8", "direct canary sequence must be UTF-8 text") from exc
+    return sequence_text, actual_sha
 
 
 def _require_known_idle_printer_state(state: dict[str, object] | None) -> None:

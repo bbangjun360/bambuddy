@@ -120,6 +120,16 @@ before any command can run.
       service regression. The final generated bundle, focused tests, full frontend
       suite, shared gates, isolated startup smoke, and desktop/mobile browser
       checks are green. Main port 18000 remained healthy; no real command ran.
+- [x] 2026-07-14 02:35 KST Pre-approval transaction audit reproduced four backend safety
+      failures before changing production code: a sequence file could change
+      between hash and send, the cycle's active state was uncommitted at send,
+      a transport exception escaped without durable manual review, and two
+      concurrent requests with different canary keys sent twice. The service now
+      serializes each named printer with a SQLite writer lock or PostgreSQL
+      transaction advisory lock, refreshes the cycle after obtaining that lock,
+      commits `START_STEP` before transport, and hashes/sends one immutable byte
+      snapshot. Transport exceptions persist a no-retry manual-review state. No
+      real printer or actuator command was sent.
 
 ## Decisions
 
@@ -142,6 +152,14 @@ before any command can run.
 - Cycles newer than the most recent `READY_FOR_NEXT_PRINT` form the unresolved
   review window. A different cycle in that window blocks direct transport, which
   prevents a refresh or second tab from repeating uncertain motion.
+- A physical send requires a durable active-state claim. SQLite uses
+  `BEGIN IMMEDIATE`; PostgreSQL uses a per-printer transaction advisory lock. The
+  cycle is refreshed under that lock and `START_STEP` is committed before the
+  transport call. If the process or final DB write fails after send, the durable
+  active state blocks another command and requires reconciliation/manual review.
+- Sequence validation and transport use the same byte snapshot. The service reads
+  the allowlisted file once, verifies that byte string against the configured
+  SHA-256, decodes those exact bytes as UTF-8, and sends only that text.
 
 ## Implementation and harness changes
 
@@ -152,6 +170,11 @@ before any command can run.
   status response with that ID. It changes no permission, authentication rule,
   dependency, migration, feature-flag default, raw-command boundary, or external
   service contract.
+- The transaction hardening is internal to the existing direct-canary service. It
+  adds no schema or dependency. The service intentionally commits the active
+  transition before crossing the physical transport boundary, then commits the
+  sent/failed transition; a final commit failure leaves the earlier active state
+  durable and non-retryable.
 - Final runtime browser evidence used only the isolated `farm_wp110_audit`
   harness on ports 18110/19110 with a fresh synthetic database and no printer
   records. No production credential, customer data, real printer, MQTT, FTPS, or
@@ -167,22 +190,37 @@ Observed on 2026-07-14 KST:
   paths.
 - Full frontend: 176 files / 2327 tests passed. ESLint and the production Vite
   build passed; only the existing large-chunk warning remains.
-- `make test-swapmod-a1mini-direct-canary`: 2/2 harness mock tests and 21/21
+- `make test-swapmod-a1mini-direct-canary`: 2/2 harness mock tests and 27/27
   backend service/architecture/API tests passed, including named-target,
-  competing-cycle, and stale-cycle failures.
+  competing-cycle, stale-cycle, exact-byte send, unreadable/non-UTF-8 sequence,
+  durable pre-send intent, transport-exception persistence, SQLite concurrency,
+  and PostgreSQL lock-call failures.
+- A separate ephemeral PostgreSQL 16.4 run issued two concurrent requests against
+  one cycle and observed exactly one synthetic send; the second request failed
+  `cycle_state_not_ready_for_step`.
 - Ruff 0.14.11 check and format check passed for every changed backend file. A
   diagnostic repository-wide run reported 47 existing findings outside this WP;
   no unrelated file was reformatted.
 - `make verify-fast FRONTEND_TESTED=1`: 190 harness tests twice plus 2
   characterization tests passed.
-- `make verify-full FRONTEND_TESTED=1` against isolated ports 18110/19110 passed,
-  including root/health/docs/mock smoke and 2 scenarios. Bambuddy started healthy.
+- `make test-unit` and `make test-contract`: 190/190 harness tests each passed.
+  `make test-integration` passed against the running isolated harness.
+- `make verify-full FRONTEND_TESTED=1` against a fresh PostgreSQL harness on
+  18141/19141 passed, including root/health/docs/mock smoke and 2 scenarios.
+  Bambuddy started healthy; the stale prior harness volume was preserved, not
+  deleted, and bypassed with a fresh Compose project.
 - The runtime status reported both real-command flags false and target printer
   `null`. Headless Chrome at 1440x1000 and 390x844 passed with the printer
   operator surface present and the SwapMod control absent by default: no
   horizontal overflow, clipped visible control, failed image, browser/runtime
   error, failed response, or failed load.
 - The main Bambuddy instance at port 18000 remained healthy throughout.
+- A fresh isolated setup followed by Chrome verification of the real `/` printer
+  operator surface passed at 1440x1000 and 390x844. Both views had meaningful
+  content, no error overlay, console/runtime/network/HTTP error, failed visible
+  image, horizontal overflow, or default-off SwapMod control. The initial
+  `/printers` probe was correctly diagnosed as an undefined route and rerun at
+  the application's actual root route.
 
 ## Failure and recovery
 
@@ -192,6 +230,10 @@ Observed on 2026-07-14 KST:
   unexpected returned state, stale cycle, or competing unresolved cycle fails
   closed before another physical command.
   Cancelling before confirmation leaves no cycle.
+- A transport exception is treated as an uncertain physical outcome and is
+  committed to manual review with retry disabled. If the process stops after the
+  durable active claim, startup reconciliation/manual inspection handles that
+  active state; it is never restored to a ready state automatically.
 - Do not automatically retry or resume an uncertain physical bed action. An
   operator must inspect the printer before any new attempt.
 - Rollback is the Draft PR merge commit; there is no migration or persistent schema
