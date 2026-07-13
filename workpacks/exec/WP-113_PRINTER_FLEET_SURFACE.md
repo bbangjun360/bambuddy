@@ -118,6 +118,8 @@ Do not read `docs/archive/FULL_SPEC_v1.1.md` for this Work Package.
   showed no horizontal overflow, and reported zero console or HTTP failures.
 - [x] 2026-07-13: Published Draft PR #94 for operator visual review; merge remains
   blocked until approval is recorded in the operator channel.
+- [x] 2026-07-13: Operator visually approved PR #94 in the session channel and
+  authorized merge to `farm-main` followed by the port 18000 harness deployment.
 
 ## Decisions
 
@@ -130,7 +132,8 @@ Do not read `docs/archive/FULL_SPEC_v1.1.md` for this Work Package.
   no capability, request, mutation, or permission.
 - Keep all four card density choices and camera-wall mode because operators
   already persist and use those preferences.
-- Keep WP-113 Draft until the operator visually accepts this slice.
+- Operator visual approval was recorded on 2026-07-13; routine merge may proceed
+  after the approval-record commit passes refreshed CI.
 
 ## Harness Changes
 
@@ -242,7 +245,7 @@ fixture-backed desktop/mobile browser inspection. The browser run had four
 distinct card states, working compact Filters, no horizontal overflow, and zero
 console or failed HTTP responses.
 
-This remains Draft PR #94 pending operator visual approval. After approval and merge,
+Operator visual approval for PR #94 is recorded. After merge,
 the next UI redesign Work Package should address the print queue as the next
 operator workflow named in `workpacks/BACKLOG.md`; library/inventory and settings
 remain later independent slices.
