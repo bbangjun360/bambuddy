@@ -20,6 +20,16 @@ local workarounds between sessions.
 
 ## FIXED
 
+### PROCESS-07 Stacked Work Package PRs skipped Validation — FIXED 2026-07-14
+
+- Was: `.github/workflows/validation.yml` ran for pull requests targeting
+  `farm-main` only. A stacked Work Package PR targeting a `feature/wp-*`
+  branch required repeated manual workflow dispatches to obtain the same gate.
+- Fix: `FIX_COMMIT` extends the existing base-branch filter to
+  `feature/wp-*` and adds a harness contract test while retaining
+  `workflow_dispatch`. Workflow permissions, jobs, and product behavior are
+  unchanged.
+
 ### PROCESS-06R Upstream integration docs stayed Draft after merge — FIXED 2026-07-14
 
 - Was: operator-approved upstream PR #92 merged v0.2.4.9 into `farm-main`, but
