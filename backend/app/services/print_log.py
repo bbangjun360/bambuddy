@@ -5,6 +5,7 @@ Log entries are written to a separate table and never touch archives or queue it
 
 import logging
 from datetime import datetime
+from math import isfinite
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +13,34 @@ from backend.app.core.config import settings
 from backend.app.models.print_log import PrintLogEntry
 
 logger = logging.getLogger(__name__)
+
+
+async def backfill_log_entry_energy(
+    db: AsyncSession,
+    *,
+    print_log_entry_id: int,
+    energy_kwh: float,
+    energy_cost: float,
+) -> bool:
+    """Attach delayed smart-plug evidence to the exact completed run."""
+    if not isfinite(energy_kwh) or energy_kwh < 0 or not isfinite(energy_cost) or energy_cost < 0:
+        logger.warning(
+            "print_log_energy_backfill_rejected print_log_entry_id=%s",
+            print_log_entry_id,
+        )
+        return False
+
+    entry = await db.get(PrintLogEntry, print_log_entry_id)
+    if entry is None:
+        logger.warning(
+            "print_log_energy_backfill_missing print_log_entry_id=%s",
+            print_log_entry_id,
+        )
+        return False
+
+    entry.energy_kwh = energy_kwh
+    entry.energy_cost = energy_cost
+    return True
 
 
 async def write_log_entry(

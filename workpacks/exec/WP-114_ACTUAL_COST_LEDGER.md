@@ -123,6 +123,21 @@ the existing print-log/statistics tests.
 - [x] 2026-07-13 22:58 KST: Final `make verify-fast`, `make test-unit`,
   `make test-contract`, alternate-port `make test-integration`, and
   `make verify-full` passed. The isolated app and main port 18000 were healthy.
+- [x] 2026-07-14 01:47 KST: Second pre-approval audit reproduced asyncpg
+  aware/naive date binding failure, concurrent attempt-classification risk,
+  delayed energy attribution to a later same-archive row, and acceptance of
+  invalid estimate/actual evidence. Added failure-first regressions and
+  minimal fail-closed fixes; the focused suite passed 58 tests.
+- [x] 2026-07-14 01:55 KST: Isolated PostgreSQL 16 runtime confirmed KST-to-UTC
+  date binding, a blocked same-archive advisory lock, pagination-independent
+  summaries, and exclusion of negative/infinite actual evidence. Main port
+  18000 remained healthy and the isolated app emitted no error logs.
+- [x] 2026-07-14 02:07 KST: Final focused regression (62 tests), Ruff,
+  `make verify-fast`, `make test-unit`, `make test-contract`, alternate-port
+  `make test-integration`, and `make verify-full` passed against the isolated
+  PostgreSQL app on 18114. PostgreSQL also retained the canonical print log
+  while rejecting an infinite material-use snapshot. The main app on 18000
+  remained healthy.
 
 # Decisions
 
@@ -149,6 +164,17 @@ the existing print-log/statistics tests.
 - Accept only finite positive electricity, estimated-power, and machine-hour
   policy values. A non-finite rate skips the optional snapshot while the
   canonical print-log transaction remains intact.
+- Serialize PostgreSQL capture by linked archive before counting attempts.
+  Unlinked rows use a separate print-log-keyed advisory-lock namespace; SQLite
+  keeps its existing no-lock test/development behavior.
+- Normalize offset-aware API date filters to UTC-naive values before binding
+  them to the repository's timestamp-without-timezone columns.
+- Backfill delayed smart-plug evidence by the exact print-log ID returned from
+  `write_log_entry`, never by a latest-row archive lookup.
+- Treat negative and non-finite estimate inputs as missing and actual
+  cost/runtime evidence as incomplete; sanitize invalid actual quantities.
+  Row completeness and SQL summaries use the same cost validity predicates so
+  invalid values cannot become negative costs or non-finite JSON.
 
 # Harness Changes
 
@@ -156,8 +182,13 @@ the existing print-log/statistics tests.
 - Integration fixtures create linked original, failed, cancelled, and reprint
   `PrintLogEntry` rows and snapshots.
 - Failure tests cover disabled flag, non-KRW configuration, missing actual
-  energy/material values, non-finite policy rates, orphan rows, unauthorized
-  reads, and pagination.
+  energy/material values, non-finite policy rates, invalid estimate/actual
+  evidence, delayed energy races, orphan rows, unauthorized reads, timezone
+  filters, and pagination.
+- A disposable PostgreSQL 16 harness used synthetic rows only. It measured a
+  `0.352s` same-archive advisory-lock wait and reconciled four filtered rows
+  across two pages while excluding negative cost, infinite energy, and
+  negative runtime evidence.
 
 # Implementation
 
@@ -170,6 +201,8 @@ Implemented files and symbols:
 - `backend/app/schemas/farm_cost_ledger.py`: stable read contract.
 - `backend/app/api/routes/farm_cost_ledger.py`: read-only filtered endpoint.
 - `backend/app/services/print_log.py::write_log_entry`: optional capture hook.
+- `backend/app/services/print_log.py::backfill_log_entry_energy`: exact-run,
+  finite, non-negative delayed energy persistence.
 - Model/router registration and the repository's additive DB creation path.
 - Focused unit/integration/architecture tests, harness contract, and runbook.
 - `.fuzzyline/PATCH_LEDGER.yaml`: upstream-core patch record.
@@ -233,12 +266,14 @@ additive, default-off KRW estimate snapshot and a read-only per-run actual cost
 API with separate original, failed, cancelled, and reprint buckets. Snapshot
 failures are isolated from the canonical print log.
 
-The final focused regression passed 39 tests. Shared unit, contract,
-integration, verify-fast, and verify-full gates passed. A clean PostgreSQL
-runtime created the additive table, preserved separate failed/reprint rows,
-reconciled both the `10346.80 KRW` scenario and the `0.02 KRW` rounding
-boundary, and emitted no application error logs. Desktop and mobile Chromium
-checks were nonblank and error-free.
+The latest focused regression passed 62 tests. The clean PostgreSQL runtime
+created the additive table, preserved separate failed/reprint rows, reconciled
+the `10346.80 KRW` scenario and the `0.02 KRW` rounding boundary, normalized
+offset-aware filters, and rejected invalid accounting evidence without an
+application error. Desktop and mobile Chromium checks were nonblank and
+error-free. The final audit rerun passed Ruff, verify-fast, unit, contract,
+integration, and verify-full against the isolated PostgreSQL app; Bambuddy
+still starts cleanly.
 
 Draft PR #95 is published and review-ready but remains draft pending explicit
 operator approval because it adds schema and a shared print-log hook. Later

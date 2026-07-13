@@ -57,3 +57,19 @@ def test_farm_cost_ledger_has_no_external_or_printer_command_boundary():
 
     for token in forbidden:
         assert token not in combined
+
+
+def test_delayed_energy_backfill_targets_the_created_print_log_row():
+    main_source = (ROOT / "app/main.py").read_text(encoding="utf-8")
+    log_write_block = main_source.split("log_entry = await write_log_entry", 1)[1].split(
+        'log_timing("Print log entry")', 1
+    )[0]
+    energy_block = main_source.split("async def _background_energy_calculation", 1)[1].split(
+        "async def _background_finish_photo", 1
+    )[0]
+
+    assert "print_log_entry_id = log_entry.id" in main_source
+    assert log_write_block.index("await db.commit()") < log_write_block.index("print_log_entry_id = log_entry.id")
+    assert "backfill_log_entry_energy(" in energy_block
+    assert "print_log_entry_id=print_log_entry_id" in energy_block
+    assert ".order_by(PrintLogEntry.id.desc())" not in energy_block

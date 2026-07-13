@@ -1,6 +1,8 @@
 """WP-114 snapshot capture tests."""
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import func, select
@@ -9,6 +11,7 @@ from backend.app.api.routes.settings import set_setting
 from backend.app.core.config import settings
 from backend.app.models.farm_cost_ledger import FarmCostLedgerSnapshot
 from backend.app.models.print_log import PrintLogEntry
+from backend.app.services import farm_cost_ledger
 from backend.app.services.farm_cost_ledger import capture_cost_snapshot
 from backend.app.services.print_log import write_log_entry
 
@@ -179,3 +182,159 @@ async def test_nonfinite_policy_rate_skips_snapshot_without_losing_print_log(
 
     assert await db_session.get(PrintLogEntry, entry.id) is not None
     assert await db_session.scalar(select(func.count(FarmCostLedgerSnapshot.id))) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("actual_cost", "actual_grams"),
+    (
+        (float("inf"), 10.0),
+        (-1.0, 10.0),
+        (200.0, float("inf")),
+        (200.0, -1.0),
+        (200.0, float("nan")),
+    ),
+)
+async def test_invalid_effective_material_rate_skips_snapshot_without_losing_print_log(
+    db_session,
+    printer_factory,
+    archive_factory,
+    monkeypatch,
+    actual_cost,
+    actual_grams,
+):
+    _enable_policy(monkeypatch)
+    await _configure_krw(db_session)
+    printer = await printer_factory()
+    archive = await archive_factory(printer.id, with_run=False)
+
+    entry = await write_log_entry(
+        db_session,
+        archive_id=archive.id,
+        status="completed",
+        filament_used_grams=actual_grams,
+        cost=actual_cost,
+    )
+    await db_session.commit()
+
+    assert await db_session.get(PrintLogEntry, entry.id) is not None
+    assert await db_session.scalar(select(func.count(FarmCostLedgerSnapshot.id))) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("archive_field", "invalid_value", "missing_fields"),
+    (
+        (
+            "filament_used_grams",
+            -1.0,
+            ("estimated_filament_grams", "estimated_material_cost"),
+        ),
+        (
+            "filament_used_grams",
+            float("inf"),
+            ("estimated_filament_grams", "estimated_material_cost"),
+        ),
+        (
+            "print_time_seconds",
+            -1,
+            (
+                "estimated_duration_seconds",
+                "estimated_energy_kwh",
+                "estimated_energy_cost",
+                "estimated_machine_cost",
+            ),
+        ),
+    ),
+)
+async def test_invalid_archive_estimate_evidence_is_captured_as_missing(
+    db_session,
+    printer_factory,
+    archive_factory,
+    monkeypatch,
+    archive_field,
+    invalid_value,
+    missing_fields,
+):
+    _enable_policy(monkeypatch)
+    await _configure_krw(db_session)
+    printer = await printer_factory()
+    archive = await archive_factory(
+        printer.id,
+        with_run=False,
+        filament_used_grams=100.0,
+        print_time_seconds=7200,
+    )
+    setattr(archive, archive_field, invalid_value)
+    await db_session.flush()
+
+    await write_log_entry(
+        db_session,
+        archive_id=archive.id,
+        status="completed",
+        filament_used_grams=10.0,
+        cost=200.0,
+    )
+    await db_session.commit()
+
+    snapshot = await db_session.scalar(select(FarmCostLedgerSnapshot))
+    assert snapshot is not None
+    for field in missing_fields:
+        assert getattr(snapshot, field) is None
+    assert snapshot.estimated_total_cost is None
+
+
+def test_timezone_aware_filter_boundary_normalizes_to_naive_utc():
+    normalize = farm_cost_ledger._normalize_db_datetime
+    kst = timezone(timedelta(hours=9))
+
+    normalized = normalize(datetime(2026, 7, 14, 9, 30, tzinfo=kst))
+
+    assert normalized == datetime(2026, 7, 14, 0, 30)
+    assert normalized.tzinfo is None
+    naive = datetime(2026, 7, 14, 0, 30)
+    assert normalize(naive) == naive
+
+
+@pytest.mark.asyncio
+async def test_postgres_capture_scope_uses_archive_advisory_lock():
+    lock_scope = farm_cost_ledger._lock_capture_scope
+    db = SimpleNamespace(
+        get_bind=lambda: SimpleNamespace(dialect=SimpleNamespace(name="postgresql")),
+        execute=AsyncMock(),
+    )
+    entry = SimpleNamespace(id=99, archive_id=42)
+
+    await lock_scope(db, entry)
+
+    statement, params = db.execute.await_args.args
+    assert str(statement) == "SELECT pg_advisory_xact_lock(11405, :scope_key)"
+    assert params == {"scope_key": 42}
+
+
+@pytest.mark.asyncio
+async def test_postgres_unlinked_capture_uses_print_log_scope():
+    lock_scope = farm_cost_ledger._lock_capture_scope
+    db = SimpleNamespace(
+        get_bind=lambda: SimpleNamespace(dialect=SimpleNamespace(name="postgresql")),
+        execute=AsyncMock(),
+    )
+
+    await lock_scope(db, SimpleNamespace(id=99, archive_id=None))
+
+    statement, params = db.execute.await_args.args
+    assert str(statement) == "SELECT pg_advisory_xact_lock(11406, :scope_key)"
+    assert params == {"scope_key": 99}
+
+
+@pytest.mark.asyncio
+async def test_sqlite_capture_scope_does_not_issue_postgres_sql():
+    lock_scope = farm_cost_ledger._lock_capture_scope
+    db = SimpleNamespace(
+        get_bind=lambda: SimpleNamespace(dialect=SimpleNamespace(name="sqlite")),
+        execute=AsyncMock(),
+    )
+
+    await lock_scope(db, SimpleNamespace(id=99, archive_id=42))
+
+    db.execute.assert_not_awaited()

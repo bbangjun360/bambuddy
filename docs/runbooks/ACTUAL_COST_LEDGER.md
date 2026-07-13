@@ -16,10 +16,18 @@ Each enabled print-log event gets one immutable policy snapshot:
 
 Actual material, energy, and runtime remain in the existing `PrintLogEntry`.
 The API joins the immutable snapshot to that run, so a delayed smart-plug
-energy result becomes visible without rewriting the policy snapshot.
+energy result becomes visible without rewriting the policy snapshot. Delayed
+energy evidence is backfilled by the exact print-log ID created for that run;
+it is never assigned by searching for the latest row of the same archive.
 
 Failed attempts and reprints are separate print-log rows. Their cost is never
 overwritten by a later successful run.
+
+On PostgreSQL, snapshot capture takes a transaction-scoped advisory lock for
+the linked archive before classifying the attempt. Concurrent completions for
+one archive therefore receive serialized original/reprint classifications.
+Unlinked rows use their print-log ID as an independent lock scope. SQLite
+remains lock-free for local tests and single-process development.
 
 ## Preconditions
 
@@ -40,10 +48,12 @@ default_filament_cost=<KRW/kg>
 energy_cost_per_kwh=<KRW/kWh>
 ```
 
-If currency is not `KRW`, a required rate is not a finite positive number, or
-the policy version is empty, Bambuddy retains the canonical print-log row but
-skips the cost snapshot and writes a `farm_cost_ledger_snapshot_skipped`
-warning. It never relabels another currency as KRW.
+If currency is not `KRW`, an electricity, estimated-power, or machine-hour
+rate is not finite and positive, the effective material rate is negative or
+non-finite, or the policy version is empty, Bambuddy retains the canonical
+print-log row but skips the cost snapshot and writes a
+`farm_cost_ledger_snapshot_skipped` warning. It never relabels another
+currency as KRW.
 
 ## Calculations
 
@@ -72,6 +82,14 @@ When all actual components exist but the estimate is incomplete,
 `actual_total_cost` remains available while `variance_cost` stays `null` and
 the row remains incomplete.
 
+Negative or non-finite material cost, energy cost, or runtime evidence is
+invalid rather than a credit. Invalid archive estimate inputs are snapshotted
+as missing. Invalid actual filament or kWh quantities are exposed as `null`;
+an invalid cost/grams pair that would derive the effective material rate skips
+snapshot capture. Invalid actual cost components are omitted from row and
+component summaries, add the corresponding `missing_actual_components` entry,
+and keep the row total incomplete. Non-finite JSON values never reach clients.
+
 ## Read API
 
 Requires the existing `stats:read` permission when authentication is enabled:
@@ -84,7 +102,9 @@ GET /api/v1/farm-cost-ledger?printer_id=1&limit=50&offset=0
 
 Supported filters are status, attempt kind, printer, capture date range,
 limit, and offset. The summary covers all matching rows, not only the current
-page.
+page. Date filters may include a UTC offset; Bambuddy converts them to
+UTC-naive values before binding them to the repository's timestamp-without-
+timezone columns.
 
 ## Migration and rollback
 
@@ -114,7 +134,8 @@ make test-contract
 docker compose -f docker-compose.test.yml run --rm backend-test \
   pytest -q -p no:cacheprovider \
   backend/tests/unit/test_farm_cost_ledger.py \
-  backend/tests/integration/test_farm_cost_ledger_api.py
+  backend/tests/integration/test_farm_cost_ledger_api.py \
+  backend/tests/unit/test_print_log.py
 ```
 
 Do not use production printer credentials, ERP tokens, customer records, or a

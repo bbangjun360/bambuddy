@@ -4,7 +4,9 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from backend.app.models.print_log import PrintLogEntry
 from backend.app.schemas.print_log import PrintLogEntrySchema, PrintLogResponse
+from backend.app.services import print_log as print_log_service
 
 
 class TestPrintLogEntrySchema:
@@ -102,3 +104,70 @@ class TestWriteLogEntry:
         if started_at and completed:
             duration = int((completed - started_at).total_seconds())
         assert duration is None
+
+
+@pytest.mark.asyncio
+async def test_energy_backfill_updates_exact_run_instead_of_latest_for_archive(
+    db_session,
+    printer_factory,
+    archive_factory,
+):
+    backfill = print_log_service.backfill_log_entry_energy
+    printer = await printer_factory()
+    archive = await archive_factory(printer.id, with_run=False)
+    first = PrintLogEntry(archive_id=archive.id, status="failed")
+    second = PrintLogEntry(archive_id=archive.id, status="completed")
+    db_session.add_all([first, second])
+    await db_session.flush()
+
+    updated = await backfill(
+        db_session,
+        print_log_entry_id=first.id,
+        energy_kwh=0.25,
+        energy_cost=45.0,
+    )
+    await db_session.flush()
+    await db_session.refresh(first)
+    await db_session.refresh(second)
+
+    assert updated is True
+    assert (first.energy_kwh, first.energy_cost) == (0.25, 45.0)
+    assert (second.energy_kwh, second.energy_cost) == (None, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("energy_kwh", "energy_cost"),
+    ((float("inf"), 45.0), (0.25, -1.0)),
+)
+async def test_energy_backfill_rejects_invalid_evidence(
+    db_session,
+    energy_kwh,
+    energy_cost,
+):
+    entry = PrintLogEntry(status="completed")
+    db_session.add(entry)
+    await db_session.flush()
+
+    updated = await print_log_service.backfill_log_entry_energy(
+        db_session,
+        print_log_entry_id=entry.id,
+        energy_kwh=energy_kwh,
+        energy_cost=energy_cost,
+    )
+    await db_session.refresh(entry)
+
+    assert updated is False
+    assert (entry.energy_kwh, entry.energy_cost) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_energy_backfill_reports_missing_run(db_session):
+    updated = await print_log_service.backfill_log_entry_energy(
+        db_session,
+        print_log_entry_id=999_999,
+        energy_kwh=0.25,
+        energy_cost=45.0,
+    )
+
+    assert updated is False

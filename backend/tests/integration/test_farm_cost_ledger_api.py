@@ -230,6 +230,62 @@ async def test_ledger_filters_reprints_and_marks_missing_energy_incomplete(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "invalid_value", "missing_component", "item_field", "summary_field"),
+    (
+        ("actual_material_cost", -1.0, "material", "actual_material_cost", "actual_material_cost"),
+        ("actual_material_cost", float("inf"), "material", "actual_material_cost", "actual_material_cost"),
+        ("actual_energy_cost", -1.0, "energy", "actual_energy_cost", "actual_energy_cost"),
+        ("actual_energy_cost", float("inf"), "energy", "actual_energy_cost", "actual_energy_cost"),
+        ("duration_seconds", -1, "machine_time", "actual_machine_cost", "actual_machine_cost"),
+    ),
+)
+async def test_ledger_treats_invalid_actual_evidence_as_incomplete(
+    async_client,
+    db_session,
+    printer_factory,
+    archive_factory,
+    monkeypatch,
+    field,
+    invalid_value,
+    missing_component,
+    item_field,
+    summary_field,
+):
+    monkeypatch.setattr(settings, "farm_actual_cost_ledger_enabled", True)
+    printer = await printer_factory()
+    archive = await archive_factory(printer.id, with_run=False)
+    actuals = {
+        "actual_material_cost": 2000.0,
+        "actual_energy_cost": 36.0,
+        "actual_energy_kwh": 0.2,
+        "duration_seconds": 7200,
+    }
+    actuals[field] = invalid_value
+    await _seed_run(
+        db_session,
+        archive_id=archive.id,
+        printer_id=printer.id,
+        status="completed",
+        attempt_number=1,
+        **actuals,
+    )
+
+    response = await async_client.get("/api/v1/farm-cost-ledger")
+
+    assert response.status_code == 200
+    body = response.json()
+    item = body["items"][0]
+    assert item[item_field] is None
+    assert item["actual_total_cost"] is None
+    assert item["cost_complete"] is False
+    assert missing_component in item["missing_actual_components"]
+    assert body["summary"]["incomplete_run_count"] == 1
+    assert body["summary"][summary_field] == 0.0
+    assert body["summary"]["actual_total_cost"] == 0.0
+
+
+@pytest.mark.asyncio
 async def test_ledger_summary_keeps_actual_total_when_estimate_is_incomplete(
     async_client,
     db_session,
@@ -263,3 +319,46 @@ async def test_ledger_summary_keeps_actual_total_when_estimate_is_incomplete(
     assert body["summary"]["incomplete_run_count"] == 1
     assert body["summary"]["actual_total_cost"] == 8036.0
     assert body["summary"]["variance_cost"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_ledger_accepts_aware_date_filters_and_summarizes_all_matching_pages(
+    async_client,
+    db_session,
+    printer_factory,
+    archive_factory,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "farm_actual_cost_ledger_enabled", True)
+    printer = await printer_factory()
+    archive = await archive_factory(printer.id, with_run=False)
+    for attempt_number in (1, 2, 3):
+        await _seed_run(
+            db_session,
+            archive_id=archive.id,
+            printer_id=printer.id,
+            status="completed",
+            attempt_number=attempt_number,
+            actual_material_cost=100.0 * attempt_number,
+            actual_energy_cost=10.0,
+            actual_energy_kwh=0.05,
+            duration_seconds=3600,
+        )
+
+    response = await async_client.get(
+        "/api/v1/farm-cost-ledger",
+        params={
+            "date_from": "2026-07-13T11:30:00Z",
+            "date_to": "2026-07-13T13:30:00+00:00",
+            "limit": 1,
+            "offset": 0,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2
+    assert len(body["items"]) == 1
+    assert body["items"][0]["attempt_number"] == 3
+    assert body["summary"]["total_run_count"] == 2
+    assert body["summary"]["actual_material_cost"] == 500.0

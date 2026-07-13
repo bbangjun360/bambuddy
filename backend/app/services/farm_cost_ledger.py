@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from math import isfinite
 from typing import Any
 
-from sqlalchemy import Numeric, and_, case, cast, func, or_, select
+from sqlalchemy import Numeric, and_, case, cast, func, not_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
@@ -41,6 +41,10 @@ class CostPolicy:
         errors: list[str] = []
         if self.currency != "KRW":
             errors.append("currency_not_krw")
+        if self.material_rate_per_kg is not None and (
+            not isfinite(self.material_rate_per_kg) or self.material_rate_per_kg < 0
+        ):
+            errors.append("material_rate_invalid")
         if not isfinite(self.energy_rate_per_kwh) or self.energy_rate_per_kwh <= 0:
             errors.append("energy_rate_not_positive")
         if not isfinite(self.estimated_power_kw) or self.estimated_power_kw <= 0:
@@ -71,6 +75,21 @@ def _money(value: float | Decimal | None) -> float | None:
         return None
 
 
+def _nonnegative_money(value: float | Decimal | None) -> float | None:
+    parsed = _as_nonnegative_float(value)
+    return _money(parsed) if parsed is not None else None
+
+
+def _as_nonnegative_int(value: int | None) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 and parsed == value else None
+
+
 def _sum_money(*values: float | None) -> float | None:
     if any(value is None for value in values):
         return None
@@ -82,6 +101,39 @@ def _sql_money(value: Any) -> Any:
     return func.round(cast(value, Numeric(24, 8)), 2)
 
 
+def _sql_nonnegative_finite(value: Any) -> Any:
+    """Reject negative, infinite, and PostgreSQL NaN float evidence."""
+    return and_(value.isnot(None), value >= 0, value < float("inf"))
+
+
+def _normalize_db_datetime(value: datetime | None) -> datetime | None:
+    """Match the repository's UTC-naive DateTime columns for asyncpg binds."""
+    if value is None or value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+async def _lock_capture_scope(db: AsyncSession, entry: PrintLogEntry) -> None:
+    """Serialize attempt classification and duplicate capture on PostgreSQL."""
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+
+    if entry.archive_id is not None:
+        namespace = 11405
+        scope_key = entry.archive_id
+    else:
+        namespace = 11406
+        scope_key = entry.id
+    if scope_key is None:
+        raise ValueError("print log entry must be flushed before ledger capture")
+
+    await db.execute(
+        text(f"SELECT pg_advisory_xact_lock({namespace}, :scope_key)"),
+        {"scope_key": scope_key},
+    )
+
+
 async def _load_policy(db: AsyncSession, entry: PrintLogEntry) -> CostPolicy:
     from backend.app.api.routes.settings import get_setting
 
@@ -89,8 +141,15 @@ async def _load_policy(db: AsyncSession, entry: PrintLogEntry) -> CostPolicy:
     energy_rate = _as_nonnegative_float(await get_setting(db, "energy_cost_per_kwh")) or 0.0
     default_material_rate = _as_nonnegative_float(await get_setting(db, "default_filament_cost"))
     effective_material_rate = default_material_rate
-    if entry.cost is not None and entry.filament_used_grams and entry.filament_used_grams > 0:
-        effective_material_rate = entry.cost * 1000.0 / entry.filament_used_grams
+    actual_material_cost = _as_nonnegative_float(entry.cost)
+    actual_filament_grams = _as_nonnegative_float(entry.filament_used_grams)
+    invalid_actual_material_evidence = (entry.cost is not None and actual_material_cost is None) or (
+        entry.filament_used_grams is not None and actual_filament_grams is None
+    )
+    if invalid_actual_material_evidence:
+        effective_material_rate = float("nan")
+    elif actual_material_cost is not None and actual_filament_grams and actual_filament_grams > 0:
+        effective_material_rate = actual_material_cost * 1000.0 / actual_filament_grams
 
     return CostPolicy(
         currency=currency,
@@ -110,6 +169,7 @@ async def capture_cost_snapshot(
     if not settings.farm_actual_cost_ledger_enabled:
         return None
 
+    await _lock_capture_scope(db, entry)
     existing = await db.scalar(
         select(FarmCostLedgerSnapshot).where(FarmCostLedgerSnapshot.print_log_entry_id == entry.id)
     )
@@ -126,8 +186,8 @@ async def capture_cost_snapshot(
         return None
 
     archive = await db.get(PrintArchive, entry.archive_id) if entry.archive_id is not None else None
-    estimated_filament_grams = archive.filament_used_grams if archive is not None else None
-    estimated_duration_seconds = archive.print_time_seconds if archive is not None else None
+    estimated_filament_grams = _as_nonnegative_float(archive.filament_used_grams) if archive is not None else None
+    estimated_duration_seconds = _as_nonnegative_int(archive.print_time_seconds) if archive is not None else None
 
     attempt_number: int | None = None
     attempt_kind = "unlinked"
@@ -194,16 +254,17 @@ def _build_item(
     snapshot: FarmCostLedgerSnapshot,
     run: PrintLogEntry,
 ) -> FarmCostLedgerItem:
-    actual_material_cost = _money(run.cost)
-    actual_energy_cost = _money(run.energy_cost)
+    actual_material_cost = _nonnegative_money(run.cost)
+    actual_energy_cost = _nonnegative_money(run.energy_cost)
+    actual_duration_seconds = _as_nonnegative_int(run.duration_seconds)
     actual_machine_cost = None
-    if run.duration_seconds is not None:
-        actual_machine_cost = _money(run.duration_seconds / 3600.0 * snapshot.machine_rate_per_hour)
+    if actual_duration_seconds is not None:
+        actual_machine_cost = _nonnegative_money(actual_duration_seconds / 3600.0 * snapshot.machine_rate_per_hour)
 
     missing: list[str] = []
-    if run.cost is None:
+    if actual_material_cost is None:
         missing.append("material")
-    if run.energy_cost is None:
+    if actual_energy_cost is None:
         missing.append("energy")
     if actual_machine_cost is None:
         missing.append("machine_time")
@@ -232,10 +293,10 @@ def _build_item(
         estimated_energy_cost=snapshot.estimated_energy_cost,
         estimated_machine_cost=snapshot.estimated_machine_cost,
         estimated_total_cost=snapshot.estimated_total_cost,
-        actual_filament_grams=run.filament_used_grams,
-        actual_duration_seconds=run.duration_seconds,
+        actual_filament_grams=_as_nonnegative_float(run.filament_used_grams),
+        actual_duration_seconds=actual_duration_seconds,
         actual_material_cost=actual_material_cost,
-        actual_energy_kwh=run.energy_kwh,
+        actual_energy_kwh=_as_nonnegative_float(run.energy_kwh),
         actual_energy_cost=actual_energy_cost,
         actual_machine_cost=actual_machine_cost,
         actual_total_cost=actual_total_cost,
@@ -258,6 +319,8 @@ async def list_cost_ledger(
     limit: int = 50,
     offset: int = 0,
 ) -> FarmCostLedgerResponse:
+    date_from = _normalize_db_datetime(date_from)
+    date_to = _normalize_db_datetime(date_to)
     conditions = []
     if status is not None:
         conditions.append(PrintLogEntry.status == status)
@@ -288,19 +351,33 @@ async def list_cost_ledger(
     )
     items = [_build_item(snapshot, run) for snapshot, run in rows.all()]
 
-    actual_material = _sql_money(PrintLogEntry.cost)
-    actual_energy = _sql_money(PrintLogEntry.energy_cost)
+    actual_material_valid = _sql_nonnegative_finite(PrintLogEntry.cost)
+    actual_energy_valid = _sql_nonnegative_finite(PrintLogEntry.energy_cost)
+    actual_duration_valid = and_(
+        PrintLogEntry.duration_seconds.isnot(None),
+        PrintLogEntry.duration_seconds >= 0,
+    )
+    machine_rate_valid = _sql_nonnegative_finite(FarmCostLedgerSnapshot.machine_rate_per_hour)
+    actual_machine_valid = and_(actual_duration_valid, machine_rate_valid)
+    actual_material = case(
+        (actual_material_valid, _sql_money(PrintLogEntry.cost)),
+        else_=None,
+    )
+    actual_energy = case(
+        (actual_energy_valid, _sql_money(PrintLogEntry.energy_cost)),
+        else_=None,
+    )
     actual_machine = case(
         (
-            PrintLogEntry.duration_seconds.isnot(None),
+            actual_machine_valid,
             _sql_money(PrintLogEntry.duration_seconds / 3600.0 * FarmCostLedgerSnapshot.machine_rate_per_hour),
         ),
         else_=None,
     )
     actual_components_complete = and_(
-        PrintLogEntry.cost.isnot(None),
-        PrintLogEntry.energy_cost.isnot(None),
-        PrintLogEntry.duration_seconds.isnot(None),
+        actual_material_valid,
+        actual_energy_valid,
+        actual_machine_valid,
     )
     actual_total = case(
         (
@@ -320,9 +397,9 @@ async def list_cost_ledger(
         else_=None,
     )
     incomplete = or_(
-        PrintLogEntry.cost.is_(None),
-        PrintLogEntry.energy_cost.is_(None),
-        PrintLogEntry.duration_seconds.is_(None),
+        not_(actual_material_valid),
+        not_(actual_energy_valid),
+        not_(actual_machine_valid),
         FarmCostLedgerSnapshot.estimated_total_cost.is_(None),
     )
     summary_row = (
