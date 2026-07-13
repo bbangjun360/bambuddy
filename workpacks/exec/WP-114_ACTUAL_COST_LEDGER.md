@@ -147,7 +147,7 @@ the existing print-log/statistics tests.
   architecture guard passed 5/5. Isolated PostgreSQL proved a second linked
   write stayed blocked until the first outer transaction committed, then
   persisted distinct `(1, original)` and `(2, reprint)` snapshots.
-- [x] 2026-07-14 05:59 KST: Post-fix focused regression passed 49 tests and
+- [x] 2026-07-14 05:59 KST: Post-fix focused regression passed 64 tests and
   Ruff. `make verify-fast`, `make test-unit`, `make test-contract`, isolated
   `make test-integration`, and `make verify-full` all passed; the rebuilt
   PostgreSQL app on 18114 and main app on 18000 remained healthy with no app
@@ -303,7 +303,7 @@ requires the archive lock before INSERT, a failure-path regression preserves
 the canonical log when that lock fails, and the isolated database confirmed
 the competing write blocks through the first outer commit.
 
-The post-fix focused regression passed 49 tests plus Ruff. Final verify-fast,
+The post-fix focused regression passed 64 tests plus Ruff. Final verify-fast,
 unit, contract, isolated integration, and verify-full gates passed against the
 rebuilt PostgreSQL app on 18114. That app emitted no startup errors, Bambuddy
 still starts cleanly, and the main deployment on port 18000 remained healthy.
