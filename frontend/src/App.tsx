@@ -1,5 +1,5 @@
 import { Component, type ReactNode, type ErrorInfo } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from './components/Layout';
 import { PrintersPage } from './pages/PrintersPage';
@@ -93,13 +93,14 @@ function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { authEnabled, loading, user } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   }
 
   if (authEnabled && !user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
   return <>{children}</>;
@@ -112,6 +113,7 @@ function PermissionRoute({ permission, children }: { permission: string; childre
   // (e.g. settings:read grants read-only access to Settings; specific tabs
   // require their own permissions like users:read, groups:update, etc.).
   const { authEnabled, loading, user, hasPermission } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
@@ -123,7 +125,7 @@ function PermissionRoute({ permission, children }: { permission: string; childre
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
   if (!hasPermission(permission as Parameters<typeof hasPermission>[0])) {
@@ -195,6 +197,10 @@ function App() {
                   <Route index element={<PrintersPage />} />
                   <Route path="archives" element={<ArchivesPage />} />
                   <Route path="queue" element={<QueuePage />} />
+                  {/* Slicer Pipelines (#1425) — Pipelines tab lives on the
+                      Print Queue page (Queue + History + Timeline +
+                      Pipelines). Old standalone URL redirects. */}
+                  <Route path="pipelines/runs" element={<Navigate to="/queue?tab=pipelines" replace />} />
                   <Route path="stats" element={<StatsPage />} />
                   <Route path="profiles" element={<ProfilesPage />} />
                   <Route path="maintenance" element={<MaintenancePage />} />

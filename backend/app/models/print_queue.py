@@ -65,6 +65,22 @@ class PrintQueueItem(Base):
     # Auto-print G-code injection (#422)
     gcode_injection: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # H2C dual-nozzle-rack slicer pick preservation (#1780). BambuStudio's
+    # project_file MQTT command for rack-swap-capable models (O1C2 today)
+    # carries per-filament physical nozzle position IDs in `nozzle_mapping`,
+    # forwarded verbatim through the queue and replayed by the dispatcher so
+    # the firmware honours the user's pick instead of falling back to
+    # "last matching nozzle type" auto-pick. Stored as opaque JSON string
+    # (list[int]); NULL on every other model. `nozzles_info` is a deprecated
+    # column from the original #1780 attempt — kept nullable so old rows still
+    # load; never written to or read from.
+    nozzle_mapping: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nozzles_info: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Printer-card direct uploads create transient library rows. When this is
+    # true, the scheduler deletes the source row/files after archiving a copy.
+    cleanup_library_after_dispatch: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Print options
     bed_levelling: Mapped[bool] = mapped_column(Boolean, default=True)
     flow_cali: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -75,8 +91,26 @@ class PrintQueueItem(Base):
     # Nozzle offset calibration — dual-nozzle printers only, MQTT-gated (#1682)
     nozzle_offset_cali: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Preheat / heat-soak override (#1468). 'inherit' uses the global
+    # preheat_enabled setting; 'on' / 'off' force the per-item decision. The
+    # chamber target falls through: per-item override → max(filament-map[loaded
+    # tray type]) → 0 (skips chamber phase). 'inherit' + global off + override
+    # null = no preheat. Default 'inherit' so existing queue items behave
+    # exactly as before the migration.
+    preheat_override: Mapped[str] = mapped_column(String(10), default="inherit")
+    preheat_chamber_target_override: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Status: pending, printing, completed, failed, skipped, cancelled
     status: Mapped[str] = mapped_column(String(20), default="pending")
+
+    # Cleared by the per-printer "Resume after failure" action (#1818) so the
+    # scheduler's `_check_previous_success` lookback skips this row. Without
+    # this, a single `failed` or `aborted` print poisoned every later
+    # `require_previous_success` item on the same printer forever — the
+    # lookback excluded `skipped` but had no way to dismiss the originating
+    # failure. The flag is per-item, not per-printer, so a fresh failure
+    # after a resume re-gates downstream items independently.
+    gate_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Set by the dispatch scheduler when the assigned spool can't satisfy
     # this print's per-slot filament weight (#1496). Display-only flag — the

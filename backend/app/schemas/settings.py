@@ -39,6 +39,10 @@ class AppSettings(BaseModel):
         default=True,
         description="Report Partial Usage for Failed Prints. When a print fails or is cancelled, report the estimated filament used up to that point based on layer progress.",
     )
+    auto_add_unknown_rfid: bool = Field(
+        default=True,
+        description="Automatically add spools with unknown RFID tags to inventory. Disable if you pre-create inventory entries manually to avoid duplicates.",
+    )
     disable_filament_warnings: bool = Field(
         default=False,
         description="Disable insufficient filament warnings when printing or queueing prints",
@@ -72,6 +76,9 @@ class AppSettings(BaseModel):
         default=35.0, description="Temperature threshold for fair (orange): <= this value, > is red"
     )
     ams_history_retention_days: int = Field(default=30, description="Number of days to keep AMS sensor history data")
+    printer_sensor_history_retention_days: int = Field(
+        default=30, description="Number of days to keep printer heater history data (nozzle / bed / chamber)"
+    )
 
     # Queue auto-drying settings
     queue_drying_enabled: bool = Field(
@@ -85,9 +92,27 @@ class AppSettings(BaseModel):
         default=False,
         description="Automatically dry AMS filament on idle printers when humidity exceeds threshold, regardless of queue",
     )
+    print_drying_enabled: bool = Field(
+        default=False,
+        description=(
+            "Allow auto-drying to also fire on a printer that is currently printing, "
+            "when its model+firmware supports concurrent drying (H2D 01.03.00.00+, "
+            "H2C/H2S/P2S/H2D Pro 01.02.00.00+, X2D/A2L 01.01.00.00+, X1C 01.11.02.00+). "
+            "Drying temperature is automatically capped 5 degC below the idle preset "
+            "(floor 40 degC) to protect spools during print."
+        ),
+    )
     drying_presets: str = Field(
         default="",
         description="JSON blob of drying presets per filament type (empty = use built-in defaults)",
+    )
+    ams_humidity_thresholds: str = Field(
+        default="",
+        description=(
+            "JSON blob of per-filament-type humidity trigger thresholds for auto-drying and alarms. "
+            'Shape: {"default": int, "PLA": int, "ASA": int, ...}. '
+            "Empty = fall back to ams_humidity_fair for all types."
+        ),
     )
 
     # Auto-print G-code injection (#422)
@@ -114,6 +139,15 @@ class AppSettings(BaseModel):
 
     # Default printer for operations
     default_printer_id: int | None = Field(default=None, description="Default printer ID for uploads, reprints, etc.")
+
+    # Slicer Pipelines (#1425 PR C). Cap on the ``copies`` field in the
+    # Run-with-pipeline modal — keeps a misclick from queueing 5000 prints.
+    pipeline_max_copies: int = Field(
+        default=50,
+        ge=1,
+        le=1000,
+        description="Upper bound on the copies an operator can request when running a Slicer Pipeline. Larger fleets / production rigs can raise this; the hard ceiling at 1000 is a sanity guard against fat-fingered input.",
+    )
 
     # Virtual Printer
     virtual_printer_enabled: bool = Field(default=False, description="Enable virtual printer for slicer uploads")
@@ -240,6 +274,20 @@ class AppSettings(BaseModel):
         description="Low stock threshold percentage (%) for inventory filtering and display",
     )
 
+    # Session policy (#1706) — admin-set ceiling for user session lifetime.
+    # Default 24h preserves the M-2 audit reduction from 7 days. Max 720h
+    # (30 days) bounds blast radius if an admin chooses a long session.
+    session_max_hours: int = Field(
+        default=24,
+        ge=1,
+        le=720,
+        description=(
+            "Maximum session lifetime in hours for user logins (default 24, max 720). "
+            "Applies to new logins only; already-issued tokens keep their original expiry. "
+            "Longer sessions reduce automatic logout protection."
+        ),
+    )
+
     # User email notifications (requires Advanced Authentication)
     user_notifications_enabled: bool = Field(
         default=True,
@@ -271,12 +319,85 @@ class AppSettings(BaseModel):
 
     # Plate-clear confirmation for queue scheduling
     require_plate_clear: bool = Field(
-        default=False,
+        default=True,
         description="Require per-printer plate-clear confirmation before starting queued prints on finished printers",
     )
     queue_shortest_first: bool = Field(
         default=False,
         description="Shortest Job First — scheduler prioritizes shorter print jobs over longer ones",
+    )
+
+    # Preheat / heat-soak before queued prints (#1468). The scheduler stage runs
+    # BEFORE FTP upload. Three hardware tiers behave differently:
+    #   - Chamber heater (H2C/H2D/H2DPro/H2S/X2D/X1E): M141 → wait for chamber
+    #     sensor to reach target → soak
+    #   - Chamber sensor only (X1C/P2S): M140 only → wait for radiant chamber
+    #     warm-up to reach target OR max-wait timeout → soak
+    #   - No chamber sensor (P1S/P1P/A1/A1 Mini): M140 only → fixed soak timer
+    #     (no way to verify chamber temp; relies entirely on max_wait + soak)
+    # Chamber target derives per-print from the loaded AMS filament types via
+    # preheat_filament_targets (max across loaded slots). A target of 0 skips
+    # the chamber phase but keeps the bed phase + soak. Per-queue-item
+    # `preheat_chamber_target_override` (nullable) bypasses the derivation.
+    preheat_enabled: bool = Field(
+        default=False,
+        description="Master toggle / default for new queue items. Per-item preheat_override can flip the decision per print.",
+    )
+    preheat_filament_targets: str = Field(
+        default="",
+        description=(
+            "JSON map of normalized filament type → chamber target °C. Empty = bundled defaults "
+            "(PLA/PETG/TPU/PVA: 0, PETG-CF: 40, ABS/ASA: 45, PA/PC/PC-FR: 50, PA-CF: 55, default: 0). "
+            "Scheduler picks max across loaded AMS slots; 0 disables chamber phase for that print."
+        ),
+    )
+    preheat_max_wait_seconds: int = Field(
+        default=900,
+        ge=60,
+        le=3600,
+        description="Maximum time to wait for the chamber to reach the target before falling through to the soak phase (radiant heating on X1C/P2S can take 15-30 min).",
+    )
+    preheat_soak_seconds: int = Field(
+        default=300,
+        ge=0,
+        le=1800,
+        description="Additional hold time at temperature after the chamber reaches the target (or after max_wait_seconds elapses). 0 = no soak.",
+    )
+
+    # User-configurable presets for the printer-card temperature / fan-speed
+    # popovers. Each is a JSON array of exactly 3 ints (the "Off" button is
+    # rendered separately and is not configurable). Empty string = use built-in
+    # defaults. Validators on AppSettingsUpdate enforce the shape on writes.
+    nozzle_temp_presets: str = Field(
+        default="",
+        description="JSON array of 3 nozzle-temperature preset values in C (0-320). Empty = use defaults [120, 220, 260]",
+    )
+    bed_temp_presets: str = Field(
+        default="",
+        description="JSON array of 3 bed-temperature preset values in C (0-140). Empty = use defaults [55, 75, 90]",
+    )
+    chamber_temp_presets: str = Field(
+        default="",
+        description="JSON array of 3 chamber-temperature preset values in C (0-60). Empty = use defaults [35, 45, 60]",
+    )
+    fan_speed_presets: str = Field(
+        default="",
+        description="JSON array of 3 fan-speed preset values in % (0-100). Empty = use defaults [50, 75, 100]",
+    )
+
+    # Local login (#1589) — when False, /auth/login rejects username+password
+    # credentials with HTTP 403 and the login page hides the credentials form,
+    # leaving only the OIDC SSO provider buttons. LDAP is governed by its own
+    # `ldap_enabled` toggle and is not affected. The env-var
+    # ``BAMBUDDY_LOCAL_LOGIN=true`` bypasses this gate at the route level so a
+    # server admin can recover an install whose SSO provider is unreachable
+    # without editing the DB.
+    local_login_enabled: bool = Field(
+        default=True,
+        description=(
+            "Allow username + password login on /auth/login. Disable when only SSO should be usable. "
+            "BAMBUDDY_LOCAL_LOGIN=true on the server overrides this to keep a recovery path open."
+        ),
     )
 
     # LDAP authentication (#794)
@@ -357,11 +478,13 @@ class AppSettingsUpdate(BaseModel):
     spoolman_sync_mode: str | None = None
     spoolman_disable_weight_sync: bool | None = None
     spoolman_report_partial_usage: bool | None = None
+    auto_add_unknown_rfid: bool | None = None
     disable_filament_warnings: bool | None = None
     prefer_lowest_filament: bool | None = None
     check_updates: bool | None = None
     check_printer_firmware: bool | None = None
     include_beta_updates: bool | None = None
+    local_login_enabled: bool | None = None
     language: str | None = None
     notification_language: str | None = None
     bed_cooled_threshold: float | None = None
@@ -370,14 +493,18 @@ class AppSettingsUpdate(BaseModel):
     ams_temp_good: float | None = None
     ams_temp_fair: float | None = None
     ams_history_retention_days: int | None = None
+    printer_sensor_history_retention_days: int | None = None
     queue_drying_enabled: bool | None = None
     queue_drying_block: bool | None = None
     ambient_drying_enabled: bool | None = None
+    print_drying_enabled: bool | None = None
     drying_presets: str | None = None
+    ams_humidity_thresholds: str | None = None
     per_printer_mapping_expanded: bool | None = None
     date_format: str | None = None
     time_format: str | None = None
     default_printer_id: int | None = None
+    pipeline_max_copies: int | None = None
     virtual_printer_enabled: bool | None = None
     virtual_printer_access_code: str | None = None
     virtual_printer_mode: str | None = None
@@ -414,6 +541,7 @@ class AppSettingsUpdate(BaseModel):
     prometheus_enabled: bool | None = None
     prometheus_token: str | None = None
     low_stock_threshold: float | None = Field(default=None, ge=0.1, le=99.9)
+    session_max_hours: int | None = Field(default=None, ge=1, le=720)
     user_notifications_enabled: bool | None = None
     default_bed_levelling: bool | None = None
     default_flow_cali: bool | None = None
@@ -425,6 +553,14 @@ class AppSettingsUpdate(BaseModel):
     stagger_interval_minutes: int | None = Field(default=None, ge=1, le=60)
     require_plate_clear: bool | None = None
     queue_shortest_first: bool | None = None
+    preheat_enabled: bool | None = None
+    preheat_filament_targets: str | None = None
+    preheat_max_wait_seconds: int | None = Field(default=None, ge=60, le=3600)
+    preheat_soak_seconds: int | None = Field(default=None, ge=0, le=1800)
+    nozzle_temp_presets: str | None = None
+    bed_temp_presets: str | None = None
+    chamber_temp_presets: str | None = None
+    fan_speed_presets: str | None = None
     gcode_snippets: str | None = None
     local_backup_enabled: bool | None = None
     local_backup_schedule: str | None = None
@@ -489,6 +625,43 @@ class AppSettingsUpdate(BaseModel):
             raise ValueError("obico_enabled_printers must be a JSON array of printer IDs (integers)")
         return v
 
+    @staticmethod
+    def _validate_preset_triple(v: str | None, field_name: str, lo: int, hi: int) -> str | None:
+        """Validate a JSON array of exactly 3 ints in [lo, hi]. Empty = defaults."""
+        if v is None or v == "":
+            return v
+        try:
+            parsed = json.loads(v)
+        except json.JSONDecodeError:
+            raise ValueError(f"{field_name} must be valid JSON or empty")
+        if not isinstance(parsed, list) or len(parsed) != 3:
+            raise ValueError(f"{field_name} must be a JSON array of exactly 3 integers")
+        if not all(isinstance(item, int) and not isinstance(item, bool) for item in parsed):
+            raise ValueError(f"{field_name} entries must all be integers")
+        if not all(lo <= item <= hi for item in parsed):
+            raise ValueError(f"{field_name} entries must each be in [{lo}, {hi}]")
+        return v
+
+    @field_validator("nozzle_temp_presets")
+    @classmethod
+    def validate_nozzle_temp_presets(cls, v: str | None) -> str | None:
+        return cls._validate_preset_triple(v, "nozzle_temp_presets", 0, 320)
+
+    @field_validator("bed_temp_presets")
+    @classmethod
+    def validate_bed_temp_presets(cls, v: str | None) -> str | None:
+        return cls._validate_preset_triple(v, "bed_temp_presets", 0, 140)
+
+    @field_validator("chamber_temp_presets")
+    @classmethod
+    def validate_chamber_temp_presets(cls, v: str | None) -> str | None:
+        return cls._validate_preset_triple(v, "chamber_temp_presets", 0, 60)
+
+    @field_validator("fan_speed_presets")
+    @classmethod
+    def validate_fan_speed_presets(cls, v: str | None) -> str | None:
+        return cls._validate_preset_triple(v, "fan_speed_presets", 0, 100)
+
     @field_validator("obico_sensitivity")
     @classmethod
     def validate_obico_sensitivity(cls, v: str | None) -> str | None:
@@ -518,6 +691,11 @@ class AppSettingsUpdate(BaseModel):
             raise ValueError("default_sidebar_order must be valid JSON or empty")
         if isinstance(parsed, dict):
             order = parsed.get("order")
+            hidden_system_item_ids = parsed.get("hiddenSystemItemIds", [])
+            if not isinstance(hidden_system_item_ids, list) or not all(
+                isinstance(item, str) for item in hidden_system_item_ids
+            ):
+                raise ValueError("sidebar hidden system item IDs must be an array of strings")
         elif isinstance(parsed, list):
             order = parsed
         else:

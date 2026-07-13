@@ -38,6 +38,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
   const [onPrintProgress, setOnPrintProgress] = useState(provider?.on_print_progress ?? false);
   const [onPrinterOffline, setOnPrinterOffline] = useState(provider?.on_printer_offline ?? false);
   const [onPrinterError, setOnPrinterError] = useState(provider?.on_printer_error ?? false);
+  const [onAiFailureDetection, setOnAiFailureDetection] = useState(provider?.on_ai_failure_detection ?? false);
   const [onFilamentLow, setOnFilamentLow] = useState(provider?.on_filament_low ?? false);
   const [onMaintenanceDue, setOnMaintenanceDue] = useState(provider?.on_maintenance_due ?? false);
   const [onStockReorderAlert, setOnStockReorderAlert] = useState(provider?.on_stock_reorder_alert ?? false);
@@ -167,6 +168,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
       on_print_progress: onPrintProgress,
       on_printer_offline: onPrinterOffline,
       on_printer_error: onPrinterError,
+      on_ai_failure_detection: onAiFailureDetection,
       on_filament_low: onFilamentLow,
       on_maintenance_due: onMaintenanceDue,
       on_stock_reorder_alert: onStockReorderAlert,
@@ -282,7 +284,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {error && (
-            <div className="p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-sm text-red-400">
+            <div className="p-3 bg-red-100 dark:bg-red-500/20 border border-red-300 dark:border-red-500/50 rounded-lg text-sm text-red-700 dark:text-red-400">
               {error}
             </div>
           )}
@@ -390,7 +392,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
             <div className={`p-3 rounded-lg flex items-center gap-2 ${
               testResult.success
                 ? 'bg-bambu-green/20 border border-bambu-green/50 text-bambu-green'
-                : 'bg-red-500/20 border border-red-500/50 text-red-400'
+                : 'bg-red-100 dark:bg-red-500/20 border border-red-300 dark:border-red-500/50 text-red-700 dark:text-red-400'
             }`}>
               {testResult.success ? (
                 <>
@@ -548,6 +550,10 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
                   <Toggle checked={onPrinterError} onChange={setOnPrinterError} />
                 </div>
                 <div className="flex items-center justify-between">
+                  <span className="text-sm text-white">{t('notifications.aiFailureDetection')}</span>
+                  <Toggle checked={onAiFailureDetection} onChange={setOnAiFailureDetection} />
+                </div>
+                <div className="flex items-center justify-between">
                   <span className="text-sm text-white">{t('notifications.lowFilament')}</span>
                   <Toggle checked={onFilamentLow} onChange={setOnFilamentLow} />
                 </div>
@@ -591,6 +597,7 @@ export function AddNotificationModal({ provider, onClose }: AddNotificationModal
               if (onFirstLayerComplete) enabledEvents.push({ key: 'on_first_layer_complete', label: t('notifications.firstLayerCompleteLabel') });
               if (onPrinterOffline) enabledEvents.push({ key: 'on_printer_offline', label: t('notifications.offline') });
               if (onPrinterError) enabledEvents.push({ key: 'on_printer_error', label: t('notifications.error') });
+              if (onAiFailureDetection) enabledEvents.push({ key: 'on_ai_failure_detection', label: t('notifications.aiFailureDetection') });
               if (onFilamentLow) enabledEvents.push({ key: 'on_filament_low', label: t('notifications.lowFilament') });
               if (onMaintenanceDue) enabledEvents.push({ key: 'on_maintenance_due', label: t('notifications.maintenance') });
               if (onStockReorderAlert) enabledEvents.push({ key: 'on_stock_reorder_alert', label: t('notifications.stockReorderAlert') });

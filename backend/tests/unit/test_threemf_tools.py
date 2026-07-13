@@ -14,7 +14,9 @@ from backend.app.utils.threemf_tools import (
     extract_embedded_presets_from_3mf,
     extract_filament_usage_from_3mf,
     extract_plate_extruder_set_from_3mf,
+    extract_print_time_from_3mf,
     extract_project_filaments_from_3mf,
+    extract_support_filament_slots_from_3mf,
     get_cumulative_usage_at_layer,
     mm_to_grams,
     parse_gcode_layer_filament_usage,
@@ -841,3 +843,194 @@ class TestExtractBedTypeFrom3mf:
         file_path.write_bytes(create_mock_3mf(xml_content).read())
 
         assert extract_bed_type_from_3mf(file_path) == "Textured PEI Plate"
+
+
+class TestExtractPrintTimeFrom3mf:
+    """Tests for extract_print_time_from_3mf — the per-plate `prediction` reader
+    used by the completion notification path to scope the archive-level (summed)
+    total down to the actually-printed plate (#1785)."""
+
+    def test_returns_plate_prediction_when_plate_id_matches(self, tmp_path):
+        xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+        <config>
+            <plate>
+                <metadata key="index" value="1"/>
+                <metadata key="prediction" value="3600"/>
+            </plate>
+            <plate>
+                <metadata key="index" value="2"/>
+                <metadata key="prediction" value="7200"/>
+            </plate>
+            <plate>
+                <metadata key="index" value="3"/>
+                <metadata key="prediction" value="10800"/>
+            </plate>
+        </config>
+        """
+        file_path = tmp_path / "test.3mf"
+        file_path.write_bytes(create_mock_3mf(xml_content).read())
+
+        assert extract_print_time_from_3mf(file_path, plate_id=2) == 7200
+
+    def test_returns_first_plate_when_no_plate_id(self, tmp_path):
+        xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+        <config>
+            <plate>
+                <metadata key="index" value="1"/>
+                <metadata key="prediction" value="900"/>
+            </plate>
+            <plate>
+                <metadata key="index" value="2"/>
+                <metadata key="prediction" value="1800"/>
+            </plate>
+        </config>
+        """
+        file_path = tmp_path / "test.3mf"
+        file_path.write_bytes(create_mock_3mf(xml_content).read())
+
+        assert extract_print_time_from_3mf(file_path) == 900
+
+    def test_returns_none_when_plate_id_missing(self, tmp_path):
+        xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+        <config>
+            <plate>
+                <metadata key="index" value="1"/>
+                <metadata key="prediction" value="3600"/>
+            </plate>
+        </config>
+        """
+        file_path = tmp_path / "test.3mf"
+        file_path.write_bytes(create_mock_3mf(xml_content).read())
+
+        assert extract_print_time_from_3mf(file_path, plate_id=5) is None
+
+    def test_returns_none_when_prediction_unparseable(self, tmp_path):
+        xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+        <config>
+            <plate>
+                <metadata key="index" value="1"/>
+                <metadata key="prediction" value="not-a-number"/>
+            </plate>
+        </config>
+        """
+        file_path = tmp_path / "test.3mf"
+        file_path.write_bytes(create_mock_3mf(xml_content).read())
+
+        assert extract_print_time_from_3mf(file_path, plate_id=1) is None
+
+    def test_returns_none_when_slice_info_missing(self, tmp_path):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("other_file.txt", "content")
+        buffer.seek(0)
+
+        file_path = tmp_path / "test.3mf"
+        file_path.write_bytes(buffer.read())
+
+        assert extract_print_time_from_3mf(file_path) is None
+        assert extract_print_time_from_3mf(file_path, plate_id=1) is None
+
+    def test_returns_none_when_file_invalid(self, tmp_path):
+        file_path = tmp_path / "invalid.3mf"
+        file_path.write_text("not a zip file")
+
+        assert extract_print_time_from_3mf(file_path) is None
+        assert extract_print_time_from_3mf(file_path, plate_id=1) is None
+
+    def test_returns_none_when_file_missing(self, tmp_path):
+        file_path = tmp_path / "nonexistent.3mf"
+
+        assert extract_print_time_from_3mf(file_path) is None
+        assert extract_print_time_from_3mf(file_path, plate_id=2) is None
+
+
+# ---------------------------------------------------------------------------
+# Tests for extract_support_filament_slots_from_3mf — #1881: a plate that uses
+# PVA (or any material) exclusively for supports doesn't reference the support
+# slot from object geometry, so without this helper substitute_unused_plate_
+# filaments overwrites the user's support-material profile with slot 1's.
+# ---------------------------------------------------------------------------
+
+
+class TestExtractSupportFilamentSlotsFrom3mf:
+    def test_pla_object_plus_pva_support_returns_support_slot(self):
+        # The reporter's exact scenario (#1881): slot 1 = PLA (model),
+        # slot 2 = PVA (support). enable_support on. Without this the
+        # substitute logic replaces slot 2's PVA profile with PLA and
+        # the printed supports come out in PLA.
+        cfg = json.dumps(
+            {
+                "enable_support": "1",
+                "support_filament": "2",
+                "support_interface_filament": "2",
+                "filament_type": ["PLA", "PVA"],
+            }
+        )
+        with _make_3mf_with({"Metadata/project_settings.config": cfg}) as zf:
+            assert extract_support_filament_slots_from_3mf(zf) == {2}
+
+    def test_distinct_support_body_and_interface_slots(self):
+        cfg = json.dumps(
+            {
+                "enable_support": "1",
+                "support_filament": "2",
+                "support_interface_filament": "3",
+            }
+        )
+        with _make_3mf_with({"Metadata/project_settings.config": cfg}) as zf:
+            assert extract_support_filament_slots_from_3mf(zf) == {2, 3}
+
+    def test_supports_disabled_returns_empty(self):
+        # enable_support off — supports won't be printed even if a slot is
+        # configured. Don't force it into the "used" set; substitution
+        # should still homogenise the loaded-filament array.
+        cfg = json.dumps(
+            {
+                "enable_support": "0",
+                "support_filament": "2",
+                "support_interface_filament": "2",
+            }
+        )
+        with _make_3mf_with({"Metadata/project_settings.config": cfg}) as zf:
+            assert extract_support_filament_slots_from_3mf(zf) == set()
+
+    def test_slot_zero_treated_as_same_as_model(self):
+        # BambuStudio's `0` for support_filament means "same as model" —
+        # no dedicated slot to preserve.
+        cfg = json.dumps(
+            {
+                "enable_support": "1",
+                "support_filament": "0",
+                "support_interface_filament": "0",
+            }
+        )
+        with _make_3mf_with({"Metadata/project_settings.config": cfg}) as zf:
+            assert extract_support_filament_slots_from_3mf(zf) == set()
+
+    def test_boolean_enable_support_accepted(self):
+        # Some forks / older versions write a real JSON bool instead of "1"/"0".
+        cfg = json.dumps({"enable_support": True, "support_filament": "2"})
+        with _make_3mf_with({"Metadata/project_settings.config": cfg}) as zf:
+            assert extract_support_filament_slots_from_3mf(zf) == {2}
+
+    def test_integer_slot_value_accepted(self):
+        cfg = json.dumps({"enable_support": "1", "support_filament": 3})
+        with _make_3mf_with({"Metadata/project_settings.config": cfg}) as zf:
+            assert extract_support_filament_slots_from_3mf(zf) == {3}
+
+    def test_missing_project_settings_returns_empty(self):
+        with _make_3mf_with({"placeholder.txt": "hi"}) as zf:
+            assert extract_support_filament_slots_from_3mf(zf) == set()
+
+    def test_malformed_json_returns_empty(self):
+        with _make_3mf_with({"Metadata/project_settings.config": b"{not json"}) as zf:
+            assert extract_support_filament_slots_from_3mf(zf) == set()
+
+    def test_root_is_list_returns_empty(self):
+        with _make_3mf_with({"Metadata/project_settings.config": json.dumps([])}) as zf:
+            assert extract_support_filament_slots_from_3mf(zf) == set()
+
+    def test_non_numeric_slot_value_skipped(self):
+        cfg = json.dumps({"enable_support": "1", "support_filament": "not-a-number"})
+        with _make_3mf_with({"Metadata/project_settings.config": cfg}) as zf:
+            assert extract_support_filament_slots_from_3mf(zf) == set()
