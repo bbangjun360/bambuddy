@@ -63,12 +63,17 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    WP-076 allowlist+hash model); flags stay default-off; the UI never
    auto-fills the checklist or phrase. Read-only monitoring (failure log,
    overview) ships first and is routine-mergeable.
+9. **Operator UI redesign — started by WP-112** — operator-approved 2026-07-13
+   after upstream v0.2.4.9 integration. WP-112 changes only the shared operator
+   shell: route context, workflow navigation sections, and existing pending-work
+   signals. Printer, queue, library/inventory, and settings redesigns follow as
+   separate observable Work Packages after operators review each preceding
+   slice; no page workflow or backend contract is changed by WP-112.
 
 ## Explicitly deferred (do not start without operator approval)
 
 - ERP Stage C–E (automatic queue, auto-submit) — spec gates these on a full
   reconciliation cycle and finance approval.
-- UI redesign (spec WP-12) — only after operators have used the system.
 - Multi-fork governance apparatus (spec WP-00 full form: fork catalog,
   farm-contracts, components.lock) — right-size later; current single-repo
   reality does not need it.

@@ -77,6 +77,22 @@ describe('Layout', () => {
       });
     });
 
+    it('renders the route-aware operator shell and workflow sections', async () => {
+      render(<Layout />);
+
+      await waitFor(() => {
+        const topBar = document.querySelector('header[aria-label="Workspace"]');
+        const sidebar = document.querySelector('aside[aria-label="Workspace"]');
+
+        expect(topBar).toBeInTheDocument();
+        expect(topBar?.textContent).toContain('Printers');
+        expect(sidebar?.textContent).toContain('Fleet');
+        expect(sidebar?.textContent).toContain('Production');
+        expect(sidebar?.textContent).toContain('Insights');
+        expect(sidebar?.textContent).toContain('Administration');
+      });
+    });
+
     it('renders navigation links', async () => {
       render(<Layout />);
 
@@ -84,6 +100,70 @@ describe('Layout', () => {
         // Navigation links should be present
         const links = document.querySelectorAll('a');
         expect(links.length).toBeGreaterThan(0);
+      });
+    });
+
+    it('keeps the pending queue count attached to the queue destination', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([
+            { id: 41, printer_id: 1, status: 'pending' },
+            { id: 42, printer_id: 1, status: 'pending' },
+          ]),
+        ),
+      );
+
+      render(<Layout />);
+
+      await waitFor(() => {
+        const queueLink = document.querySelector('aside a[href="/queue"]');
+        expect(queueLink).toBeInTheDocument();
+        expect(queueLink?.textContent).toContain('2');
+
+        const queueStatus = document.querySelector(
+          'header a[href="/queue"][aria-label="Print Queue: 2"]',
+        );
+        expect(queueStatus).toBeInTheDocument();
+        expect(queueStatus?.textContent).toContain('2');
+      });
+    });
+
+    it('links pending uploads to archives from the operator top bar', async () => {
+      server.use(
+        http.get('/api/v1/pending-uploads/count', () =>
+          HttpResponse.json({ count: 3 }),
+        ),
+      );
+
+      render(<Layout />);
+
+      await waitFor(() => {
+        const archiveStatus = document.querySelector(
+          'header a[href="/archives"][aria-label="Archives: 3"]',
+        );
+        expect(archiveStatus).toBeInTheDocument();
+        expect(archiveStatus?.textContent).toContain('3');
+      });
+    });
+
+    it('surfaces a plate-clear warning without adding a control action', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () =>
+          HttpResponse.json([{ id: 41, printer_id: 1, status: 'pending' }]),
+        ),
+        http.get('/api/v1/printers/:id/status', () =>
+          HttpResponse.json({ connected: true, state: 'IDLE', awaiting_plate_clear: true }),
+        ),
+      );
+
+      render(<Layout />);
+
+      await waitFor(() => {
+        const warning = document.querySelector(
+          'header a[href="/"][aria-label="Plate clear required"]',
+        );
+        expect(warning).toBeInTheDocument();
+        expect(warning?.tagName).toBe('A');
       });
     });
   });
