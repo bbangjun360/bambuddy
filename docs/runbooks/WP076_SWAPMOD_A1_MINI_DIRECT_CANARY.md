@@ -32,6 +32,47 @@ against the configured SHA-256, requires UTF-8, and sends only the verified
 snapshot. It serializes the named printer in the database and commits the active
 SwapMod state before calling the printer transport.
 
+## Sequence Candidate Editor
+
+WP-110 adds an optional structured editor for feedrates. Keep the physical
+canary disarmed while using it:
+
+```bash
+FARM_SWAPMOD_A1MINI_SEQUENCE_EDITOR_ENABLED=true
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ENABLED=false
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ALLOW_REAL_COMMANDS=false
+```
+
+The read endpoint requires `settings:read`. Saving requires both
+`settings:update` and `printers:control`; API keys cannot use the administrative
+settings permission. The editor returns only server-generated action IDs,
+targets, and numeric feedrates. It never accepts or returns sequence text, a
+filesystem path, a coordinate override, or a printer command.
+
+Only a `G0`/`G1` line containing exactly one positive integer `F` word in the
+range 1..30000 is editable. A save must submit the complete server-provided
+action set and the current pinned base SHA-256. Bambuddy re-reads and verifies
+the pinned source, replaces only those numeric `F` spans, and leaves every other
+byte and the configured source file unchanged.
+
+Each save creates a new mode-0700 candidate directory entry with a mode-0600
+`.gcode` file and a mode-0600 JSON audit manifest. Creation is exclusive, so an
+existing version is never overwritten. The API returns a server-generated
+version ID and fresh SHA-256, but no path or sequence text. The manifest and
+structured application log record the version ID, step, base hash, candidate
+hash, operator, `PENDING_REVIEW` status, and `active=false` without recording
+sequence content.
+
+Saving is not approval or activation. There is no approval, activation,
+selection, upload, or transport endpoint for candidate versions. To use a
+candidate in a later supervised session, an operator must keep the canary
+disarmed, inspect the candidate and manifest directly under the configured
+sequence root, independently verify the candidate hash, review the intended
+physical motion against the named-canary checklist, then
+explicitly update the corresponding relative sequence filename and SHA-256
+environment settings and restart Bambuddy. The ordinary checklist and exact
+confirmation phrase still apply after re-arming.
+
 ## Checklist
 
 Every field must be true before a direct transport request:
@@ -94,6 +135,11 @@ Stop immediately if any of these occur:
 - any route attempts queue, scheduler, upload/start, raw command, multi-printer,
   automatic retry, or next-print automation.
 
+For candidate editing, stop without saving if the editor flag is off, either
+direct canary flag is armed, the base hash is stale, the pinned file fails hash
+or UTF-8 verification, the action set differs from the server snapshot, a
+feedrate is outside 1..30000, or candidate storage cannot be created exclusively.
+
 ## Rollback
 
 Set either flag false and restart Bambuddy if needed:
@@ -107,3 +153,9 @@ There is no migration and no automatic resume after restart. Disabling the flags
 does not reset an already active or uncertain cycle. Inspect the named printer,
 leave the cycle blocked from retry, and complete the existing manual
 reconciliation/verification procedure before any new physical request.
+
+To roll back only the editor, set
+`FARM_SWAPMOD_A1MINI_SEQUENCE_EDITOR_ENABLED=false` and restart. Existing
+candidate files remain inert and unselected; the active pinned source and its
+environment configuration were never modified by the editor. Retain candidates
+and manifests for audit unless an operator explicitly approves their removal.

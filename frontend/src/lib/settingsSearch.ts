@@ -18,6 +18,7 @@ export type SettingsSearchTab =
   | 'apikeys'
   | 'virtual-printer'
   | 'spoolbuddy'
+  | 'swapmod'
   | 'users'
   | 'backup'
   | 'failure-detection';

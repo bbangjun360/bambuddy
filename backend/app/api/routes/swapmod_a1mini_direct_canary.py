@@ -11,10 +11,15 @@ from backend.app.core.permissions import Permission
 from backend.app.models.printer import Printer
 from backend.app.models.user import User
 from backend.app.schemas.swapmod_a1mini_direct_canary import SwapmodA1MiniDirectCanaryTransportRequest
+from backend.app.schemas.swapmod_sequence_editor import SwapmodSequenceCandidateRequest
 from backend.app.services.printer_manager import printer_manager
 from backend.app.services.swapmod_a1mini_direct_canary import (
     SwapmodA1MiniDirectCanaryError,
     swapmod_a1mini_direct_canary_service,
+)
+from backend.app.services.swapmod_sequence_editor import (
+    SwapmodSequenceEditorError,
+    swapmod_sequence_editor_service,
 )
 from backend.app.services.swapmod_state_machine import get_swapmod_cycle
 
@@ -58,6 +63,19 @@ def _require_direct_canary_enabled(printer_id: int) -> None:
     _require_direct_canary_target(printer_id)
 
 
+def _sequence_editor_config() -> dict[str, object]:
+    return {
+        "enabled": settings.farm_swapmod_a1mini_sequence_editor_enabled,
+        "direct_canary_enabled": settings.farm_swapmod_a1mini_direct_canary_enabled,
+        "allow_real_commands": settings.farm_swapmod_a1mini_direct_canary_allow_real_commands,
+        "sequence_root": settings.farm_swapmod_a1mini_direct_canary_sequence_root,
+        "release_sequence_file": settings.farm_swapmod_a1mini_direct_canary_release_sequence_file,
+        "release_sequence_sha256": settings.farm_swapmod_a1mini_direct_canary_release_sequence_sha256,
+        "load_sequence_file": settings.farm_swapmod_a1mini_direct_canary_load_sequence_file,
+        "load_sequence_sha256": settings.farm_swapmod_a1mini_direct_canary_load_sequence_sha256,
+    }
+
+
 @router.get("/status")
 async def get_swapmod_a1mini_direct_canary_status(
     _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_READ),
@@ -77,6 +95,30 @@ async def get_swapmod_a1mini_direct_canary_status(
             and settings.farm_swapmod_a1mini_direct_canary_load_sequence_sha256
         ),
     )
+
+
+@router.get("/sequence-editor")
+def get_swapmod_sequence_editor_status(
+    _: User | None = RequirePermissionIfAuthEnabled(Permission.SETTINGS_READ),
+):
+    return swapmod_sequence_editor_service.status_snapshot(**_sequence_editor_config())
+
+
+@router.post("/sequence-versions", status_code=201)
+def create_swapmod_sequence_candidate(
+    body: SwapmodSequenceCandidateRequest,
+    operator: User | None = RequirePermissionIfAuthEnabled(Permission.SETTINGS_UPDATE, Permission.PRINTERS_CONTROL),
+):
+    try:
+        return swapmod_sequence_editor_service.create_candidate(
+            step=body.step,
+            base_sha256=body.base_sha256,
+            actions=[action.model_dump() for action in body.actions],
+            created_by=operator.username if operator is not None else "local-auth-disabled",
+            **_sequence_editor_config(),
+        )
+    except SwapmodSequenceEditorError as exc:
+        raise HTTPException(status_code=400, detail={"code": exc.code, "message": exc.message}) from exc
 
 
 @router.get("/confirmation-preview")

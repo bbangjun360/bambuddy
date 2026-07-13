@@ -32,6 +32,7 @@ import { ColorCatalogSettings } from '../components/ColorCatalogSettings';
 import { ExternalLinksSettings } from '../components/ExternalLinksSettings';
 import { VirtualPrinterList } from '../components/VirtualPrinterList';
 import { SpoolBuddySettings } from '../components/SpoolBuddySettings';
+import { SwapModSequenceEditor } from '../components/swapmod/SwapModSequenceEditor';
 import { GitHubBackupSettings } from '../components/GitHubBackupSettings';
 import { FailureDetectionSettings } from '../components/FailureDetectionSettings';
 import { EmailSettings } from '../components/EmailSettings';
@@ -89,6 +90,8 @@ registerSettingsSearch({ labelKey: 'settings.apiBrowser', tab: 'apikeys', keywor
 registerSettingsSearch({ labelKey: 'cameraTokens.title', tab: 'apikeys', keywords: 'camera token long-lived home assistant frigate kiosk stream', anchor: 'card-camera-tokens' });
 registerSettingsSearch({ labelKey: 'settings.tabs.virtualPrinter', tab: 'virtual-printer', keywords: 'virtual printer proxy archive slicer bambustudio orcaslicer ip bind', anchor: 'card-vp' });
 registerSettingsSearch({ labelKey: 'settings.tabs.spoolbuddy', tab: 'spoolbuddy', keywords: 'spoolbuddy device scale nfc rfid kiosk unregister', anchor: 'card-spoolbuddy' });
+registerSettingsSearch({ labelKey: 'settings.swapmod.sequenceEditor', labelFallback: 'Sequence editor', tab: 'swapmod', keywords: 'swapmod sequence speed feedrate version hash review', anchor: 'card-swapmod-sequences' });
+registerSettingsSearch({ labelKey: 'settings.swapmod.failureLogDescription', labelFallback: 'SwapMod failure log', tab: 'swapmod', keywords: 'swapmod failure manual review blocked cycle', anchor: 'card-swapmod-failures' });
 registerSettingsSearch({ labelKey: 'settings.currentUser', tab: 'users', subTab: 'users', keywords: 'current user profile password change', anchor: 'card-currentuser' });
 registerSettingsSearch({ labelKey: 'settings.users', tab: 'users', subTab: 'users', keywords: 'users accounts list', anchor: 'card-users' });
 registerSettingsSearch({ labelKey: 'settings.groups', tab: 'users', subTab: 'users', keywords: 'groups roles permissions administrators operators viewers', anchor: 'card-groups' });
@@ -6508,7 +6511,7 @@ export function SettingsPage() {
       )}
 
       {activeTab === 'swapmod' && (
-        <div className="space-y-4" id="card-swapmod-failures">
+        <div className="space-y-4" id="card-swapmod">
           <div className="bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg p-4">
             <div className="flex items-center gap-2 mb-1">
               <RefreshCw className="w-5 h-5 text-bambu-green" />
@@ -6516,7 +6519,8 @@ export function SettingsPage() {
             </div>
             <p className="text-sm text-bambu-gray">{t('settings.swapmod.failureLogDescription', 'Recent plate-change cycles that ended in manual review. Read-only.')}</p>
           </div>
-          <div className="bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg overflow-hidden">
+          <SwapModSequenceEditor />
+          <div className="bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg overflow-hidden" id="card-swapmod-failures">
             <div className="flex items-center gap-4 px-4 py-2 border-b border-bambu-dark-tertiary text-xs font-semibold text-bambu-gray">
               <div className="w-44 flex-shrink-0">{t('settings.swapmod.colTime', 'Updated')}</div>
               <div className="w-20 flex-shrink-0">{t('settings.swapmod.colPrinter', 'Printer')}</div>

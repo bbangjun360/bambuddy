@@ -63,15 +63,23 @@ patches:
     files:
       - backend/app/core/config.py
       - backend/app/api/routes/swapmod_a1mini_direct_canary.py
+      - backend/app/schemas/swapmod_sequence_editor.py
       - backend/app/services/swapmod_a1mini_direct_canary.py
+      - backend/app/services/swapmod_sequence_editor.py
       - frontend/src/api/client.ts
       - frontend/src/components/swapmod/SwapModPlateChangeControl.tsx
+      - frontend/src/components/swapmod/SwapModSequenceEditor.tsx
+      - frontend/src/lib/settingsSearch.ts
       - frontend/src/pages/PrintersPage.tsx
-    upstream_area: Printer card composition and supervised SwapMod direct-canary control
+      - frontend/src/pages/SettingsPage.tsx
+      - harness/docker-compose.harness.yml
+    upstream_area: Printer card composition, SwapMod settings, and supervised direct-canary control
     reason: >-
       Replace the curl-only supervised plate-change procedure with an operator
       control while preserving the WP-076 named-canary, allowlisted-sequence,
       checklist, exact-phrase, manual-verification, and no-auto-resume gates.
+      Add structured feedrate candidate generation without adding a raw sequence,
+      activation, or transport path.
     behavior: >-
       The control renders only for the configured, connected, controllable A1
       Mini canary while both default-off flags are armed. It creates no cycle
@@ -80,18 +88,27 @@ patches:
       failure, uncertain response, stale state, or another unresolved cycle. The
       backend serializes each named-printer claim, refreshes state under the lock,
       commits an active transition before transport, and hashes and sends one
-      immutable sequence snapshot.
+      immutable sequence snapshot. The default-off sequence editor re-verifies
+      that pinned snapshot, accepts only the complete server-generated action ID
+      and integer feedrate set, and exclusively writes an inactive pending-review
+      version plus a redacted audit manifest. It never modifies or selects the
+      configured active sequence.
     feature_flags:
       - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ENABLED=false
       - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ALLOW_REAL_COMMANDS=false
       - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_TARGET_PRINTER_ID=
+      - FARM_SWAPMOD_A1MINI_SEQUENCE_EDITOR_ENABLED=false
     rollback: >-
       Disable either direct-canary flag and revert the WP-110 Draft PR. The
       target-printer setting is additive, no migration exists, and uncertain
       cycles are never resumed or reset automatically; an already active cycle
-      remains subject to manual reconciliation.
+      remains subject to manual reconciliation. Disable the sequence-editor flag
+      to remove its UI and write endpoint; generated candidates remain inactive
+      audit artifacts and the configured filename/hash are unchanged.
     validation:
       - npm --prefix frontend run test -- --run src/__tests__/components/SwapModPlateChangeControl.test.tsx
+      - npm --prefix frontend run test -- --run src/__tests__/components/SwapModSequenceEditor.test.tsx
+      - python -m unittest backend.tests.unit.services.test_swapmod_sequence_editor backend.tests.unit.test_swapmod_sequence_editor_architecture backend.tests.integration.test_swapmod_sequence_editor_api
       - npm --prefix frontend run test -- --run
       - npm --prefix frontend run lint
       - npm --prefix frontend run build
