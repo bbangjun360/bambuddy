@@ -23,11 +23,13 @@ it is never assigned by searching for the latest row of the same archive.
 Failed attempts and reprints are separate print-log rows. Their cost is never
 overwritten by a later successful run.
 
-On PostgreSQL, snapshot capture takes a transaction-scoped advisory lock for
-the linked archive before classifying the attempt. Concurrent completions for
-one archive therefore receive serialized original/reprint classifications.
-Unlinked rows use their print-log ID as an independent lock scope. SQLite
-remains lock-free for local tests and single-process development.
+On PostgreSQL, the print-log hook takes a transaction-scoped advisory lock for
+the linked archive before inserting the run row, then retains it while the row
+is classified and snapshotted. Concurrent completions for one archive
+therefore receive insertion-ordered, serialized original/reprint
+classifications even when their transactions reach capture in a different
+order. Unlinked rows use their print-log ID as an independent lock scope.
+SQLite remains lock-free for local tests and single-process development.
 
 ## Preconditions
 
@@ -54,6 +56,11 @@ non-finite, or the policy version is empty, Bambuddy retains the canonical
 print-log row but skips the cost snapshot and writes a
 `farm_cost_ledger_snapshot_skipped` warning. It never relabels another
 currency as KRW.
+
+If linked-scope lock acquisition fails, Bambuddy logs
+`farm_cost_ledger_scope_lock_failed`, skips that optional snapshot, and still
+commits the canonical print-log row. A later diagnostic or recovery process
+must not invent a historical snapshot with current rates.
 
 ## Calculations
 

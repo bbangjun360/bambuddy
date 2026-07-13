@@ -22,3 +22,37 @@ async def test_snapshot_exception_never_removes_canonical_print_log(db_session, 
 
     assert await db_session.get(PrintLogEntry, entry.id) is not None
     assert await db_session.scalar(select(func.count(FarmCostLedgerSnapshot.id))) == 0
+
+
+async def test_archive_lock_exception_never_removes_canonical_print_log(
+    db_session,
+    printer_factory,
+    archive_factory,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "farm_actual_cost_ledger_enabled", True)
+    printer = await printer_factory()
+    archive = await archive_factory(printer.id, with_run=False)
+    capture_called = False
+
+    async def fail_lock(*_args, **_kwargs):
+        raise RuntimeError("synthetic advisory-lock failure")
+
+    async def record_capture(*_args, **_kwargs):
+        nonlocal capture_called
+        capture_called = True
+
+    monkeypatch.setattr(farm_cost_ledger, "lock_cost_ledger_archive", fail_lock)
+    monkeypatch.setattr(farm_cost_ledger, "capture_cost_snapshot", record_capture)
+
+    entry = await write_log_entry(
+        db_session,
+        archive_id=archive.id,
+        status="failed",
+        cost=125.0,
+    )
+    await db_session.commit()
+
+    assert await db_session.get(PrintLogEntry, entry.id) is not None
+    assert await db_session.scalar(select(func.count(FarmCostLedgerSnapshot.id))) == 0
+    assert capture_called is False

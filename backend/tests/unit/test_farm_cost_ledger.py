@@ -338,3 +338,51 @@ async def test_sqlite_capture_scope_does_not_issue_postgres_sql():
     await lock_scope(db, SimpleNamespace(id=99, archive_id=42))
 
     db.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_linked_log_locks_attempt_scope_before_insert(monkeypatch):
+    events: list[object] = []
+
+    class NestedTransaction:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    class RecordingSession:
+        def add(self, entry):
+            events.append("add")
+            self.entry = entry
+
+        async def flush(self):
+            events.append("flush")
+            self.entry.id = 99
+
+        def begin_nested(self):
+            return NestedTransaction()
+
+    async def record_archive_lock(_db, archive_id):
+        events.append(("lock", archive_id))
+
+    async def record_capture(_db, _entry, *, archive_scope_locked=False):
+        events.append(("capture", archive_scope_locked))
+
+    _enable_policy(monkeypatch)
+    monkeypatch.setattr(
+        farm_cost_ledger,
+        "lock_cost_ledger_archive",
+        record_archive_lock,
+        raising=False,
+    )
+    monkeypatch.setattr(farm_cost_ledger, "capture_cost_snapshot", record_capture)
+
+    await write_log_entry(RecordingSession(), archive_id=42, status="completed")
+
+    assert events == [
+        ("lock", 42),
+        "add",
+        "flush",
+        ("capture", True),
+    ]

@@ -138,6 +138,20 @@ the existing print-log/statistics tests.
   PostgreSQL app on 18114. PostgreSQL also retained the canonical print log
   while rejecting an infinite material-use snapshot. The main app on 18000
   remained healthy.
+- [x] 2026-07-14 05:53 KST: Approval audit reproduced a lock-order inversion:
+  when a lower-ID uncommitted row acquired the archive lock after a higher-ID
+  row, both snapshots were classified `(1, original)`. Added a failure-first
+  insertion-order regression and moved the linked-archive lock before the
+  print-log INSERT while retaining SAVEPOINT failure isolation.
+- [x] 2026-07-14 05:53 KST: Focused tests passed 21/21 and the default-off
+  architecture guard passed 5/5. Isolated PostgreSQL proved a second linked
+  write stayed blocked until the first outer transaction committed, then
+  persisted distinct `(1, original)` and `(2, reprint)` snapshots.
+- [x] 2026-07-14 05:59 KST: Post-fix focused regression passed 49 tests and
+  Ruff. `make verify-fast`, `make test-unit`, `make test-contract`, isolated
+  `make test-integration`, and `make verify-full` all passed; the rebuilt
+  PostgreSQL app on 18114 and main app on 18000 remained healthy with no app
+  startup errors.
 
 # Decisions
 
@@ -164,9 +178,12 @@ the existing print-log/statistics tests.
 - Accept only finite positive electricity, estimated-power, and machine-hour
   policy values. A non-finite rate skips the optional snapshot while the
   canonical print-log transaction remains intact.
-- Serialize PostgreSQL capture by linked archive before counting attempts.
-  Unlinked rows use a separate print-log-keyed advisory-lock namespace; SQLite
-  keeps its existing no-lock test/development behavior.
+- Serialize PostgreSQL linked attempts before inserting their print-log rows,
+  then count and capture while the outer transaction retains that archive
+  lock. This makes insertion order observable and prevents a later ID from
+  being captured before an earlier uncommitted ID. Unlinked rows use a separate
+  print-log-keyed advisory-lock namespace; SQLite keeps its existing no-lock
+  test/development behavior.
 - Normalize offset-aware API date filters to UTC-naive values before binding
   them to the repository's timestamp-without-timezone columns.
 - Backfill delayed smart-plug evidence by the exact print-log ID returned from
@@ -189,6 +206,10 @@ the existing print-log/statistics tests.
   `0.352s` same-archive advisory-lock wait and reconciled four filtered rows
   across two pages while excluding negative cost, infinite energy, and
   negative runtime evidence.
+- The approval audit inverted insert and lock order in two PostgreSQL
+  transactions and reproduced duplicate `(1, original)` classifications. The
+  fixed write path held the pre-insert archive lock through the outer commit;
+  a competing linked write blocked and then became `(2, reprint)`.
 
 # Implementation
 
@@ -242,6 +263,9 @@ to the row totals. With the flag disabled, the route fails closed.
 
 - Snapshot capture is transactionally tied to print-log creation; duplicate
   capture is prevented by a unique key and is idempotent.
+- Linked-scope lock acquisition runs in its own SAVEPOINT. If it fails, capture
+  is skipped and `farm_cost_ledger_scope_lock_failed` is logged, while the
+  canonical print-log row remains committable.
 - Missing material or energy observations produce nullable components and an
   explicit completeness state, not invented zero-cost evidence.
 - Rollback disables the feature flag and reverts the application commit. The
@@ -266,14 +290,23 @@ additive, default-off KRW estimate snapshot and a read-only per-run actual cost
 API with separate original, failed, cancelled, and reprint buckets. Snapshot
 failures are isolated from the canonical print log.
 
-The latest focused regression passed 62 tests. The clean PostgreSQL runtime
-created the additive table, preserved separate failed/reprint rows, reconciled
-the `10346.80 KRW` scenario and the `0.02 KRW` rounding boundary, normalized
-offset-aware filters, and rejected invalid accounting evidence without an
-application error. Desktop and mobile Chromium checks were nonblank and
-error-free. The final audit rerun passed Ruff, verify-fast, unit, contract,
-integration, and verify-full against the isolated PostgreSQL app; Bambuddy
-still starts cleanly.
+The earlier full focused regression passed 62 tests. The clean PostgreSQL
+runtime created the additive table, preserved separate failed/reprint rows,
+reconciled the `10346.80 KRW` scenario and the `0.02 KRW` rounding boundary,
+normalized offset-aware filters, and rejected invalid accounting evidence
+without an application error. Desktop and mobile Chromium checks were
+nonblank and error-free.
+
+The approval audit additionally closed a PostgreSQL lock-order race that could
+label two concurrent linked rows as originals. A structural regression now
+requires the archive lock before INSERT, a failure-path regression preserves
+the canonical log when that lock fails, and the isolated database confirmed
+the competing write blocks through the first outer commit.
+
+The post-fix focused regression passed 49 tests plus Ruff. Final verify-fast,
+unit, contract, isolated integration, and verify-full gates passed against the
+rebuilt PostgreSQL app on 18114. That app emitted no startup errors, Bambuddy
+still starts cleanly, and the main deployment on port 18000 remained healthy.
 
 Draft PR #95 is published and review-ready but remains draft pending explicit
 operator approval because it adds schema and a shared print-log hook. Later

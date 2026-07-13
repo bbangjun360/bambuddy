@@ -74,11 +74,13 @@ patches:
     behavior: >-
       When the default-off WP-114 flag is enabled with a valid KRW policy,
       write_log_entry creates one farm-owned estimate snapshot in an isolated
-      savepoint. PostgreSQL capture serializes attempt classification per
-      archive, while snapshot failure is logged and never removes the canonical
-      print-log row. Delayed smart-plug evidence updates the exact created log
-      ID. A STATS_READ-protected route exposes read-only reconciliation and
-      rejects negative or non-finite accounting evidence.
+      savepoint. PostgreSQL takes the linked archive lock before the print-log
+      INSERT and retains it through capture, so concurrent attempt
+      classification follows insertion order. Lock or snapshot failure is
+      logged and never removes the canonical print-log row. Delayed smart-plug
+      evidence updates the exact created log ID. A STATS_READ-protected route
+      exposes read-only reconciliation and rejects negative or non-finite
+      accounting evidence.
     feature_flags:
       - FARM_ACTUAL_COST_LEDGER_ENABLED=false
     rollback: >-
@@ -87,6 +89,7 @@ patches:
       destructive rollback is performed.
     validation:
       - backend/tests/unit/test_farm_cost_ledger.py
+      - backend/tests/unit/test_farm_cost_ledger_failure_isolation.py
       - backend/tests/integration/test_farm_cost_ledger_api.py
       - backend/tests/unit/test_print_log.py
       - make verify-fast

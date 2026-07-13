@@ -113,24 +113,33 @@ def _normalize_db_datetime(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-async def _lock_capture_scope(db: AsyncSession, entry: PrintLogEntry) -> None:
-    """Serialize attempt classification and duplicate capture on PostgreSQL."""
+async def lock_cost_ledger_archive(db: AsyncSession, archive_id: int) -> None:
+    """Lock a linked attempt scope before its print-log row is inserted."""
     bind = db.get_bind()
     if bind.dialect.name != "postgresql":
         return
 
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(11405, :scope_key)"),
+        {"scope_key": archive_id},
+    )
+
+
+async def _lock_capture_scope(db: AsyncSession, entry: PrintLogEntry) -> None:
+    """Serialize attempt classification and duplicate capture on PostgreSQL."""
     if entry.archive_id is not None:
-        namespace = 11405
-        scope_key = entry.archive_id
-    else:
-        namespace = 11406
-        scope_key = entry.id
-    if scope_key is None:
+        await lock_cost_ledger_archive(db, entry.archive_id)
+        return
+
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    if entry.id is None:
         raise ValueError("print log entry must be flushed before ledger capture")
 
     await db.execute(
-        text(f"SELECT pg_advisory_xact_lock({namespace}, :scope_key)"),
-        {"scope_key": scope_key},
+        text("SELECT pg_advisory_xact_lock(11406, :scope_key)"),
+        {"scope_key": entry.id},
     )
 
 
@@ -164,12 +173,15 @@ async def _load_policy(db: AsyncSession, entry: PrintLogEntry) -> CostPolicy:
 async def capture_cost_snapshot(
     db: AsyncSession,
     entry: PrintLogEntry,
+    *,
+    archive_scope_locked: bool = False,
 ) -> FarmCostLedgerSnapshot | None:
     """Capture immutable estimate/rate context without changing the run row."""
     if not settings.farm_actual_cost_ledger_enabled:
         return None
 
-    await _lock_capture_scope(db, entry)
+    if not archive_scope_locked:
+        await _lock_capture_scope(db, entry)
     existing = await db.scalar(
         select(FarmCostLedgerSnapshot).where(FarmCostLedgerSnapshot.print_log_entry_id == entry.id)
     )

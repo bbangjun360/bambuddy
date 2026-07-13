@@ -69,6 +69,24 @@ async def write_log_entry(
     if started_at and completed_at:
         duration = int((completed_at - started_at).total_seconds())
 
+    capture_ledger = settings.farm_actual_cost_ledger_enabled
+    archive_scope_locked = False
+    if capture_ledger and archive_id is not None:
+        try:
+            from backend.app.services.farm_cost_ledger import lock_cost_ledger_archive
+
+            # Attempt order is the print-log insertion order. Acquire the
+            # archive lock before this row can become visible to a competitor.
+            async with db.begin_nested():
+                await lock_cost_ledger_archive(db, archive_id)
+            archive_scope_locked = True
+        except Exception:
+            capture_ledger = False
+            logger.exception(
+                "farm_cost_ledger_scope_lock_failed archive_id=%s",
+                archive_id,
+            )
+
     entry = PrintLogEntry(
         archive_id=archive_id,
         print_name=print_name,
@@ -95,12 +113,16 @@ async def write_log_entry(
     # Farm extension: preserve estimate/rate context next to this immutable
     # actual run. A SAVEPOINT isolates ledger failures so accounting metadata
     # can never erase the canonical print-log event.
-    if settings.farm_actual_cost_ledger_enabled:
+    if capture_ledger:
         try:
             from backend.app.services.farm_cost_ledger import capture_cost_snapshot
 
             async with db.begin_nested():
-                await capture_cost_snapshot(db, entry)
+                await capture_cost_snapshot(
+                    db,
+                    entry,
+                    archive_scope_locked=archive_scope_locked,
+                )
         except Exception:
             logger.exception(
                 "farm_cost_ledger_snapshot_failed print_log_entry_id=%s",
