@@ -70,7 +70,8 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    status summary, responsive tools, and printer-card scan hierarchy. WP-115 is
    the next slice and redesigns only the Queue operator surface: compact status
    rail, accessible tabs, responsive tools, and denser run rows. It is validated
-   and awaiting visual review. Library/inventory and settings redesigns follow
+   in draft PR #96 and awaiting operator visual review. Library/inventory and
+   settings redesigns follow
    as separate observable Work Packages after operators review each preceding
    slice; no page workflow, printer command, or backend contract is changed by
    WP-112, WP-113, or WP-115.

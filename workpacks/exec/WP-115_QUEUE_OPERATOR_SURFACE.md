@@ -110,7 +110,9 @@ baseline passed `make verify-fast` and all 26 focused QueuePage tests.
   `make verify-full` passed. Isolated Chrome checks passed at 1440x1000 and
   390x844 with zero page overflow, overlaps, clipped controls, image failures,
   failed responses, console errors, or runtime exceptions.
-- [ ] Publish the draft PR and record its visual-review URL.
+- [x] 2026-07-13 21:23 KST: Published draft PR #96 for operator visual review
+  at https://github.com/bbangjun360/bambuddy/pull/96; the isolated preview
+  remains available at http://127.0.0.1:18115/queue.
 
 ## Decisions
 
