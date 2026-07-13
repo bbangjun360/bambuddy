@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.app.core.database import Base
@@ -15,12 +18,14 @@ from backend.app.services.swapmod_a1mini_direct_canary import (
     SwapmodA1MiniDirectCanaryError,
     SwapmodA1MiniDirectCanaryService,
     _acquire_direct_canary_execution_lock,
+    _lock_active_cycle_for_transport,
     required_a1mini_direct_canary_phrase,
 )
 from backend.app.services.swapmod_state_machine import (
     LOAD_NEXT_PLATE,
     READY_FOR_NEXT_PRINT,
     RELEASE_PLATE,
+    RELEASING_PLATE,
     VERIFY_PLATE_RELEASED,
     VERIFY_RELEASED,
     WAITING_FOR_PRINT_FINISH,
@@ -58,6 +63,58 @@ class RaisingDirectTransport(FakeDirectTransport):
     def send_gcode(self, printer_id: int, gcode: str) -> bool:
         self.sent.append((printer_id, gcode))
         raise RuntimeError("synthetic transport failure")
+
+
+class ChangingStatusTransport(FakeDirectTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self.status_calls = 0
+
+    def get_status(self, printer_id: int) -> dict[str, object] | None:
+        self.status_calls += 1
+        if self.status_calls == 1:
+            return {"state": "FINISH", "gcode_file": ""}
+        return {"state": "RUNNING", "gcode_file": "active.gcode"}
+
+
+class RaisingStatusTransport(ChangingStatusTransport):
+    def get_status(self, printer_id: int) -> dict[str, object] | None:
+        self.status_calls += 1
+        if self.status_calls == 1:
+            return {"state": "FINISH", "gcode_file": ""}
+        raise RuntimeError("synthetic status failure")
+
+
+class ConcurrentCycleWriterTransport(FakeDirectTransport):
+    def __init__(self, db_path: Path, cycle_key: str) -> None:
+        super().__init__()
+        self.db_path = db_path
+        self.cycle_key = cycle_key
+        self.state_at_send: str | None = None
+        self.concurrent_write_blocked = False
+
+    def send_gcode(self, printer_id: int, gcode: str) -> bool:
+        connection = sqlite3.connect(self.db_path, timeout=0)
+        try:
+            row = connection.execute(
+                "SELECT state FROM swapmod_state_machine_cycles WHERE cycle_key = ?",
+                (self.cycle_key,),
+            ).fetchone()
+            self.state_at_send = row[0] if row else None
+            try:
+                connection.execute(
+                    "UPDATE swapmod_state_machine_cycles SET note = ? WHERE cycle_key = ?",
+                    ("concurrent state mutation", self.cycle_key),
+                )
+                connection.commit()
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower():
+                    raise
+                self.concurrent_write_blocked = True
+                connection.rollback()
+        finally:
+            connection.close()
+        return super().send_gcode(printer_id, gcode)
 
 
 def write_sequence(root: Path, name: str, text: str = "G91\nG4 P10\nG90\n") -> tuple[str, str]:
@@ -281,7 +338,27 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    async def test_commits_active_state_before_transport_send(self) -> None:
+    async def test_postgres_locks_the_active_cycle_row_through_transport(self) -> None:
+        db = MagicMock(spec=AsyncSession)
+        db.get_bind.return_value.dialect.name = "postgresql"
+        locked_cycle = SimpleNamespace(printer_id=101, state=RELEASING_PLATE)
+        row_result = MagicMock()
+        row_result.scalar_one_or_none.return_value = locked_cycle
+        db.execute = AsyncMock(side_effect=[None, row_result])
+
+        result = await _lock_active_cycle_for_transport(
+            db,
+            cycle_id=7,
+            printer_id=101,
+            expected_state=RELEASING_PLATE,
+        )
+
+        statement = db.execute.await_args_list[1].args[0]
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        self.assertIn("FOR UPDATE", sql)
+        self.assertIs(result, locked_cycle)
+
+    async def test_reclaims_database_lock_after_committing_active_state(self) -> None:
         cycle = await self.create_release_ready_cycle()
         transport = TransactionInspectingTransport(self.session)
 
@@ -292,7 +369,80 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
             transport=transport,
         )
 
-        self.assertFalse(transport.in_transaction_at_send)
+        self.assertTrue(transport.in_transaction_at_send)
+
+    async def test_blocks_a_concurrent_cycle_writer_during_transport_send(self) -> None:
+        db_path = self.root / "transport-cycle-lock.db"
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
+        sessionmaker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            async with sessionmaker() as db:
+                cycle = await create_swapmod_operator_trigger(
+                    db,
+                    trigger_key="transport-cycle-lock-trigger",
+                    cycle_key="transport-cycle-lock",
+                    printer_id=101,
+                    operator_intent="START_SWAPMOD_PLATE_CHANGE",
+                )
+                await db.commit()
+                transport = ConcurrentCycleWriterTransport(db_path, cycle.cycle_key)
+
+                result = await self.execute_release(
+                    db,
+                    cycle,
+                    canary_key="transport-cycle-lock",
+                    transport=transport,
+                )
+
+            self.assertEqual(transport.state_at_send, "RELEASING_PLATE")
+            self.assertTrue(transport.concurrent_write_blocked)
+            self.assertEqual(result["state"], VERIFY_RELEASED)
+            self.assertEqual(len(transport.sent), 1)
+        finally:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.drop_all)
+            await engine.dispose()
+
+    async def test_printer_state_is_rechecked_after_durable_active_commit(self) -> None:
+        cycle = await self.create_release_ready_cycle()
+        transport = ChangingStatusTransport()
+
+        with self.assertRaises(SwapmodA1MiniDirectCanaryError) as raised:
+            await self.execute_release(
+                self.session,
+                cycle,
+                canary_key="direct-printer-state-changed",
+                transport=transport,
+            )
+        await self.session.rollback()
+        persisted_cycle = await get_swapmod_cycle(self.session, cycle_key=cycle.cycle_key)
+
+        self.assertEqual(raised.exception.code, "printer_not_known_idle")
+        self.assertEqual(transport.status_calls, 2)
+        self.assertEqual(transport.sent, [])
+        self.assertIsNotNone(persisted_cycle)
+        self.assertTrue(persisted_cycle.manual_review_required)
+
+    async def test_printer_status_exception_after_durable_claim_sends_nothing(self) -> None:
+        cycle = await self.create_release_ready_cycle()
+        transport = RaisingStatusTransport()
+
+        with self.assertRaises(SwapmodA1MiniDirectCanaryError) as raised:
+            await self.execute_release(
+                self.session,
+                cycle,
+                canary_key="direct-printer-status-error",
+                transport=transport,
+            )
+        await self.session.rollback()
+        persisted_cycle = await get_swapmod_cycle(self.session, cycle_key=cycle.cycle_key)
+
+        self.assertEqual(raised.exception.code, "printer_status_check_failed")
+        self.assertEqual(transport.sent, [])
+        self.assertIsNotNone(persisted_cycle)
+        self.assertTrue(persisted_cycle.manual_review_required)
 
     async def test_transport_exception_persists_manual_review_without_retry(self) -> None:
         cycle = await self.create_release_ready_cycle()

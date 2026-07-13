@@ -145,6 +145,25 @@ before any command can run.
       isolated runtime, and desktop/mobile browser verification completed. The
       synthetic runtime wrote only inactive candidates; both pinned source hashes
       remained unchanged and no real printer or actuator command was sent.
+- [x] 2026-07-14 06:25 KST Second transaction audit reproduced four additional
+      fail-open gaps: direct transport remained callable while the state-machine
+      flag was off, the durable `START_STEP` commit released all DB protection
+      before send, a concurrent cycle writer could mutate the row during send,
+      and a printer that changed from idle to running after the first check was
+      not checked again. Failure-first regressions now require the state-machine
+      gate, a post-commit printer lock plus cycle `FOR UPDATE`, and a second
+      status check immediately before synthetic transport.
+- [x] 2026-07-14 06:25 KST Updated direct-canary tests passed 32 tests plus 27
+      subtests and the harness mock passed 2 tests. A PostgreSQL 16.4 probe saw
+      the durable `RELEASING_PLATE` state from another connection while its
+      concurrent cycle UPDATE timed out on the row lock; one synthetic send
+      completed to `VERIFY_RELEASED`. No real command ran.
+- [x] 2026-07-14 06:32 KST Final regression passed the 13-test control suite,
+      full frontend (176 files / 2329 tests), ESLint, production build, Ruff,
+      `make verify-fast FRONTEND_TESTED=1`, unit, contract, isolated integration,
+      and `make verify-full FRONTEND_TESTED=1`. The rebuilt default-off app on
+      18141 remained healthy and reported both real-command flags false with no
+      named target.
 
 ## Decisions
 
@@ -170,8 +189,15 @@ before any command can run.
 - A physical send requires a durable active-state claim. SQLite uses
   `BEGIN IMMEDIATE`; PostgreSQL uses a per-printer transaction advisory lock. The
   cycle is refreshed under that lock and `START_STEP` is committed before the
-  transport call. If the process or final DB write fails after send, the durable
-  active state blocks another command and requires reconciliation/manual review.
+  transport call. A new transaction then reclaims the printer lock, locks and
+  refreshes the cycle row, verifies the expected active state, and rechecks the
+  printer immediately before send. That lock is held through the synthetic
+  transport result transition. If the process or final DB write fails after send,
+  the earlier durable active state blocks another command and requires
+  reconciliation/manual review.
+- The direct-canary transport route requires the broader SwapMod state-machine
+  flag in addition to both direct-canary flags. A stale ready cycle cannot be
+  actuated after the state machine is disabled.
 - Sequence validation and transport use the same byte snapshot. The service reads
   the allowlisted file once, verifies that byte string against the configured
   SHA-256, decodes those exact bytes as UTF-8, and sends only that text.
@@ -203,9 +229,9 @@ before any command can run.
   service contract.
 - The transaction hardening is internal to the existing direct-canary service. It
   adds no schema or dependency. The service intentionally commits the active
-  transition before crossing the physical transport boundary, then commits the
-  sent/failed transition; a final commit failure leaves the earlier active state
-  durable and non-retryable.
+  transition before crossing the physical transport boundary, reclaims the
+  printer/cycle locks for send, then commits the sent/failed transition; a final
+  commit failure leaves the earlier active state durable and non-retryable.
 - Milestone 3 adds `swapmod_sequence_editor.py` service/schema modules and two
   endpoints on the existing direct-canary router: read-only
   `GET /sequence-editor` and administrative `POST /sequence-versions`. It adds
@@ -267,16 +293,21 @@ Observed on 2026-07-14 KST:
   eligibility, full server checklist, command-failure and uncertain transport,
   uncertain verification, unexpected state, disarm clearing, and unresolved-cycle
   paths.
-- Full frontend: 176 files / 2327 tests passed. ESLint and the production Vite
+- Full frontend: 176 files / 2329 tests passed. ESLint and the production Vite
   build passed; only the existing large-chunk warning remains.
-- `make test-swapmod-a1mini-direct-canary`: 2/2 harness mock tests and 27/27
-  backend service/architecture/API tests passed, including named-target,
+- `make test-swapmod-a1mini-direct-canary`: 2/2 harness mock tests and 32 backend
+  service/architecture/API tests plus 27 subtests passed, including named-target,
   competing-cycle, stale-cycle, exact-byte send, unreadable/non-UTF-8 sequence,
   durable pre-send intent, transport-exception persistence, SQLite concurrency,
   and PostgreSQL lock-call failures.
 - A separate ephemeral PostgreSQL 16.4 run issued two concurrent requests against
   one cycle and observed exactly one synthetic send; the second request failed
   `cycle_state_not_ready_for_step`.
+- A second PostgreSQL 16.4 probe observed `RELEASING_PLATE` from another
+  connection at send time and proved a concurrent cycle UPDATE was blocked by
+  the row lock until the synthetic send result committed. SQLite tests exercise
+  the same writer exclusion, state-machine-disabled route, pre-send status
+  change, and status-exception paths.
 - Ruff 0.14.11 check and format check passed for every changed backend file. A
   diagnostic repository-wide run reported 47 existing findings outside this WP;
   no unrelated file was reformatted.
@@ -313,6 +344,9 @@ Observed on 2026-07-14 KST:
   committed to manual review with retry disabled. If the process stops after the
   durable active claim, subsequent state checks keep that active state blocked
   until manual inspection; it is never restored to a ready state automatically.
+- If the state-machine flag is disabled, the route sends nothing. If the printer
+  status changes or becomes unreadable after the durable claim, the service sends
+  nothing, commits a timeout/manual-review state, and does not offer retry.
 - Do not automatically retry or resume an uncertain physical bed action. An
   operator must inspect the printer before any new attempt.
 - Rollback is the Draft PR merge commit; there is no migration or persistent schema
@@ -337,6 +371,10 @@ Observed on 2026-07-14 KST:
   delegated routine merge because speed changes are physically consequential;
   operator review is still required even though candidate generation cannot send
   or activate a command.
+- The second transaction audit closes the post-commit/pre-send state gap: the
+  broader state machine must remain enabled, the printer and cycle are locked
+  again through send, and a changed/unreadable printer state sends nothing and
+  becomes manual review.
 
 ## Risks and human gates
 

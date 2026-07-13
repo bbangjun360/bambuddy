@@ -56,6 +56,8 @@ def _require_direct_canary_target(printer_id: int) -> None:
 
 
 def _require_direct_canary_enabled(printer_id: int) -> None:
+    if not settings.farm_swapmod_state_machine_enabled:
+        raise HTTPException(status_code=404, detail="SwapMod state machine is disabled")
     if not settings.farm_swapmod_a1mini_direct_canary_enabled:
         raise HTTPException(status_code=404, detail="SwapMod A1 Mini direct canary is disabled")
     if not settings.farm_swapmod_a1mini_direct_canary_allow_real_commands:
