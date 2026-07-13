@@ -7433,6 +7433,7 @@ export interface SwapmodCanaryStatus {
   load_sequence_configured: boolean;
   single_printer_only: boolean;
   human_confirmation_required: boolean;
+  target_printer_id: number | null;
 }
 
 export interface SwapmodConfirmationPreview {
@@ -7454,6 +7455,12 @@ export interface SwapmodTransportStepRequest {
   operator_approved: boolean;
   operator_approval_phrase: string;
   checklist: Record<string, boolean>;
+}
+
+export interface SwapmodDirectCanaryCycle extends SwapmodCycle {
+  direct_canary_status: 'COMMAND_SENT' | 'COMMAND_FAILED';
+  real_command_sent: boolean;
+  printer_command_sent: boolean;
 }
 
 // Read-only cycle listing (overview + failure log) plus the supervised
@@ -7496,7 +7503,7 @@ export const swapmodApi = {
     }),
 
   transportStep: (cycleKey: string, body: SwapmodTransportStepRequest) =>
-    request<SwapmodCycle>(
+    request<SwapmodDirectCanaryCycle>(
       `/swapmod-a1-mini-direct-canary/cycles/${encodeURIComponent(cycleKey)}/transport-steps`,
       { method: 'POST', body: JSON.stringify(body) },
     ),

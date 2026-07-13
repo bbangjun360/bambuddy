@@ -42,11 +42,20 @@ def get_a1mini_direct_transport() -> PrinterManagerA1MiniDirectTransport:
     return PrinterManagerA1MiniDirectTransport()
 
 
-def _require_direct_canary_enabled() -> None:
+def _require_direct_canary_target(printer_id: int) -> None:
+    target_printer_id = settings.farm_swapmod_a1mini_direct_canary_target_printer_id
+    if target_printer_id is None:
+        raise HTTPException(status_code=404, detail="Named SwapMod A1 Mini direct canary printer is not configured")
+    if int(printer_id) != int(target_printer_id):
+        raise HTTPException(status_code=404, detail="Printer is not the named SwapMod A1 Mini direct canary")
+
+
+def _require_direct_canary_enabled(printer_id: int) -> None:
     if not settings.farm_swapmod_a1mini_direct_canary_enabled:
         raise HTTPException(status_code=404, detail="SwapMod A1 Mini direct canary is disabled")
     if not settings.farm_swapmod_a1mini_direct_canary_allow_real_commands:
         raise HTTPException(status_code=404, detail="SwapMod A1 Mini direct canary real commands are disabled")
+    _require_direct_canary_target(printer_id)
 
 
 @router.get("/status")
@@ -56,6 +65,7 @@ async def get_swapmod_a1mini_direct_canary_status(
     return swapmod_a1mini_direct_canary_service.status_snapshot(
         enabled=settings.farm_swapmod_a1mini_direct_canary_enabled,
         allow_real_commands=settings.farm_swapmod_a1mini_direct_canary_allow_real_commands,
+        target_printer_id=settings.farm_swapmod_a1mini_direct_canary_target_printer_id,
         release_sequence_configured=bool(
             settings.farm_swapmod_a1mini_direct_canary_sequence_root
             and settings.farm_swapmod_a1mini_direct_canary_release_sequence_file
@@ -81,6 +91,7 @@ async def get_swapmod_a1mini_direct_canary_confirmation_preview(
     Lets the UI display the server-provided phrase read-only before the operator
     ticks the checklist and confirms. Sends no printer command.
     """
+    _require_direct_canary_target(printer_id)
     return swapmod_a1mini_direct_canary_service.confirmation_preview(
         printer_id=printer_id,
         cycle_key=cycle_key,
@@ -97,7 +108,7 @@ async def execute_swapmod_a1mini_direct_canary_transport_step(
     db: AsyncSession = Depends(get_db),
     _: User | None = RequirePermissionIfAuthEnabled(Permission.PRINTERS_CONTROL),
 ):
-    _require_direct_canary_enabled()
+    _require_direct_canary_enabled(body.printer_id)
     cycle = await get_swapmod_cycle(db, cycle_key=cycle_key)
     if cycle is None:
         raise HTTPException(status_code=404, detail="SwapMod state machine cycle not found")
@@ -118,6 +129,7 @@ async def execute_swapmod_a1mini_direct_canary_transport_step(
             checklist=body.checklist.model_dump(),
             enabled=settings.farm_swapmod_a1mini_direct_canary_enabled,
             allow_real_commands=settings.farm_swapmod_a1mini_direct_canary_allow_real_commands,
+            target_printer_id=settings.farm_swapmod_a1mini_direct_canary_target_printer_id,
             sequence_root=settings.farm_swapmod_a1mini_direct_canary_sequence_root,
             release_sequence_file=settings.farm_swapmod_a1mini_direct_canary_release_sequence_file,
             release_sequence_sha256=settings.farm_swapmod_a1mini_direct_canary_release_sequence_sha256,

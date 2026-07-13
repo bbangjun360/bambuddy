@@ -4,11 +4,13 @@ import hashlib
 from pathlib import Path
 from typing import Protocol
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.models.swapmod_state_machine import SwapmodStateMachineCycle
 from backend.app.services.swapmod_state_machine import (
     LOAD_NEXT_PLATE,
+    READY_FOR_NEXT_PRINT,
     READY_TO_LOAD,
     READY_TO_RELEASE,
     RELEASE_PLATE,
@@ -66,6 +68,7 @@ class SwapmodA1MiniDirectCanaryService:
         *,
         enabled: bool,
         allow_real_commands: bool,
+        target_printer_id: int | None,
         release_sequence_configured: bool,
         load_sequence_configured: bool,
     ) -> dict[str, object]:
@@ -73,6 +76,7 @@ class SwapmodA1MiniDirectCanaryService:
             "mode": A1MINI_DIRECT_CANARY_MODE,
             "enabled": enabled,
             "allow_real_commands": allow_real_commands,
+            "target_printer_id": target_printer_id,
             "release_sequence_configured": release_sequence_configured,
             "load_sequence_configured": load_sequence_configured,
             "single_printer_only": True,
@@ -139,6 +143,7 @@ class SwapmodA1MiniDirectCanaryService:
         checklist: dict[str, bool],
         enabled: bool,
         allow_real_commands: bool,
+        target_printer_id: int | None,
         sequence_root: str | Path | None,
         release_sequence_file: str | None,
         release_sequence_sha256: str | None,
@@ -153,6 +158,16 @@ class SwapmodA1MiniDirectCanaryService:
                 "real_commands_not_enabled",
                 "A1 Mini direct canary real command flag is disabled",
             )
+        if target_printer_id is None:
+            raise SwapmodA1MiniDirectCanaryError(
+                "target_printer_not_configured",
+                "named A1 Mini direct canary printer is not configured",
+            )
+        if int(printer_id) != int(target_printer_id):
+            raise SwapmodA1MiniDirectCanaryError(
+                "target_printer_mismatch",
+                "request printer is not the named A1 Mini direct canary",
+            )
         if step not in {RELEASE_PLATE, LOAD_NEXT_PLATE}:
             raise SwapmodA1MiniDirectCanaryError("unsupported_step", "unsupported A1 Mini direct canary step")
         if int(cycle.printer_id or printer_id) != int(printer_id):
@@ -166,10 +181,13 @@ class SwapmodA1MiniDirectCanaryService:
                 "cycle_state_not_ready_for_step",
                 f"cycle must be {required_state} for {step}",
             )
+        await _require_only_recent_unresolved_cycle(db, cycle, printer_id=printer_id)
 
         missing = [field for field in A1MINI_DIRECT_CHECKLIST_FIELDS if not bool(checklist.get(field))]
         if missing:
-            raise SwapmodA1MiniDirectCanaryError("checklist_incomplete", "all direct canary checklist fields are required")
+            raise SwapmodA1MiniDirectCanaryError(
+                "checklist_incomplete", "all direct canary checklist fields are required"
+            )
         if not operator_approved:
             raise SwapmodA1MiniDirectCanaryError("operator_approval_missing", "operator approval is required")
 
@@ -260,6 +278,36 @@ class SwapmodA1MiniDirectCanaryService:
             }
         )
         return payload
+
+
+async def _require_only_recent_unresolved_cycle(
+    db: AsyncSession,
+    cycle: SwapmodStateMachineCycle,
+    *,
+    printer_id: int,
+) -> None:
+    result = await db.execute(
+        select(SwapmodStateMachineCycle.id, SwapmodStateMachineCycle.state)
+        .where(SwapmodStateMachineCycle.printer_id == printer_id)
+        .order_by(SwapmodStateMachineCycle.id.desc())
+        .limit(200)
+    )
+    current_found = False
+    for cycle_id, state in result.all():
+        if state == READY_FOR_NEXT_PRINT:
+            break
+        if cycle_id == cycle.id:
+            current_found = True
+            continue
+        raise SwapmodA1MiniDirectCanaryError(
+            "another_unresolved_cycle",
+            "another recent SwapMod cycle for this printer requires review",
+        )
+    if not current_found:
+        raise SwapmodA1MiniDirectCanaryError(
+            "stale_cycle",
+            "the requested SwapMod cycle is older than the latest completed cycle",
+        )
 
 
 def _select_sequence(

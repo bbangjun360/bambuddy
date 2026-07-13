@@ -14,6 +14,7 @@ FARM_SWAPMOD_STATE_MACHINE_ENABLED=true
 FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ENABLED=true
 FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ALLOW_REAL_COMMANDS=true
 FARM_SWAPMOD_A1MINI_DIRECT_CANARY_REQUIRE_HUMAN_CONFIRMATION=true
+FARM_SWAPMOD_A1MINI_DIRECT_CANARY_TARGET_PRINTER_ID=<bambuddy_printer_id>
 FARM_SWAPMOD_A1MINI_DIRECT_CANARY_SEQUENCE_ROOT=/path/outside/repo
 FARM_SWAPMOD_A1MINI_DIRECT_CANARY_RELEASE_SEQUENCE_FILE=release.gcode
 FARM_SWAPMOD_A1MINI_DIRECT_CANARY_RELEASE_SEQUENCE_SHA256=<sha256>
@@ -21,8 +22,10 @@ FARM_SWAPMOD_A1MINI_DIRECT_CANARY_LOAD_SEQUENCE_FILE=load.gcode
 FARM_SWAPMOD_A1MINI_DIRECT_CANARY_LOAD_SEQUENCE_SHA256=<sha256>
 ```
 
-The sequence root must be outside the repository. Sequence files are
-server-side allowlisted files; the API never accepts raw G-code or a path.
+The target printer ID must identify the named A1 Mini canary for this session.
+Requests for any other printer fail closed. The sequence root must be outside
+the repository. Sequence files are server-side allowlisted files; the API
+never accepts raw G-code or a path.
 
 ## Checklist
 
@@ -67,12 +70,16 @@ CONFIRM_A1_MINI_DIRECT_PLATE_CHANGE <printer_id> <cycle_key> <step> <sequence_sh
 Stop immediately if any of these occur:
 
 - any direct canary flag is not explicitly enabled for the session;
+- the named canary printer ID is missing or does not match the request;
+- another cycle since the most recent completed cycle still requires review;
 - the configured sequence SHA-256 does not match;
 - the printer is not A1 Mini;
 - Bambuddy shows an active file or non-idle state;
 - any checklist field is false;
 - the phrase does not exactly match;
 - the response reports `COMMAND_FAILED`;
+- the transport or verification response is missing, interrupted, or does not
+  prove that the cycle reached its expected next state;
 - physical motion is uncertain, interrupted, or unexpected;
 - any route attempts queue, scheduler, upload/start, raw command, multi-printer,
   automatic retry, or next-print automation.

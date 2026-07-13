@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw, AlertTriangle, CheckCircle, X } from 'lucide-react';
 import { swapmodApi } from '../../api/client';
-import type { Printer, SwapmodStep, SwapmodConfirmationPreview, SwapmodCycle } from '../../api/client';
+import type { Printer, SwapmodStep, SwapmodConfirmationPreview } from '../../api/client';
 
 /**
  * WP-110 slice 4 (DRAFT). Supervised SwapMod plate-change control rendered on a
@@ -50,20 +50,49 @@ export function SwapModPlateChangeControl({
     enabled: eligible,
   });
 
-  const armed = eligible && !!canaryStatus.data?.enabled && !!canaryStatus.data?.allow_real_commands;
+  const armed =
+    eligible &&
+    !!canaryStatus.data?.enabled &&
+    !!canaryStatus.data?.allow_real_commands &&
+    canaryStatus.data?.target_printer_id === printer.id;
+
+  const recentCycles = useQuery({
+    queryKey: ['swapmod-cycles', 'plate-change-control', printer.id],
+    queryFn: () => swapmodApi.listCycles({ printerId: printer.id, limit: 50 }),
+    refetchInterval: 15000,
+    enabled: armed,
+  });
+
+  const unresolvedCycle = useMemo(() => {
+    for (const candidate of recentCycles.data?.cycles ?? []) {
+      if (candidate.state === 'READY_FOR_NEXT_PRINT') break;
+      if (candidate.cycle_key !== cycleKey) return candidate;
+    }
+    return null;
+  }, [cycleKey, recentCycles.data]);
 
   const allChecked = useMemo(
     () => !!preview && preview.checklist_fields.length > 0 && preview.checklist_fields.every((f) => checks[f]),
     [preview, checks],
   );
 
-  const reset = () => {
+  const reset = async () => {
+    await recentCycles.refetch();
     setPhase('idle');
     setCycleKey(null);
     setPreview(null);
     setChecks({});
     setError(null);
   };
+
+  useEffect(() => {
+    if (armed) return;
+    setPhase('idle');
+    setCycleKey(null);
+    setPreview(null);
+    setChecks({});
+    setError(null);
+  }, [armed]);
 
   const openConfirm = async (key: string, step: SwapmodStep, nextPhase: Phase) => {
     setError(null);
@@ -76,20 +105,36 @@ export function SwapModPlateChangeControl({
   const startCycle = useMutation({
     mutationFn: async () => {
       const key = `swapmod-ui-${printer.id}-${Date.now()}`;
-      await swapmodApi.createCycle({ triggerKey: `${key}-trigger`, cycleKey: key, printerId: printer.id });
-      return key;
+      const confirmation = await swapmodApi.confirmationPreview(printer.id, key, 'RELEASE_PLATE');
+      return { key, confirmation };
     },
-    onSuccess: async (key) => {
+    onSuccess: ({ key, confirmation }) => {
       setCycleKey(key);
-      await openConfirm(key, 'RELEASE_PLATE', 'confirm-release');
+      setPreview(confirmation);
+      setChecks({});
+      setPhase('confirm-release');
     },
     onError: (e: Error) => setError(e.message),
   });
 
   const sendStep = useMutation({
-    mutationFn: (step: SwapmodStep) => {
+    mutationFn: async (step: SwapmodStep) => {
       if (!cycleKey || !preview?.required_operator_approval_phrase) {
         throw new Error(t('swapmod.control.noPreview', 'Confirmation phrase not loaded.'));
+      }
+      if (step === 'RELEASE_PLATE') {
+        const created = await swapmodApi.createCycle({
+          triggerKey: `${cycleKey}-trigger`,
+          cycleKey,
+          printerId: printer.id,
+        });
+        if (
+          created.cycle_key !== cycleKey ||
+          created.state !== 'READY_TO_RELEASE' ||
+          created.manual_review_required
+        ) {
+          throw new Error(t('swapmod.control.cycleNotReady', 'The SwapMod cycle was not created in a safe ready state.'));
+        }
       }
       const checklist: Record<string, boolean> = {};
       for (const f of preview.checklist_fields) checklist[f] = true;
@@ -102,10 +147,34 @@ export function SwapModPlateChangeControl({
         checklist,
       });
     },
-    onSuccess: (_cycle: SwapmodCycle, step) => {
+    onSuccess: (cycle, step) => {
+      const expectedState = step === 'RELEASE_PLATE' ? 'VERIFY_RELEASED' : 'VERIFY_LOADED';
+      if (
+        cycle.direct_canary_status !== 'COMMAND_SENT' ||
+        !cycle.real_command_sent ||
+        !cycle.printer_command_sent ||
+        cycle.manual_review_required ||
+        cycle.state !== expectedState
+      ) {
+        setError(
+          cycle.blocked_reason ??
+            t('swapmod.control.transportFailed', 'The command was not confirmed as sent. Manual review is required.'),
+        );
+        setPreview(null);
+        setChecks({});
+        setPhase('manual-review');
+        void recentCycles.refetch();
+        return;
+      }
       setPhase(step === 'RELEASE_PLATE' ? 'verify-release' : 'verify-load');
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => {
+      setError(e.message);
+      setPreview(null);
+      setChecks({});
+      setPhase('manual-review');
+      void recentCycles.refetch();
+    },
   });
 
   const sendVerify = useMutation({
@@ -120,22 +189,77 @@ export function SwapModPlateChangeControl({
         })
         .then((cycle) => ({ cycle, step, result }));
     },
-    onSuccess: async ({ step, result }) => {
+    onSuccess: async ({ cycle, step, result }) => {
       if (result === 'fail') {
         setPhase('manual-review');
+        void recentCycles.refetch();
+        return;
+      }
+      const expectedState = step === 'RELEASE_PLATE' ? 'READY_TO_LOAD' : 'READY_FOR_NEXT_PRINT';
+      if (cycle.manual_review_required || cycle.state !== expectedState) {
+        setError(
+          cycle.blocked_reason ??
+            t('swapmod.control.verifyFailed', 'The verification result was not accepted. Manual review is required.'),
+        );
+        setPhase('manual-review');
+        void recentCycles.refetch();
         return;
       }
       if (step === 'RELEASE_PLATE') {
-        if (cycleKey) await openConfirm(cycleKey, 'LOAD_NEXT_PLATE', 'confirm-load');
+        if (cycleKey) {
+          try {
+            await openConfirm(cycleKey, 'LOAD_NEXT_PLATE', 'confirm-load');
+          } catch (e) {
+            setError(e instanceof Error ? e.message : t('swapmod.control.previewFailed', 'Confirmation preview failed.'));
+            setPhase('manual-review');
+          }
+        }
       } else {
         setPhase('done');
+        void recentCycles.refetch();
       }
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error) => {
+      setError(e.message);
+      setPreview(null);
+      setChecks({});
+      setPhase('manual-review');
+      void recentCycles.refetch();
+    },
   });
 
   // The backend repeats every gate; these checks also keep ineligible cards inert.
   if (!armed) return null;
+
+  if (phase === 'idle' && unresolvedCycle) {
+    return (
+      <div
+        id={`card-swapmod-plate-change-${printer.id}`}
+        data-testid="card-swapmod-plate-change"
+        role="alert"
+        className="mt-3 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-yellow-600 dark:text-yellow-400"
+      >
+        {t(
+          'swapmod.control.unresolvedCycle',
+          'An existing SwapMod cycle requires review before another plate change.',
+        )}
+      </div>
+    );
+  }
+
+  if (phase === 'idle' && (recentCycles.error || !recentCycles.data)) {
+    if (!recentCycles.error) return null;
+    return (
+      <div
+        id={`card-swapmod-plate-change-${printer.id}`}
+        data-testid="card-swapmod-plate-change"
+        role="alert"
+        className="mt-3 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-500"
+      >
+        {t('swapmod.control.cycleStatusUnavailable', 'SwapMod cycle status is unavailable. Controls are disabled.')}
+      </div>
+    );
+  }
 
   const busy = startCycle.isPending || sendStep.isPending || sendVerify.isPending;
 
@@ -157,7 +281,7 @@ export function SwapModPlateChangeControl({
       </div>
 
       {error && (
-        <div className="mb-2 rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs text-red-400">
+        <div role="alert" className="mb-2 rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs text-red-400">
           {error}
         </div>
       )}
@@ -221,7 +345,10 @@ export function SwapModPlateChangeControl({
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm text-yellow-500">
             <AlertTriangle className="w-4 h-4" />
-            {t('swapmod.control.manualReview', 'Cycle ended in MANUAL_REVIEW. Inspect the printer before retrying.')}
+            {t(
+              'swapmod.control.manualReview',
+              'Cycle stopped in MANUAL_REVIEW or an unexpected state. Inspect the printer and cycle log before retrying.',
+            )}
           </div>
           <button
             onClick={reset}
@@ -233,14 +360,19 @@ export function SwapModPlateChangeControl({
       )}
 
       {(phase === 'confirm-release' || phase === 'confirm-load') && preview && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-lg rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary p-5">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 sm:items-center">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`swapmod-confirm-title-${printer.id}`}
+            className="max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary p-5"
+          >
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
                 <div className="text-xs font-semibold text-yellow-500">
                   {printer.name} · {t('swapmod.control.supervised', 'supervised actuation')}
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                <h3 id={`swapmod-confirm-title-${printer.id}`} className="text-lg font-bold text-gray-900 dark:text-white">
                   {t('swapmod.control.confirmTitle', 'Confirm')} {preview.step}
                 </h3>
                 <p className="text-sm text-bambu-gray">
@@ -260,7 +392,7 @@ export function SwapModPlateChangeControl({
                     checked={!!checks[field]}
                     onChange={(e) => setChecks((c) => ({ ...c, [field]: e.target.checked }))}
                   />
-                  {field}
+                  <span className="capitalize">{field.replaceAll('_', ' ')}</span>
                 </label>
               ))}
             </div>

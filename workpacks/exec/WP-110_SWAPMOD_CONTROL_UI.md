@@ -11,8 +11,9 @@ via the WP-901 pipeline.
 
 The current Draft PR's observable outcome is the supervised printer-card control.
 It remains absent unless both canary flags are armed and the card represents a
-connected, active A1 Mini that the current operator may control. Bambuddy remains
-the final authority and repeats every safety check before any command can run.
+connected, active, explicitly configured A1 Mini that the current operator may
+control. Bambuddy remains the final authority and repeats every safety check
+before any command can run.
 
 ## Read these files
 
@@ -51,7 +52,8 @@ the final authority and repeats every safety check before any command can run.
 - The failure log renders from that endpoint.
 - The printer-card control stays hidden unless all UI eligibility checks pass,
   drives only the existing gated actuation flow, requires every server checklist
-  item, and displays the server phrase read-only.
+  item, displays the server phrase read-only, and refuses stale or competing
+  unresolved cycles.
 - Focused backend and frontend tests, the repository verification gates, startup
   smoke, and desktop/mobile browser checks pass with both canary flags default-off.
 - The Draft PR is current with `farm-main`; physical E2E and merge still require an
@@ -104,6 +106,20 @@ the final authority and repeats every safety check before any command can run.
       connection, active/control permission, and A1 Mini model eligibility. Only
       eligible cards poll canary status, and repeated cards receive unique control
       IDs. No real printer or actuator command was sent.
+- [x] 2026-07-14 00:11 KST Pre-approval safety audit found that all connected
+      A1 Mini cards shared the armed control, `COMMAND_FAILED` responses advanced
+      to verification, and refresh/cancel could permit another cycle while an
+      earlier physical state remained unresolved. Added a default-null named
+      target printer ID enforced by route, service, and UI; server-state checks
+      after transport and verification; disarm-state clearing; and recent-cycle
+      guards in both UI and service. The UI now creates a cycle only after all ten
+      checklist items are checked. Missing responses and unexpected states stop in
+      manual review with no automatic retry. No real printer command was sent.
+- [x] 2026-07-14 00:40 KST Final state-transition review added fail-closed
+      handling for an uncertain verification response and a dedicated stale-cycle
+      service regression. The final generated bundle, focused tests, full frontend
+      suite, shared gates, isolated startup smoke, and desktop/mobile browser
+      checks are green. Main port 18000 remained healthy; no real command ran.
 
 ## Decisions
 
@@ -114,45 +130,68 @@ the final authority and repeats every safety check before any command can run.
   Failure reason comes from `blocked_reason`.
 - Ship read-only monitoring before any actuation UI so the risky slices land small,
   as operator-approved draft PRs.
+- A globally armed flag is insufficient identification for physical control.
+  `FARM_SWAPMOD_A1MINI_DIRECT_CANARY_TARGET_PRINTER_ID` is default-null and a
+  request must match it at the route and service boundaries.
+- Treat returned server state, not a successful HTTP status alone, as the
+  authority. Only `COMMAND_SENT` plus the expected verification state advances
+  the UI; any other result is manual-review-only.
+- Opening or cancelling the confirmation dialog creates no persistent cycle.
+  The cycle is created immediately before the first transport request after the
+  operator checks every server-owned item.
+- Cycles newer than the most recent `READY_FOR_NEXT_PRINT` form the unresolved
+  review window. A different cycle in that window blocks direct transport, which
+  prevents a refresh or second tab from repeating uncertain motion.
 
 ## Implementation and harness changes
 
 - Manual conflict resolution was limited to `PrintersPage.tsx`, generated
   `static/index.html`, and the generated JavaScript asset. Vite regenerated the
   static bundle from the resolved source.
-- The refresh adds no production dependency, migration, service contract, feature
-  flag, permission, or authentication change. The existing read-only confirmation
-  preview and existing gated actuation calls are unchanged by the refresh.
-- Runtime browser evidence used only the isolated `farm_wp110_refresh` harness and
-  a synthetic inactive A1 Mini record (`192.0.2.0/24` TEST-NET). No production
-  credential, customer data, real printer, MQTT, FTPS, or raw G-code path was used.
+- The audit adds one default-null target-printer setting and extends the existing
+  status response with that ID. It changes no permission, authentication rule,
+  dependency, migration, feature-flag default, raw-command boundary, or external
+  service contract.
+- Final runtime browser evidence used only the isolated `farm_wp110_audit`
+  harness on ports 18110/19110 with a fresh synthetic database and no printer
+  records. No production credential, customer data, real printer, MQTT, FTPS, or
+  raw G-code path was used.
 
 ## Validation
 
-Observed on 2026-07-13 KST:
+Observed on 2026-07-14 KST:
 
-- Pre-merge baseline: frontend 159 files / 2123 tests; `make verify-fast` ran 182
-  harness tests twice plus 2 characterization tests.
-- `SwapModPlateChangeControl.test.tsx`: 6/6 passed, including five hidden/inert
-  conditions and the complete checklist/phrase/failure-to-MANUAL_REVIEW path.
-- `PrintersPage.test.tsx`: 65/65 passed.
-- Full frontend: 176 files / 2320 tests; all 11 locales matched at 5584 leaves;
-  ESLint and production Vite build passed (existing large-chunk warning only).
-- `make test-swapmod-a1mini-direct-canary`: 2/2 harness mock tests and 16/16
-  backend service/architecture/API tests passed.
+- `SwapModPlateChangeControl.test.tsx`: 13/13 passed, including target-printer
+  eligibility, full server checklist, command-failure and uncertain transport,
+  uncertain verification, unexpected state, disarm clearing, and unresolved-cycle
+  paths.
+- Full frontend: 176 files / 2327 tests passed. ESLint and the production Vite
+  build passed; only the existing large-chunk warning remains.
+- `make test-swapmod-a1mini-direct-canary`: 2/2 harness mock tests and 21/21
+  backend service/architecture/API tests passed, including named-target,
+  competing-cycle, and stale-cycle failures.
+- Ruff 0.14.11 check and format check passed for every changed backend file. A
+  diagnostic repository-wide run reported 47 existing findings outside this WP;
+  no unrelated file was reformatted.
 - `make verify-fast FRONTEND_TESTED=1`: 190 harness tests twice plus 2
   characterization tests passed.
 - `make verify-full FRONTEND_TESTED=1` against isolated ports 18110/19110 passed,
-  including smoke health and 2 scenarios. Bambuddy started healthy.
-- Headless Chrome at 1440x1000 and 390x844 passed: synthetic printer card present,
-  SwapMod control absent by default, no horizontal overflow, landmark overlap,
-  clipped visible control, failed image, browser error, failed response, or failed
-  load.
+  including root/health/docs/mock smoke and 2 scenarios. Bambuddy started healthy.
+- The runtime status reported both real-command flags false and target printer
+  `null`. Headless Chrome at 1440x1000 and 390x844 passed with the printer
+  operator surface present and the SwapMod control absent by default: no
+  horizontal overflow, clipped visible control, failed image, browser/runtime
+  error, failed response, or failed load.
+- The main Bambuddy instance at port 18000 remained healthy throughout.
 
 ## Failure and recovery
 
 - UI preview/list failures remain read-only failures. Existing backend gates reject
   invalid actuation attempts; verification failure terminates in `MANUAL_REVIEW`.
+- A missing/incorrect named canary, uncertain transport or verification response,
+  unexpected returned state, stale cycle, or competing unresolved cycle fails
+  closed before another physical command.
+  Cancelling before confirmation leaves no cycle.
 - Do not automatically retry or resume an uncertain physical bed action. An
   operator must inspect the printer before any new attempt.
 - Rollback is the Draft PR merge commit; there is no migration or persistent schema

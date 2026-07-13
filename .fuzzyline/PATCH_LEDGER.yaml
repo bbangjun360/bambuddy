@@ -57,3 +57,41 @@ patches:
       - docker compose -f docker-compose.test.yml run --rm backend-test
       - npm --prefix frontend run test:run
       - make verify-full FRONTEND_TESTED=1
+  - id: WP-110-supervised-swapmod-printer-card-control
+    date: 2026-07-14
+    workpack: workpacks/exec/WP-110_SWAPMOD_CONTROL_UI.md
+    files:
+      - backend/app/core/config.py
+      - backend/app/api/routes/swapmod_a1mini_direct_canary.py
+      - backend/app/services/swapmod_a1mini_direct_canary.py
+      - frontend/src/api/client.ts
+      - frontend/src/components/swapmod/SwapModPlateChangeControl.tsx
+      - frontend/src/pages/PrintersPage.tsx
+    upstream_area: Printer card composition and supervised SwapMod direct-canary control
+    reason: >-
+      Replace the curl-only supervised plate-change procedure with an operator
+      control while preserving the WP-076 named-canary, allowlisted-sequence,
+      checklist, exact-phrase, manual-verification, and no-auto-resume gates.
+    behavior: >-
+      The control renders only for the configured, connected, controllable A1
+      Mini canary while both default-off flags are armed. It creates no cycle
+      until all server-provided checklist items are checked, trusts only
+      acknowledged server states, and stops for manual review on command
+      failure, uncertain response, stale state, or another unresolved cycle.
+    feature_flags:
+      - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ENABLED=false
+      - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ALLOW_REAL_COMMANDS=false
+      - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_TARGET_PRINTER_ID=
+    rollback: >-
+      Disable either direct-canary flag and revert the WP-110 Draft PR. The
+      target-printer setting is additive, no migration exists, and uncertain
+      cycles are never resumed automatically.
+    validation:
+      - npm --prefix frontend run test -- --run src/__tests__/components/SwapModPlateChangeControl.test.tsx
+      - npm --prefix frontend run test -- --run
+      - npm --prefix frontend run lint
+      - npm --prefix frontend run build
+      - make test-swapmod-a1mini-direct-canary
+      - make verify-fast FRONTEND_TESTED=1
+      - make verify-full FRONTEND_TESTED=1
+      - git diff --check

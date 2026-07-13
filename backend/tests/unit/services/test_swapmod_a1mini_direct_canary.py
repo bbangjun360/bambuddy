@@ -15,6 +15,7 @@ from backend.app.services.swapmod_a1mini_direct_canary import (
 )
 from backend.app.services.swapmod_state_machine import (
     LOAD_NEXT_PLATE,
+    READY_FOR_NEXT_PRINT,
     RELEASE_PLATE,
     VERIFY_PLATE_RELEASED,
     VERIFY_RELEASED,
@@ -89,11 +90,11 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
             "dry_run_gate_reviewed": True,
         }
 
-    async def create_release_ready_cycle(self):
+    async def create_release_ready_cycle(self, cycle_key: str = "direct-cycle"):
         return await create_swapmod_operator_trigger(
             self.session,
-            trigger_key="direct-trigger",
-            cycle_key="direct-cycle",
+            trigger_key=f"{cycle_key}-trigger",
+            cycle_key=cycle_key,
             printer_id=101,
             operator_intent="START_SWAPMOD_PLATE_CHANGE",
         )
@@ -102,6 +103,7 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
         status = self.service.status_snapshot(
             enabled=False,
             allow_real_commands=False,
+            target_printer_id=None,
             release_sequence_configured=False,
             load_sequence_configured=False,
         )
@@ -135,6 +137,7 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
             checklist=self.complete_checklist(),
             enabled=True,
             allow_real_commands=True,
+            target_printer_id=101,
             sequence_root=self.root,
             release_sequence_file=self.release_file,
             release_sequence_sha256=self.release_sha,
@@ -174,6 +177,7 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
                 checklist=self.complete_checklist(),
                 enabled=False,
                 allow_real_commands=True,
+                target_printer_id=101,
                 sequence_root=self.root,
                 release_sequence_file=self.release_file,
                 release_sequence_sha256=self.release_sha,
@@ -202,6 +206,7 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
                 checklist=self.complete_checklist(),
                 enabled=True,
                 allow_real_commands=True,
+                target_printer_id=101,
                 sequence_root=self.root,
                 release_sequence_file=self.release_file,
                 release_sequence_sha256=self.release_sha,
@@ -231,6 +236,7 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
                 checklist=self.complete_checklist(),
                 enabled=True,
                 allow_real_commands=True,
+                target_printer_id=101,
                 sequence_root=self.root,
                 release_sequence_file=self.release_file,
                 release_sequence_sha256="0" * 64,
@@ -264,6 +270,7 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
             checklist=self.complete_checklist(),
             enabled=True,
             allow_real_commands=True,
+            target_printer_id=101,
             sequence_root=self.root,
             release_sequence_file=self.release_file,
             release_sequence_sha256=self.release_sha,
@@ -303,6 +310,7 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
                 checklist=self.complete_checklist(),
                 enabled=True,
                 allow_real_commands=True,
+                target_printer_id=101,
                 sequence_root=self.root,
                 release_sequence_file=self.release_file,
                 release_sequence_sha256=self.release_sha,
@@ -330,6 +338,7 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
                 checklist=self.complete_checklist(),
                 enabled=True,
                 allow_real_commands=True,
+                target_printer_id=101,
                 sequence_root=self.root,
                 release_sequence_file=self.release_file,
                 release_sequence_sha256=self.release_sha,
@@ -338,6 +347,97 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
                 transport=FakeDirectTransport(status={"state": "RUNNING", "gcode_file": "active.3mf"}),
             )
         self.assertEqual(raised_printer.exception.code, "printer_not_known_idle")
+
+    async def test_blocks_a_printer_other_than_the_named_canary(self) -> None:
+        cycle = await self.create_release_ready_cycle()
+        transport = FakeDirectTransport()
+
+        with self.assertRaises(SwapmodA1MiniDirectCanaryError) as raised:
+            await self.service.execute_transport_step(
+                self.session,
+                cycle,
+                canary_key="direct-wrong-target",
+                printer_id=101,
+                printer_model="A1 mini",
+                step=RELEASE_PLATE,
+                operator_approved=True,
+                operator_approval_phrase="not-used",
+                checklist=self.complete_checklist(),
+                enabled=True,
+                allow_real_commands=True,
+                target_printer_id=202,
+                sequence_root=self.root,
+                release_sequence_file=self.release_file,
+                release_sequence_sha256=self.release_sha,
+                load_sequence_file=self.load_file,
+                load_sequence_sha256=self.load_sha,
+                transport=transport,
+            )
+
+        self.assertEqual(raised.exception.code, "target_printer_mismatch")
+        self.assertEqual(transport.sent, [])
+
+    async def test_blocks_when_another_recent_cycle_is_unresolved(self) -> None:
+        cycle = await self.create_release_ready_cycle()
+        await self.create_release_ready_cycle("other-direct-cycle")
+        transport = FakeDirectTransport()
+
+        with self.assertRaises(SwapmodA1MiniDirectCanaryError) as raised:
+            await self.service.execute_transport_step(
+                self.session,
+                cycle,
+                canary_key="direct-competing-cycle",
+                printer_id=101,
+                printer_model="A1 mini",
+                step=RELEASE_PLATE,
+                operator_approved=True,
+                operator_approval_phrase="not-used",
+                checklist=self.complete_checklist(),
+                enabled=True,
+                allow_real_commands=True,
+                target_printer_id=101,
+                sequence_root=self.root,
+                release_sequence_file=self.release_file,
+                release_sequence_sha256=self.release_sha,
+                load_sequence_file=self.load_file,
+                load_sequence_sha256=self.load_sha,
+                transport=transport,
+            )
+
+        self.assertEqual(raised.exception.code, "another_unresolved_cycle")
+        self.assertEqual(transport.sent, [])
+
+    async def test_blocks_a_cycle_older_than_the_latest_completed_cycle(self) -> None:
+        stale_cycle = await self.create_release_ready_cycle("stale-direct-cycle")
+        completed_cycle = await self.create_release_ready_cycle("completed-direct-cycle")
+        completed_cycle.state = READY_FOR_NEXT_PRINT
+        await self.session.commit()
+        transport = FakeDirectTransport()
+
+        with self.assertRaises(SwapmodA1MiniDirectCanaryError) as raised:
+            await self.service.execute_transport_step(
+                self.session,
+                stale_cycle,
+                canary_key="direct-stale-cycle",
+                printer_id=101,
+                printer_model="A1 mini",
+                step=RELEASE_PLATE,
+                operator_approved=True,
+                operator_approval_phrase="not-used",
+                checklist=self.complete_checklist(),
+                enabled=True,
+                allow_real_commands=True,
+                target_printer_id=101,
+                sequence_root=self.root,
+                release_sequence_file=self.release_file,
+                release_sequence_sha256=self.release_sha,
+                load_sequence_file=self.load_file,
+                load_sequence_sha256=self.load_sha,
+                transport=transport,
+            )
+
+        self.assertEqual(raised.exception.code, "stale_cycle")
+        self.assertEqual(transport.sent, [])
 
 
 if __name__ == "__main__":

@@ -183,6 +183,7 @@ class Settings(BaseSettings):
     farm_swapmod_a1mini_direct_canary_enabled: bool = False
     farm_swapmod_a1mini_direct_canary_allow_real_commands: bool = False
     farm_swapmod_a1mini_direct_canary_require_human_confirmation: bool = True
+    farm_swapmod_a1mini_direct_canary_target_printer_id: int | None = None
     farm_swapmod_a1mini_direct_canary_sequence_root: str | None = None
     farm_swapmod_a1mini_direct_canary_release_sequence_file: str | None = None
     farm_swapmod_a1mini_direct_canary_release_sequence_sha256: str | None = None
