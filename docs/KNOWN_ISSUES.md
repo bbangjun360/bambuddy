@@ -25,7 +25,7 @@ local workarounds between sessions.
 - Was: `.github/workflows/validation.yml` ran for pull requests targeting
   `farm-main` only. A stacked Work Package PR targeting a `feature/wp-*`
   branch required repeated manual workflow dispatches to obtain the same gate.
-- Fix: `FIX_COMMIT` extends the existing base-branch filter to
+- Fix: commit `2bda0d99` extends the existing base-branch filter to
   `feature/wp-*` and adds a harness contract test while retaining
   `workflow_dispatch`. Workflow permissions, jobs, and product behavior are
   unchanged.
