@@ -385,6 +385,9 @@ function SortableQueueItem({
   const isPrinting = item.status === 'printing';
   const isPending = item.status === 'pending';
   const isHistory = ['completed', 'failed', 'skipped', 'cancelled'].includes(item.status);
+  const itemName = item.archive_name || item.library_file_name || `File #${item.archive_id || item.library_file_id}`;
+  const selectItemLabel = `${t(isSelected ? 'archives.menu.deselect' : 'archives.menu.select')}: ${itemName}`;
+  const reorderItemLabel = `${t('queue.dragToReorder')}: ${itemName}`;
 
   const isMobileSelectable = isPending && onToggleSelect;
 
@@ -428,7 +431,9 @@ function SortableQueueItem({
               e.stopPropagation();
               onToggleSelect();
             }}
-            className={`hidden sm:flex items-center justify-center w-6 h-6 rounded border transition-colors shrink-0 ${
+            aria-label={selectItemLabel}
+            title={selectItemLabel}
+            className={`hidden sm:flex h-8 w-8 items-center justify-center rounded border transition-colors shrink-0 ${
               isSelected
                 ? 'bg-bambu-green border-bambu-green text-white'
                 : 'border-white/30 bg-black/30 hover:border-bambu-green/50'
@@ -443,6 +448,8 @@ function SortableQueueItem({
           <div
             {...attributes}
             {...listeners}
+            aria-label={reorderItemLabel}
+            title={reorderItemLabel}
             className="hidden sm:flex items-center justify-center w-8 h-8 rounded-lg bg-bambu-dark cursor-grab active:cursor-grabbing hover:bg-bambu-dark-tertiary transition-colors touch-manipulation shrink-0"
           >
             <GripVertical className="w-4 h-4 text-bambu-gray" />
@@ -488,22 +495,24 @@ function SortableQueueItem({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <p className="text-sm sm:text-base text-white font-medium truncate">
-              {item.archive_name || item.library_file_name || `File #${item.archive_id || item.library_file_id}`}
+              {itemName}
               {(platesData?.is_multi_plate ?? false) && item.plate_id !== undefined && item.plate_id !== null && ` • ${plates.find(plate => plate.index === item.plate_id)?.name || t('queue.plateNumber', { index: item.plate_id })}`}
             </p>
             {item.archive_id ? (
               <Link
                 to={`/archives?highlight=${item.archive_id}`}
-                className="text-bambu-gray hover:text-bambu-green transition-colors flex-shrink-0"
-                title={t('queue.viewArchive')}
+                className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center text-bambu-gray transition-colors hover:text-bambu-green"
+                aria-label={`${t('queue.viewArchive')}: ${itemName}`}
+                title={`${t('queue.viewArchive')}: ${itemName}`}
               >
                 <ExternalLink className="w-3.5 h-3.5" />
               </Link>
             ) : item.library_file_id ? (
               <Link
                 to={`/library?highlight=${item.library_file_id}`}
-                className="text-bambu-gray hover:text-bambu-green transition-colors flex-shrink-0"
-                title={t('queue.viewInFileManager')}
+                className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center text-bambu-gray transition-colors hover:text-bambu-green"
+                aria-label={`${t('queue.viewInFileManager')}: ${itemName}`}
+                title={`${t('queue.viewInFileManager')}: ${itemName}`}
               >
                 <ExternalLink className="w-3.5 h-3.5" />
               </Link>
@@ -891,11 +900,12 @@ function SortableBatchRow({
               }
             });
           }}
-          className={`hidden sm:flex items-center justify-center w-6 h-6 rounded border transition-colors shrink-0 ${
+          className={`hidden sm:flex h-8 w-8 items-center justify-center rounded border transition-colors shrink-0 ${
             allSelected
               ? 'bg-bambu-green border-bambu-green text-white'
               : 'border-white/30 bg-black/30 hover:border-bambu-green/50'
           }`}
+          aria-label={allSelected ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
           title={allSelected ? t('queue.bulkEdit.deselectAll') : t('queue.bulkEdit.selectAll')}
         >
           {allSelected && <Check className="w-4 h-4" />}
@@ -905,6 +915,7 @@ function SortableBatchRow({
             {...attributes}
             {...listeners}
             className="hidden sm:flex items-center justify-center w-8 h-8 rounded-lg bg-bambu-dark cursor-grab active:cursor-grabbing hover:bg-bambu-dark-tertiary transition-colors touch-manipulation shrink-0"
+            aria-label={t('queue.batch.dragGroup', { defaultValue: 'Drag group' })}
             title={t('queue.batch.dragGroup', { defaultValue: 'Drag group' })}
           >
             <GripVertical className="w-4 h-4 text-bambu-gray" />
@@ -1078,7 +1089,8 @@ function HistorySection({
         </h2>
         <div className="flex items-center gap-2">
           <select
-            className="px-2 sm:px-3 py-1.5 text-xs sm:text-sm bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+            className="h-8 px-2 text-xs sm:px-3 sm:text-sm bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+            aria-label={`${t('common.sort')}: ${t('queue.sections.history')}`}
             value={sortBy}
             onChange={(e) => onSortByChange(e.target.value as 'date' | 'name' | 'printer')}
           >
@@ -1090,8 +1102,9 @@ function HistorySection({
             variant="ghost"
             size="sm"
             onClick={onSortAscToggle}
+            aria-label={sortAsc ? t('queue.sort.ascendingOldest') : t('queue.sort.descendingNewest')}
             title={sortAsc ? t('queue.sort.ascendingOldest') : t('queue.sort.descendingNewest')}
-            className="px-2"
+            className="h-8 w-8 p-0"
           >
             {sortAsc ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
           </Button>
@@ -2276,7 +2289,8 @@ export function QueuePage() {
                 </h2>
                 <div className="flex items-center gap-2">
                   <select
-                    className="px-2 sm:px-3 py-1.5 text-xs sm:text-sm bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                    className="h-8 px-2 text-xs sm:px-3 sm:text-sm bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none"
+                    aria-label={`${t('common.sort')}: ${t('queue.sections.queued')}`}
                     value={pendingSortBy}
                     onChange={(e) => setPendingSortBy(e.target.value as 'position' | 'name' | 'printer' | 'time')}
                   >
@@ -2289,8 +2303,9 @@ export function QueuePage() {
                     variant="ghost"
                     size="sm"
                     onClick={() => setPendingSortAsc(!pendingSortAsc)}
+                    aria-label={pendingSortAsc ? t('common.ascending') : t('common.descending')}
                     title={pendingSortAsc ? t('common.ascending') : t('common.descending')}
-                    className="px-2"
+                    className="h-8 w-8 p-0"
                   >
                     {pendingSortAsc ? <ArrowUp className="w-4 h-4" /> : <ArrowDown className="w-4 h-4" />}
                   </Button>

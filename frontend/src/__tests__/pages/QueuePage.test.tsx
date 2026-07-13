@@ -211,9 +211,11 @@ describe('QueuePage', () => {
       expect(tablist).toBeInTheDocument();
       const queueTab = screen.getByRole('tab', { name: /^Queue/ });
       const historyTab = screen.getByRole('tab', { name: /^History/ });
+      const panel = screen.getByRole('tabpanel');
       expect(queueTab).toHaveAttribute('aria-selected', 'true');
       expect(historyTab).toHaveAttribute('aria-selected', 'false');
       expect(queueTab).toHaveAttribute('aria-controls', 'queue-panel');
+      expect(panel).toHaveAttribute('aria-labelledby', 'queue-tab-queue');
 
       queueTab.focus();
       await user.keyboard('{ArrowRight}');
@@ -232,6 +234,26 @@ describe('QueuePage', () => {
       await user.click(historyTab);
       expect(queueTab).toHaveAttribute('aria-selected', 'false');
       expect(historyTab).toHaveAttribute('aria-selected', 'true');
+      expect(panel).toHaveAttribute('aria-labelledby', 'queue-tab-history');
+      expect(screen.getByRole('combobox', { name: 'Sort: History' })).toHaveClass('h-8');
+    });
+
+    it('names compact row tools and gives icon controls stable targets', async () => {
+      render(<QueuePage />);
+
+      await screen.findByText('Test Print 1');
+      const selectButton = screen.getByRole('button', { name: 'Select: Test Print 1' });
+      const reorderButton = screen.getByRole('button', {
+        name: 'Drag to reorder (ASAP only): Test Print 1',
+      });
+      const archiveLink = screen.getByRole('link', { name: 'View archive: Test Print 1' });
+      const sortSelect = screen.getByRole('combobox', { name: 'Sort: Queued' });
+      const sortDirectionButton = screen.getByRole('button', { name: 'Ascending' });
+
+      expect(sortSelect).toHaveClass('h-8');
+      for (const control of [selectButton, reorderButton, archiveLink, sortDirectionButton]) {
+        expect(control).toHaveClass('h-8', 'w-8');
+      }
     });
 
     it('reserves a mobile gutter between job rows and the fixed bug report button', async () => {

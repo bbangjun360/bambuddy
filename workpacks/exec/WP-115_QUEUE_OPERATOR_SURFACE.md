@@ -121,6 +121,17 @@ baseline passed `make verify-fast` and all 26 focused QueuePage tests.
   passed 2,318/2,318 with 11 locales in parity. ESLint, build, `verify-fast`,
   `verify-full`, desktop/mobile browser checks, and card/control intersection
   checks passed; main port 18000 remained healthy.
+- [x] 2026-07-14 01:03 KST: A second pre-approval Chrome accessibility audit
+  found unnamed pending-item selection and drag controls, 13px archive-link
+  targets, and unnamed sort selects. Added a red regression for item-specific
+  names, stable targets, and the active tabpanel relationship before changing
+  production code.
+- [x] 2026-07-14 01:16 KST: Added translated item-specific accessible names,
+  explicit Queue/History sort names, and stable 32px CSS targets for compact
+  row and sort controls. Focused tests passed 31/31; the full frontend passed
+  2,319/2,319 with all locales in parity. ESLint, build, `verify-fast`,
+  isolated `verify-full`, visual checks, and the Chrome accessibility tree
+  audit passed.
 
 ## Decisions
 
@@ -137,6 +148,12 @@ baseline passed `make verify-fast` and all 26 focused QueuePage tests.
   outside the overlay at every scroll position while preserving desktop width.
 - Give the mobile icon-only resume-after-failure control an explicit translated
   accessible name and tooltip because its visible text is hidden below `sm`.
+- Derive compact row control names from existing translated action labels plus
+  the visible job name. This avoids new locale keys while distinguishing
+  repeated selection, drag, archive, and file-manager controls.
+- Keep compact icon controls at `h-8 w-8` in source. The configured 90% UI
+  scale renders these as 28.8 CSS px, above the audit floor and without
+  increasing row height or crowding mobile commands.
 
 ## Harness Changes
 
@@ -149,6 +166,13 @@ baseline passed `make verify-fast` and all 26 focused QueuePage tests.
 - A CDP coordinate audit checks the global fixed bug-report button against
   visible Queue row and command rectangles at 390x844; both intersection sets
   are empty after the fix.
+- A CDP accessibility audit checks scoped DOM names, Chrome accessibility-tree
+  names, duplicate IDs, active tabpanel ownership, and control dimensions at
+  1440x1000 and 390x844.
+- Rebuilding the isolated preview exposed a stale PostgreSQL volume whose role
+  password predated the current `.env.harness.example`. The `farm_wp115` role
+  was synchronized to the synthetic `local-harness-only` value and only its app
+  container was restarted; no volume, schema, or application data was removed.
 
 ## Implementation
 
@@ -177,20 +201,27 @@ make verify-fast FRONTEND_TESTED=1
 make verify-full FRONTEND_TESTED=1
 ```
 
-Observed results on 2026-07-13:
+Observed results on 2026-07-14:
 
-- Focused QueuePage: 30/30 tests passed, including semantic tabs, arrow-key
-  focus movement, compact rows, mobile overlay clearance, accessible icon-only
-  actions, filters, history, and existing action controls.
-- Full frontend: 175 files and 2,318 tests passed; all 11 locales matched; ESLint
+- Focused QueuePage: 31/31 tests passed, including semantic tabs, dynamic
+  tabpanel ownership, item-specific control names, stable compact targets,
+  arrow-key focus movement, mobile overlay clearance, filters, history, and
+  existing action controls.
+- Full frontend: 175 files and 2,319 tests passed; all 11 locales matched; ESLint
   and the TypeScript/Vite production build passed.
 - Shared gates: `make verify-fast FRONTEND_TESTED=1` and isolated
-  `make verify-full FRONTEND_TESTED=1` passed, including clean-start smoke.
+  `make verify-full FRONTEND_TESTED=1` passed. The full smoke explicitly used
+  `BAMBUDDY_BASE_URL=http://127.0.0.1:18115` and
+  `MOCK_BASE_URL=http://127.0.0.1:19115`; all four targets returned 200.
 - Browser: 1440x1000 and 390x844 showed two compact active rows, loaded real
   repository thumbnails, no page overflow or component overlap, no clipped
   controls, and no failed requests or browser errors. Queue/History keyboard
   switching retained focus. At mobile top and scroll bottom, visible Queue
   rows, commands, and the fixed bug-report control had zero intersection.
+- Accessibility: every scoped control and interactive Chrome accessibility
+  node had a name, no duplicate IDs were present, no scoped target rendered
+  below 28 CSS px, and History switched the shared panel to
+  `aria-labelledby="queue-tab-history"` with `Sort: History`.
 
 Observable scenario: with one printing, one pending, and one completed synthetic
 job, the active Queue view shows the running and pending work plus summary load;
@@ -227,5 +258,7 @@ failure paths still use the existing query, mutation, API, and browser
 diagnostics. Rollback is the source plus generated-asset revert. Bambuddy was
 built and started successfully in the isolated harness. The pre-approval audit
 also removed a mobile command-overlay collision and restored the accessible
-name of an icon-only failure-recovery action. The remaining gate is operator
-visual approval of the draft PR; no merge is attempted before it.
+name of an icon-only failure-recovery action. The second audit also named each
+compact selection, reorder, archive, and sort control and restored stable target
+dimensions. The remaining gate is operator visual approval of the draft PR;
+no merge is attempted before it.
