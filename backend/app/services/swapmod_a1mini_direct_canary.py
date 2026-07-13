@@ -11,10 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.models.swapmod_state_machine import SwapmodStateMachineCycle
 from backend.app.services.swapmod_state_machine import (
     LOAD_NEXT_PLATE,
+    LOADING_PLATE,
     READY_FOR_NEXT_PRINT,
     READY_TO_LOAD,
     READY_TO_RELEASE,
     RELEASE_PLATE,
+    RELEASING_PLATE,
     START_STEP,
     STEP_REAL_COMMAND_SENT,
     TIMEOUT,
@@ -234,6 +236,50 @@ class SwapmodA1MiniDirectCanaryService:
         # A crash or later DB failure then blocks retry instead of restoring READY.
         await db.commit()
 
+        expected_active_state = RELEASING_PLATE if step == RELEASE_PLATE else LOADING_PLATE
+        cycle = await _lock_active_cycle_for_transport(
+            db,
+            cycle_id=cycle.id,
+            printer_id=printer_id,
+            expected_state=expected_active_state,
+        )
+        try:
+            # Recheck immediately before send. The initial check avoids creating
+            # an active claim for an already-busy printer; this check closes the
+            # commit gap while the cycle row remains locked through transport.
+            _require_known_idle_printer_state(transport.get_status(printer_id))
+        except SwapmodA1MiniDirectCanaryError:
+            cycle = await apply_swapmod_event(
+                db,
+                cycle,
+                TIMEOUT,
+                event_id=f"{event_prefix}:pre-send-status-failed",
+                step=step,
+                note="A1 Mini direct canary printer state changed before send; manual review required",
+            )
+            await db.commit()
+            raise
+        except Exception as exc:  # noqa: BLE001 - unknown status is unsafe after durable claim
+            logger.exception(
+                "A1 Mini direct canary pre-send status raised; printer_id=%s cycle_key=%s step=%s",
+                printer_id,
+                cycle.cycle_key,
+                step,
+            )
+            cycle = await apply_swapmod_event(
+                db,
+                cycle,
+                TIMEOUT,
+                event_id=f"{event_prefix}:pre-send-status-error",
+                step=step,
+                note="A1 Mini direct canary printer status failed before send; manual review required",
+            )
+            await db.commit()
+            raise SwapmodA1MiniDirectCanaryError(
+                "printer_status_check_failed",
+                "printer status check failed before direct canary send",
+            ) from exc
+
         transport_raised = False
         try:
             command_sent = transport.send_gcode(printer_id, sequence_text)
@@ -328,6 +374,40 @@ async def _acquire_direct_canary_execution_lock(db: AsyncSession, *, printer_id:
         "database_dialect_not_supported",
         "A1 Mini direct canary requires SQLite or PostgreSQL transaction locking",
     )
+
+
+async def _lock_active_cycle_for_transport(
+    db: AsyncSession,
+    *,
+    cycle_id: int,
+    printer_id: int,
+    expected_state: str,
+) -> SwapmodStateMachineCycle:
+    """Reclaim the printer and cycle after the durable pre-send commit."""
+    await _acquire_direct_canary_execution_lock(db, printer_id=printer_id)
+    result = await db.execute(
+        select(SwapmodStateMachineCycle)
+        .where(SwapmodStateMachineCycle.id == cycle_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    cycle = result.scalar_one_or_none()
+    if cycle is None:
+        raise SwapmodA1MiniDirectCanaryError(
+            "cycle_missing_before_transport",
+            "SwapMod cycle disappeared before direct canary transport",
+        )
+    if cycle.printer_id is None or int(cycle.printer_id) != int(printer_id):
+        raise SwapmodA1MiniDirectCanaryError(
+            "printer_id_changed_before_transport",
+            "SwapMod cycle printer changed before direct canary transport",
+        )
+    if cycle.state != expected_state:
+        raise SwapmodA1MiniDirectCanaryError(
+            "cycle_state_changed_before_transport",
+            "SwapMod cycle state changed before direct canary transport",
+        )
+    return cycle
 
 
 async def _require_only_recent_unresolved_cycle(

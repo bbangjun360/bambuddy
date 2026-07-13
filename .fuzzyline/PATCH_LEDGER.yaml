@@ -79,8 +79,10 @@ patches:
       acknowledged server states, and stops for manual review on command
       failure, uncertain response, stale state, or another unresolved cycle. The
       backend serializes each named-printer claim, refreshes state under the lock,
-      commits an active transition before transport, and hashes and sends one
-      immutable sequence snapshot.
+      commits an active transition before transport, then reclaims the printer
+      lock and cycle row lock through send. It rechecks the printer immediately
+      before sending the already hashed immutable sequence snapshot. The broader
+      state-machine flag is also required.
     feature_flags:
       - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ENABLED=false
       - FARM_SWAPMOD_A1MINI_DIRECT_CANARY_ALLOW_REAL_COMMANDS=false
@@ -97,6 +99,7 @@ patches:
       - npm --prefix frontend run build
       - make test-swapmod-a1mini-direct-canary
       - ephemeral PostgreSQL concurrent direct-canary audit (one synthetic send)
+      - ephemeral PostgreSQL send-time cycle row-lock audit
       - make verify-fast FRONTEND_TESTED=1
       - make verify-full FRONTEND_TESTED=1
       - git diff --check

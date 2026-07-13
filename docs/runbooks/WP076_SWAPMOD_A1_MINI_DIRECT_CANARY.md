@@ -30,7 +30,12 @@ never accepts raw G-code or a path.
 Bambuddy reads the selected sequence once, verifies that exact byte snapshot
 against the configured SHA-256, requires UTF-8, and sends only the verified
 snapshot. It serializes the named printer in the database and commits the active
-SwapMod state before calling the printer transport.
+SwapMod state before calling the printer transport. It then starts a new
+transaction, reclaims the named-printer lock, locks and refreshes the cycle row,
+requires the expected active state, and checks the printer is still idle
+immediately before send. The cycle row remains locked until the command result is
+recorded. Another state writer cannot race the send and be overwritten by a stale
+cycle object.
 
 ## Checklist
 
@@ -77,12 +82,14 @@ CONFIRM_A1_MINI_DIRECT_PLATE_CHANGE <printer_id> <cycle_key> <step> <sequence_sh
 Stop immediately if any of these occur:
 
 - any direct canary flag is not explicitly enabled for the session;
+- the SwapMod state-machine flag is disabled;
 - the named canary printer ID is missing or does not match the request;
 - another cycle since the most recent completed cycle still requires review;
 - the configured sequence SHA-256 does not match;
 - the sequence cannot be read as the same verified UTF-8 byte snapshot;
 - the printer is not A1 Mini;
 - Bambuddy shows an active file or non-idle state;
+- the printer state changes or becomes unreadable after the durable active claim;
 - any checklist field is false;
 - the phrase does not exactly match;
 - the response reports `COMMAND_FAILED`;
