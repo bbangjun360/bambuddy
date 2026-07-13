@@ -94,7 +94,8 @@ business workflow.
   with all 11 locales in parity with English.
 - [x] 2026-07-13: Published Draft PR #93 with the validation and merge-policy
   exclusion summary.
-- [ ] Obtain operator visual review before taking the PR out of Draft.
+- [x] 2026-07-13: Operator visually approved the shared shell and authorized
+  PR #93 to leave Draft and merge.
 
 ## Done when
 
@@ -158,5 +159,5 @@ Validation evidence on 2026-07-13:
 Migration and rollback remain as documented above. Remaining redesign work is
 intentionally split into later observable slices: printer fleet/card workflows,
 production work surfaces (queue, archives, inventory, projects, and files),
-then insights and administration surfaces. WP-112 should remain Draft until the
-operator accepts the shared shell visually.
+then insights and administration surfaces. The operator accepted the shared
+shell visually on 2026-07-13, clearing PR #93 for routine merge.
