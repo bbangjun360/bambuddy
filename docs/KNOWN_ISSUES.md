@@ -25,7 +25,7 @@ local workarounds between sessions.
 - Was: operator-approved upstream PR #92 merged v0.2.4.9 into `farm-main`, but
   its ExecPlan still left publication unchecked and the impact report still
   described the integration PR as awaiting review.
-- Fix: `FIX_COMMIT` records the merged state in both documents and adds a
+- Fix: commit `9f05aea3` records the merged state in both documents and adds a
   2026-07-14 freshness check. v0.2.4.9 remains the latest stable release;
   v0.2.5b2 daily builds remain prerelease and outside the approved scope.
 
