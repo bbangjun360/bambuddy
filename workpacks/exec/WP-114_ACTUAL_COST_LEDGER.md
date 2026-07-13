@@ -114,7 +114,8 @@ the existing print-log/statistics tests.
   including incomplete-estimate/actual-total summary consistency.
 - [x] 2026-07-13 20:00 KST: `make test-unit`, `make test-contract`, corrected
   alternate-port `make test-integration`, `make verify-full`, and Ruff passed.
-- [ ] Publish the draft PR and record all evidence.
+- [x] 2026-07-13 20:17 KST: Published draft PR #95 targeting `farm-main`;
+  additive schema and the shared print-log hook await explicit operator approval.
 
 # Decisions
 
@@ -224,7 +225,7 @@ runtime created the additive table, preserved separate failed/reprint rows,
 reconciled `10346.80 KRW` actual total, and emitted no application error logs.
 Desktop and mobile Chromium checks were nonblank and error-free.
 
-Draft PR publication remains before this slice is review-ready. The schema and
-shared print-log hook require explicit operator approval before merge. Later
+Draft PR #95 is published and review-ready but remains draft pending explicit
+operator approval because it adds schema and a shared print-log hook. Later
 WP-114 slices still own labor, overhead, adjustment/closing, and ERP cost
 payload requirements.
