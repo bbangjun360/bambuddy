@@ -20,6 +20,15 @@ local workarounds between sessions.
 
 ## FIXED
 
+### UI-01 Settings requests protected 2FA status when auth is disabled — FIXED 2026-07-14
+
+- Was: opening Settings with authentication disabled still requested
+  `/api/v1/auth/2fa/status`. The endpoint correctly returned 401, and the
+  browser then retried the avoidable protected request.
+- Fix: commit `8a930df1` gates the current-user 2FA query on `authEnabled`.
+  Regression tests assert zero calls while authentication is disabled and
+  preserve the authenticated-user request when authentication is enabled.
+
 ### HARNESS-02 verify-full smoke needs the compose harness running — FIXED 2026-07-02
 
 - Was: `make test-integration` waited through the full smoke readiness timeout

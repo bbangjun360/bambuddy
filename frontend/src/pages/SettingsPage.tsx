@@ -603,6 +603,7 @@ export function SettingsPage() {
   const { data: twoFAStatus } = useQuery({
     queryKey: ['twoFAStatus'],
     queryFn: () => api.get2FAStatus(),
+    enabled: authEnabled,
   });
   const { data: oidcProvidersAll = [] } = useQuery({
     queryKey: ['oidcProvidersAll'],
