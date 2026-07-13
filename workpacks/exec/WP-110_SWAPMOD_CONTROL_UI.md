@@ -232,8 +232,8 @@ Observed on 2026-07-14 KST:
   Cancelling before confirmation leaves no cycle.
 - A transport exception is treated as an uncertain physical outcome and is
   committed to manual review with retry disabled. If the process stops after the
-  durable active claim, startup reconciliation/manual inspection handles that
-  active state; it is never restored to a ready state automatically.
+  durable active claim, subsequent state checks keep that active state blocked
+  until manual inspection; it is never restored to a ready state automatically.
 - Do not automatically retry or resume an uncertain physical bed action. An
   operator must inspect the printer before any new attempt.
 - Rollback is the Draft PR merge commit; there is no migration or persistent schema
