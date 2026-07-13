@@ -98,6 +98,13 @@ class Settings(BaseSettings):
     farm_erp_timezone: str = "Asia/Seoul"
     farm_erp_timeout_seconds: float = 5.0
 
+    # WP-114 actual cost ledger. Disabled by default and read-only; enabling
+    # capture also requires a valid KRW policy and positive allocation rates.
+    farm_actual_cost_ledger_enabled: bool = False
+    farm_cost_ledger_machine_rate_per_hour_krw: float = 0.0
+    farm_cost_ledger_estimated_power_kw: float = 0.0
+    farm_cost_ledger_policy_version: str = ""
+
     # WP-040 ERP draft write. Disabled by default; creates Draft-only
     # synthetic ERP output documents through the mock/sandbox adapter.
     farm_erp_draft_posting_enabled: bool = False

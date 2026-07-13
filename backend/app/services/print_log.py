@@ -8,6 +8,7 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.config import settings
 from backend.app.models.print_log import PrintLogEntry
 
 logger = logging.getLogger(__name__)
@@ -61,4 +62,19 @@ async def write_log_entry(
     )
     db.add(entry)
     await db.flush()
+
+    # Farm extension: preserve estimate/rate context next to this immutable
+    # actual run. A SAVEPOINT isolates ledger failures so accounting metadata
+    # can never erase the canonical print-log event.
+    if settings.farm_actual_cost_ledger_enabled:
+        try:
+            from backend.app.services.farm_cost_ledger import capture_cost_snapshot
+
+            async with db.begin_nested():
+                await capture_cost_snapshot(db, entry)
+        except Exception:
+            logger.exception(
+                "farm_cost_ledger_snapshot_failed print_log_entry_id=%s",
+                entry.id,
+            )
     return entry

@@ -30,6 +30,7 @@ from backend.app.api.routes import (
     erp_draft_write,
     erp_readonly,
     external_links,
+    farm_cost_ledger,
     filaments,
     firmware,
     github_backup,
@@ -52,14 +53,14 @@ from backend.app.api.routes import (
     obico_shadow,
     orca_cloud,
     pending_uploads,
+    pipeline_runs,
     plate_change_3mf_postprocess,
     plate_change_command,
-    printflow_canary,
-    pipeline_runs,
     print_log,
     print_queue,
     printer_sensor_history,
     printers,
+    printflow_canary,
     projects,
     settings as settings_routes,
     slice_jobs,
@@ -70,12 +71,12 @@ from backend.app.api.routes import (
     spoolbuddy,
     spoolman,
     spoolman_inventory,
+    support,
     swapmod_3mf_dry_run,
     swapmod_a1mini_direct_canary,
     swapmod_bed_readiness,
     swapmod_canary_preflight,
     swapmod_state_machine,
-    support,
     system,
     updates,
     user_notifications,
@@ -6740,6 +6741,7 @@ app.include_router(orca_cloud.router, prefix=app_settings.api_prefix)
 app.include_router(local_presets.router, prefix=app_settings.api_prefix)
 app.include_router(smart_plugs.router, prefix=app_settings.api_prefix)
 app.include_router(print_log.router, prefix=app_settings.api_prefix)
+app.include_router(farm_cost_ledger.router, prefix=app_settings.api_prefix)
 app.include_router(print_queue.router, prefix=app_settings.api_prefix)
 app.include_router(kprofiles.router, prefix=app_settings.api_prefix)
 app.include_router(notifications.router, prefix=app_settings.api_prefix)

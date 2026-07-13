@@ -45,7 +45,10 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    and least-privilege credentials remain operator deployment work.
 5. **Actual cost ledger** (spec WP-05) — estimate snapshot vs actual
    material/energy/machine-time, failed/reprint cost separation, KRW.
-   Untouched so far. The ERP payload dependency is unblocked by WP-111.
+   WP-114 is in progress with a default-off, read-only per-run ledger API and
+   immutable estimate/rate snapshots. ERP and accounting writes remain out of
+   scope for this first slice. The ERP payload dependency is unblocked by
+   WP-111.
 6. **Obico phase 2** (spec WP-09) — assisted pause after shadow-mode sample
    collection. Blocked on: enough production shadow samples, which needs 2.
 7. **WP-9xx off-track tooling closure** — WP-901 Paper UI export: DONE

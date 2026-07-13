@@ -126,6 +126,7 @@ async def test_engine():
         erp_draft_write,
         erp_readonly,
         external_link,
+        farm_cost_ledger,
         filament,
         group,
         kprofile_note,
@@ -144,8 +145,6 @@ async def test_engine():
         smart_plug_energy_snapshot,  # noqa: F401
         sponsor_toast_state,  # noqa: F401
         spool,
-        swapmod_queue_readiness_binding,
-        swapmod_state_machine,
         spool_assignment,
         spool_catalog,
         spool_k_profile,
@@ -153,6 +152,8 @@ async def test_engine():
         spoolbuddy_device,
         spoolman_k_profile,
         spoolman_slot_assignment,
+        swapmod_queue_readiness_binding,
+        swapmod_state_machine,
         user,
         user_email_pref,
         user_otp_code,
