@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Fragment, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Printer, Archive, ListOrdered, BarChart3, Cloud, Settings, Sun, Moon, Monitor, ChevronLeft, ChevronRight, Keyboard, Github, ArrowUpCircle, Wrench, FolderKanban, FolderOpen, X, Menu, Info, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Globe, Bell, type LucideIcon } from 'lucide-react';
+import { Printer, Archive, ListOrdered, BarChart3, Cloud, Settings, Sun, Moon, Monitor, ChevronLeft, ChevronRight, Keyboard, Github, ArrowUpCircle, Wrench, FolderKanban, FolderOpen, X, Info, Plug, Bug, LogOut, Key, Loader2, Disc3, ShieldAlert, Globe, Bell, type LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../contexts/ThemeContext';
 import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
@@ -28,32 +28,44 @@ import {
   saveSidebarOrder,
   SIDEBAR_LAYOUT_CHANGED_EVENT,
 } from '../utils/sidebarLayout';
+import { OperatorTopBar } from './OperatorTopBar';
 
+
+type NavSection = 'fleet' | 'production' | 'insights' | 'administration';
 
 interface NavItem {
   id: string;
   to: string;
   icon: LucideIcon;
   labelKey: string; // Translation key
+  section: NavSection;
 }
 
+const navSectionLabelKeys: Record<NavSection | 'links', string> = {
+  fleet: 'nav.sections.fleet',
+  production: 'nav.sections.production',
+  insights: 'nav.sections.insights',
+  administration: 'nav.sections.administration',
+  links: 'nav.sections.links',
+};
+
 export const defaultNavItems: NavItem[] = [
-  { id: 'printers', to: '/', icon: Printer, labelKey: 'nav.printers' },
-  { id: 'inventory', to: '/inventory', icon: Disc3, labelKey: 'nav.inventory' },
-  { id: 'archives', to: '/archives', icon: Archive, labelKey: 'nav.archives' },
-  { id: 'queue', to: '/queue', icon: ListOrdered, labelKey: 'nav.queue' },
-  { id: 'projects', to: '/projects', icon: FolderKanban, labelKey: 'nav.projects' },
-  { id: 'files', to: '/files', icon: FolderOpen, labelKey: 'nav.files' },
-  { id: 'makerworld', to: '/makerworld', icon: Globe, labelKey: 'nav.makerworld' },
-  { id: 'profiles', to: '/profiles', icon: Cloud, labelKey: 'nav.profiles' },
-  { id: 'maintenance', to: '/maintenance', icon: Wrench, labelKey: 'nav.maintenance' },
-  { id: 'stats', to: '/stats', icon: BarChart3, labelKey: 'nav.stats' },
+  { id: 'printers', to: '/', icon: Printer, labelKey: 'nav.printers', section: 'fleet' },
+  { id: 'inventory', to: '/inventory', icon: Disc3, labelKey: 'nav.inventory', section: 'production' },
+  { id: 'archives', to: '/archives', icon: Archive, labelKey: 'nav.archives', section: 'production' },
+  { id: 'queue', to: '/queue', icon: ListOrdered, labelKey: 'nav.queue', section: 'production' },
+  { id: 'projects', to: '/projects', icon: FolderKanban, labelKey: 'nav.projects', section: 'production' },
+  { id: 'files', to: '/files', icon: FolderOpen, labelKey: 'nav.files', section: 'production' },
+  { id: 'makerworld', to: '/makerworld', icon: Globe, labelKey: 'nav.makerworld', section: 'production' },
+  { id: 'profiles', to: '/profiles', icon: Cloud, labelKey: 'nav.profiles', section: 'production' },
+  { id: 'maintenance', to: '/maintenance', icon: Wrench, labelKey: 'nav.maintenance', section: 'insights' },
+  { id: 'stats', to: '/stats', icon: BarChart3, labelKey: 'nav.stats', section: 'insights' },
   // User-account feature: gated in isHidden() on advanced auth + user_notifications
   // + the notifications:user_email permission. Kept adjacent to Settings
   // intentionally. Do not drop this entry — without it the /notifications page
   // is orphaned (route + page still exist but no nav link) (#1901).
-  { id: 'notifications', to: '/notifications', icon: Bell, labelKey: 'nav.notifications' },
-  { id: 'settings', to: '/settings', icon: Settings, labelKey: 'nav.settings' },
+  { id: 'notifications', to: '/notifications', icon: Bell, labelKey: 'nav.notifications', section: 'administration' },
+  { id: 'settings', to: '/settings', icon: Settings, labelKey: 'nav.settings', section: 'administration' },
 ];
 
 // Get default view from localStorage
@@ -356,6 +368,44 @@ export function Layout() {
     return result;
   })();
 
+  const getSidebarSection = (id: string): NavSection | 'links' => {
+    if (isExternalSidebarItemId(id)) return 'links';
+    return navItemsMap.get(id)?.section ?? 'production';
+  };
+
+  const activeNavContext = useMemo(() => {
+    const path = location.pathname;
+    const internalNavItem = [...defaultNavItems]
+      .sort((a, b) => b.to.length - a.to.length)
+      .find((item) =>
+        item.to === '/'
+          ? path === '/'
+          : path === item.to || path.startsWith(`${item.to}/`),
+      );
+
+    if (internalNavItem) {
+      return {
+        icon: internalNavItem.icon,
+        label: t(internalNavItem.labelKey),
+      };
+    }
+
+    if (path.startsWith('/system')) return { icon: Info, label: t('nav.system') };
+    if (path.startsWith('/groups')) return { icon: Settings, label: t('nav.settings') };
+    if (path.startsWith('/gcode-viewer')) return { icon: FolderOpen, label: t('nav.files') };
+
+    const externalId = path.match(/^\/external\/(\d+)/)?.[1];
+    const externalLink = externalLinks?.find((link) => String(link.id) === externalId);
+    if (externalLink) {
+      return {
+        icon: externalLink.custom_icon ? Globe : getIconByName(externalLink.icon),
+        label: externalLink.name,
+      };
+    }
+
+    return { icon: Printer, label: 'Bambuddy' };
+  }, [externalLinks, location.pathname, t]);
+
   // Show update banner if update available and not dismissed for this version.
   // Suppressed when running as a Home Assistant addon — HA Supervisor surfaces
   // its own update notification in the HA UI, so the in-app banner is duplicate
@@ -478,25 +528,7 @@ export function Layout() {
   }, [handleKeyDown]);
 
   return (
-    <div className="flex min-h-screen">
-      {/* Compact Header */}
-      {isSidebarCompact && (
-        <header className="fixed top-0 left-0 right-0 z-40 h-14 bg-bambu-dark-secondary border-b border-bambu-dark-tertiary flex items-center px-4">
-          <button
-            onClick={() => setMobileDrawerOpen(true)}
-            className="p-2 -ml-2 rounded-lg hover:bg-bambu-dark-tertiary transition-colors"
-            aria-label="Open menu"
-          >
-            <Menu className="w-6 h-6 text-white" />
-          </button>
-          <img
-            src={resolvedMode === 'dark' ? '/img/bambuddy_logo_dark_transparent.png' : '/img/bambuddy_logo_light.png'}
-            alt="Bambuddy"
-            className="h-8 ml-3"
-          />
-        </header>
-      )}
-
+    <div className="min-h-screen bg-bambu-dark">
       {/* Compact Drawer Backdrop */}
       {isSidebarCompact && mobileDrawerOpen && (
         <div
@@ -507,26 +539,53 @@ export function Layout() {
 
       {/* Sidebar / Mobile Drawer */}
       <aside
-        className={`bg-bambu-dark-secondary border-r border-bambu-dark-tertiary flex flex-col transition-all duration-300 ${
+        aria-label={t('nav.workspace')}
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col border-r border-bambu-dark-tertiary bg-bambu-dark-secondary shadow-xl transition-all duration-300 ${
           isSidebarCompact
-            ? `fixed inset-y-0 left-0 z-50 w-72 transform ${mobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}`
-            : `fixed inset-y-0 left-0 z-30 ${sidebarExpanded ? 'w-64' : 'w-16'}`
+            ? `w-72 transform ${mobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}`
+            : `${sidebarExpanded ? 'w-60' : 'w-16'} translate-x-0 shadow-none`
         }`}
       >
         {/* Logo */}
-        <div className={`border-b border-bambu-dark-tertiary flex items-center justify-center ${isSidebarCompact || sidebarExpanded ? 'p-4' : 'p-2'}`}>
+        <div className={`flex h-14 flex-shrink-0 items-center border-b border-bambu-dark-tertiary px-3 ${
+          isSidebarCompact ? 'justify-between' : 'justify-center'
+        }`}>
           <img
             src={resolvedMode === 'dark' ? '/img/bambuddy_logo_dark_transparent.png' : '/img/bambuddy_logo_light.png'}
             alt="Bambuddy"
-            className={isSidebarCompact || sidebarExpanded ? 'h-16 w-auto' : 'h-8 w-8 object-cover object-left'}
+            className={isSidebarCompact || sidebarExpanded ? 'h-9 max-w-[156px] object-contain' : 'h-8 w-8 object-cover object-left'}
           />
+          {isSidebarCompact && (
+            <button
+              type="button"
+              onClick={() => setMobileDrawerOpen(false)}
+              className="flex h-9 w-9 items-center justify-center rounded-md text-bambu-gray-light transition-colors hover:bg-bambu-dark-tertiary hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bambu-green"
+              aria-label={t('common.close')}
+              title={t('common.close')}
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-2 overflow-y-auto">
-          <ul className="space-y-2">
-            {orderedSidebarIds.map((id) => {
+        <nav className="flex-1 overflow-y-auto p-2">
+          <ul className="space-y-1">
+            {orderedSidebarIds.map((id, index) => {
               const isExternal = isExternalSidebarItemId(id);
+              const section = getSidebarSection(id);
+              const previousSection = index > 0 ? getSidebarSection(orderedSidebarIds[index - 1]) : null;
+              const sectionHeading = section !== previousSection ? (
+                <li className={isSidebarCompact || sidebarExpanded ? 'px-3 pb-1 pt-3' : 'px-2 py-2'}>
+                  {isSidebarCompact || sidebarExpanded ? (
+                    <span className="text-[11px] font-semibold text-bambu-gray">
+                      {t(navSectionLabelKeys[section])}
+                    </span>
+                  ) : (
+                    <span aria-hidden="true" className="block border-t border-bambu-dark-tertiary" />
+                  )}
+                </li>
+              ) : null;
 
               if (isExternal) {
                 // Render external link
@@ -535,13 +594,15 @@ export function Layout() {
 
                 const LinkIcon = link.custom_icon ? null : getIconByName(link.icon);
                 return (
-                  <li key={id}>
+                  <Fragment key={id}>
+                    {sectionHeading}
+                    <li>
                     {link.open_in_new_tab ? (
                       <a
                         href={link.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className={`flex items-center ${isSidebarCompact || sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-lg transition-colors group text-bambu-gray-light hover:bg-bambu-dark-tertiary hover:text-white`}
+                        className={`group flex items-center border border-transparent py-2.5 transition-colors ${isSidebarCompact || sidebarExpanded ? 'gap-3 px-3' : 'justify-center px-2'} rounded-md text-bambu-gray-light hover:bg-bambu-dark-tertiary hover:text-white`}
                         title={!isSidebarCompact && !sidebarExpanded ? link.name : undefined}
                       >
                         {link.custom_icon ? (
@@ -559,10 +620,10 @@ export function Layout() {
                       <NavLink
                         to={`/external/${link.id}`}
                         className={({ isActive }) =>
-                          `flex items-center ${isSidebarCompact || sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-lg transition-colors group ${
+                          `group flex items-center border py-2.5 transition-colors ${isSidebarCompact || sidebarExpanded ? 'gap-3 px-3' : 'justify-center px-2'} rounded-md ${
                             isActive
-                              ? 'bg-bambu-green text-white'
-                              : 'text-bambu-gray-light hover:bg-bambu-dark-tertiary hover:text-white'
+                              ? 'border-bambu-green/30 bg-bambu-green/10 text-bambu-green'
+                              : 'border-transparent text-bambu-gray-light hover:bg-bambu-dark-tertiary hover:text-white'
                           }`
                         }
                         title={!isSidebarCompact && !sidebarExpanded ? link.name : undefined}
@@ -579,7 +640,8 @@ export function Layout() {
                         {(isSidebarCompact || sidebarExpanded) && <span>{link.name}</span>}
                       </NavLink>
                     )}
-                  </li>
+                    </li>
+                  </Fragment>
                 );
               } else {
                 // Render internal nav item
@@ -594,14 +656,16 @@ export function Layout() {
                 const showClearPlateDot = id === 'printers' && needsClearPlate;
 
                 return (
-                  <li key={id}>
+                  <Fragment key={id}>
+                    {sectionHeading}
+                    <li>
                     <NavLink
                       to={to}
                       className={({ isActive }) =>
-                        `flex items-center ${isSidebarCompact || sidebarExpanded ? 'gap-3 px-4' : 'justify-center px-2'} py-3 rounded-lg transition-colors group ${
+                        `group flex items-center border py-2.5 transition-colors ${isSidebarCompact || sidebarExpanded ? 'gap-3 px-3' : 'justify-center px-2'} rounded-md ${
                           isActive
-                            ? 'bg-bambu-green text-white'
-                            : 'text-bambu-gray-light hover:bg-bambu-dark-tertiary hover:text-white'
+                            ? 'border-bambu-green/30 bg-bambu-green/10 text-bambu-green'
+                            : 'border-transparent text-bambu-gray-light hover:bg-bambu-dark-tertiary hover:text-white'
                         }`
                       }
                       title={!isSidebarCompact && !sidebarExpanded ? t(labelKey) : undefined}
@@ -621,7 +685,8 @@ export function Layout() {
                       </div>
                       {(isSidebarCompact || sidebarExpanded) && <span>{t(labelKey)}</span>}
                     </NavLink>
-                  </li>
+                    </li>
+                  </Fragment>
                 );
               }
             })}
@@ -837,10 +902,26 @@ export function Layout() {
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className={`flex-1 bg-bambu-dark overflow-auto transition-all duration-300 ${
-        isSidebarCompact ? 'mt-14' : sidebarExpanded ? 'ml-64' : 'ml-16'
+      <div className={`min-h-screen min-w-0 transition-[margin] duration-300 ${
+        isSidebarCompact ? 'ml-0' : sidebarExpanded ? 'ml-60' : 'ml-16'
       }`}>
+        <OperatorTopBar
+          activeIcon={activeNavContext.icon}
+          activeLabel={activeNavContext.label}
+          archiveLabel={t('nav.archives')}
+          isCompact={isSidebarCompact}
+          needsClearPlate={needsClearPlate}
+          onOpenMenu={() => setMobileDrawerOpen(true)}
+          openMenuLabel={t('nav.openMenu')}
+          pendingQueueCount={pendingQueueCount}
+          pendingUploadsCount={pendingUploadsCount}
+          plateClearLabel={t('nav.plateClearRequired')}
+          queueLabel={t('nav.queue')}
+          workspaceLabel={t('nav.workspace')}
+        />
+
+      {/* Main content */}
+      <main className="min-h-[calc(100vh-3.5rem)] overflow-auto bg-bambu-dark">
         {/* Debug logging indicator */}
         {debugLoggingState?.enabled && (
           <div className="bg-amber-100 dark:bg-amber-500/20 border-b border-amber-300 dark:border-amber-500/30 px-4 py-2 flex items-center justify-between">
@@ -910,6 +991,7 @@ export function Layout() {
         )}
         <Outlet />
       </main>
+      </div>
 
       <UnknownSpoolModal
         prompt={unknownSpool.prompt}
