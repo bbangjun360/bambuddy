@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -75,6 +75,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { QueueStatsBar } from '../components/QueueStatsBar';
 import { CompactHistoryRow } from '../components/CompactHistoryRow';
 import { QueueTimelineView } from '../components/QueueTimelineView';
+
+const QUEUE_TABS = ['queue', 'history', 'timeline', 'pipelines'] as const;
+type QueueTab = (typeof QUEUE_TABS)[number];
 
 function formatWeight(g: number, useKg = false): string {
   if (useKg && g >= 1000) return `${(g / 1000).toFixed(1)}kg`;
@@ -389,17 +392,19 @@ function SortableQueueItem({
     <div
       ref={setNodeRef}
       style={style}
+      data-testid="queue-job-row"
+      data-density="compact"
       className={`
-        group relative bg-bambu-dark-secondary rounded-xl border transition-all duration-200
-        border-l-[3px] ${
+        group relative rounded-md border border-l-2 bg-bambu-dark-secondary transition-colors duration-150
+        ${
           isPrinting ? 'border-l-blue-500' :
           isPending ? 'border-l-yellow-500' :
           item.status === 'completed' ? 'border-l-emerald-500' :
           item.status === 'failed' ? 'border-l-red-500' :
           'border-l-gray-500'
         }
-        ${isDragging ? 'opacity-50 scale-[1.02] shadow-xl z-50' : ''}
-        ${isPrinting ? 'border-blue-500/30 bg-gradient-to-r from-blue-500/5 to-transparent' : ''}
+        ${isDragging ? 'z-50 opacity-60 shadow-lg' : ''}
+        ${isPrinting ? 'border-blue-500/40 bg-blue-500/[0.04]' : ''}
         ${isSelected && isMobileSelectable ? 'sm:border-bambu-dark-tertiary border-bambu-green/40' : ''}
         ${!isSelected && !isPrinting ? 'border-bambu-dark-tertiary hover:border-bambu-dark-tertiary/80' : ''}
         ${isMobileSelectable ? 'sm:cursor-default' : ''}
@@ -413,7 +418,7 @@ function SortableQueueItem({
         <div className="sm:hidden absolute left-0 top-3 bottom-3 w-1 rounded-full bg-bambu-green" />
       )}
 
-      <div className="flex items-start sm:items-center gap-2 sm:gap-4 p-3 sm:p-4">
+      <div className="flex items-start gap-2.5 px-2.5 py-2.5 sm:items-center sm:gap-3 sm:px-3">
         {/* Mobile selection indicator — left accent bar only, no tick */}
 
         {/* Selection checkbox for pending items - hidden on mobile, tap card instead */}
@@ -451,7 +456,7 @@ function SortableQueueItem({
         )}
 
         {/* Thumbnail - use plate-specific thumbnail if plate_id is set */}
-        <div className="w-10 h-10 sm:w-14 sm:h-14 flex-shrink-0 bg-bambu-dark rounded-lg overflow-hidden">
+        <div className="h-11 w-11 shrink-0 overflow-hidden rounded-md bg-bambu-dark sm:h-12 sm:w-12">
           {item.archive_thumbnail ? (
             <img
               src={
@@ -865,12 +870,13 @@ function SortableBatchRow({
     <div
       ref={setNodeRef}
       style={style}
-      className={`bg-bambu-dark-secondary rounded-xl border border-l-[3px] border-l-cyan-400 border-bambu-dark-tertiary overflow-hidden ${
-        isDragging ? 'opacity-50 scale-[1.01] shadow-xl z-50' : ''
+      data-density="compact"
+      className={`overflow-hidden rounded-md border border-l-2 border-bambu-dark-tertiary border-l-cyan-400 bg-bambu-dark-secondary ${
+        isDragging ? 'z-50 opacity-60 shadow-lg' : ''
       }`}
     >
       {/* Parent header */}
-      <div className="flex items-center gap-2 sm:gap-3 p-3 sm:p-4">
+      <div className="flex items-center gap-2 px-2.5 py-2.5 sm:gap-3 sm:px-3">
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -912,7 +918,7 @@ function SortableBatchRow({
             <ChevronDown className="w-4 h-4 text-bambu-gray" />
           )}
         </button>
-        <div className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 bg-bambu-dark rounded-lg flex items-center justify-center">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-bambu-dark sm:h-11 sm:w-11">
           {collapsed ? (
             <Package className="w-5 h-5 text-cyan-700 dark:text-cyan-300" />
           ) : (
@@ -1238,7 +1244,7 @@ export function QueuePage() {
   // History tab renders unconditionally so this no longer drives the UI.
   // Tabbed page structure: Active queue stays as the main view; History
   // and Timeline split off. Persists per-user via localStorage.
-  const [activeTab, setActiveTab] = useState<'queue' | 'history' | 'timeline' | 'pipelines'>(() => {
+  const [activeTab, setActiveTab] = useState<QueueTab>(() => {
     // URL deep-link wins so the legacy /pipelines/runs redirect lands on the
     // right tab. localStorage holds the per-user last-selected fallback.
     const search = new URLSearchParams(window.location.search);
@@ -1906,212 +1912,271 @@ export function QueuePage() {
     return { count, time, weight };
   };
 
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentTab: QueueTab) => {
+    const currentIndex = QUEUE_TABS.indexOf(currentTab);
+    let nextIndex: number | null = null;
+
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % QUEUE_TABS.length;
+    else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + QUEUE_TABS.length) % QUEUE_TABS.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = QUEUE_TABS.length - 1;
+
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    const nextTab = QUEUE_TABS[nextIndex];
+    setActiveTab(nextTab);
+    document.getElementById(`queue-tab-${nextTab}`)?.focus();
+  };
+
   return (
-    <div className="p-4 md:p-8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-            <ListOrdered className="w-7 h-7 text-bambu-green" />
-            {t('queue.title')}
-          </h1>
-          <p className="text-bambu-gray mt-1">{t('queue.subtitle')}</p>
+    <div
+      data-testid="queue-operator-surface"
+      data-density="compact"
+      className="px-3 pb-24 pt-4 sm:px-5 sm:pb-5 lg:px-6"
+    >
+      <section aria-labelledby="queue-operator-heading" className="mb-4 space-y-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-bambu-green/10 text-bambu-green">
+            <ListOrdered className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h1 id="queue-operator-heading" className="truncate text-xl font-semibold text-white sm:text-2xl">
+              {t('queue.title')}
+            </h1>
+            <p className="sr-only">{t('queue.subtitle')}</p>
+          </div>
         </div>
-      </div>
 
-      {/* Tab strip — Active queue is the main view; History and Timeline
-          live in their own tabs so the queue page stays focused. */}
-      <div className="flex gap-1 border-b border-bambu-dark-tertiary mb-6 overflow-x-auto">
-        {([
-          { id: 'queue' as const, label: t('queue.tabs.queue'), icon: Clock, count: pendingItems.length + activeItems.length },
-          { id: 'history' as const, label: t('queue.tabs.history'), icon: ListOrdered, count: historyItems.length },
-          { id: 'timeline' as const, label: t('queue.tabs.timeline'), icon: GanttChart, count: null as number | null },
-          // Slicer Pipelines dashboard (#1425 PR C). Lives here instead of
-          // its own sidebar entry so the Print Queue page is the single
-          // place an operator looks for "what's running / what ran".
-          { id: 'pipelines' as const, label: t('queue.tabs.pipelines'), icon: Workflow, count: null as number | null },
-        ]).map(({ id, label, icon: Icon, count }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={`px-4 py-2.5 text-sm flex items-center gap-2 border-b-2 -mb-px transition-colors whitespace-nowrap ${
-              activeTab === id
-                ? 'text-white border-bambu-green font-medium'
-                : 'text-bambu-gray border-transparent hover:text-white'
-            }`}
-          >
-            <Icon className="w-4 h-4" />
-            {label}
-            {count !== null && count > 0 && (
-              <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                activeTab === id ? 'bg-bambu-green/20 text-bambu-green' : 'bg-bambu-dark-tertiary text-bambu-gray'
-              }`}>
-                {count}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+        {activeTab !== 'pipelines' && (
+          <QueueStatsBar
+            activeCount={activeItems.length}
+            pendingCount={pendingItems.length}
+            totalTime={totalQueueTime}
+            totalWeight={totalWeight}
+            historyCount={historyItems.length}
+            t={t}
+          />
+        )}
 
-      {/* Summary Stats — about the print queue, not pipelines. */}
-      {activeTab !== 'pipelines' && <QueueStatsBar
-        activeCount={activeItems.length}
-        pendingCount={pendingItems.length}
-        totalTime={totalQueueTime}
-        totalWeight={totalWeight}
-        historyCount={historyItems.length}
-        t={t}
-      />}
+        <div
+          role="tablist"
+          aria-label={t('queue.title')}
+          className="flex min-h-10 gap-0 overflow-x-auto border-b border-bambu-dark-tertiary"
+        >
+          {([
+            { id: 'queue' as const, label: t('queue.tabs.queue'), icon: Clock, count: pendingItems.length + activeItems.length },
+            { id: 'history' as const, label: t('queue.tabs.history'), icon: ListOrdered, count: historyItems.length },
+            { id: 'timeline' as const, label: t('queue.tabs.timeline'), icon: GanttChart, count: null as number | null },
+            { id: 'pipelines' as const, label: t('queue.tabs.pipelines'), icon: Workflow, count: null as number | null },
+          ]).map(({ id, label, icon: Icon, count }) => (
+            <button
+              key={id}
+              id={`queue-tab-${id}`}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === id}
+              aria-controls="queue-panel"
+              tabIndex={activeTab === id ? 0 : -1}
+              onClick={() => setActiveTab(id)}
+              onKeyDown={(event) => handleTabKeyDown(event, id)}
+              className={`flex h-10 shrink-0 items-center gap-2 border-b-2 px-3 text-sm transition-colors sm:px-4 ${
+                activeTab === id
+                  ? 'border-bambu-green text-white'
+                  : 'border-transparent text-bambu-gray hover:text-white'
+              }`}
+            >
+              <Icon className="h-4 w-4" />
+              <span>{label}</span>
+              {count !== null && count > 0 && (
+                <span
+                  className={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[11px] ${
+                    activeTab === id
+                      ? 'bg-bambu-green/15 text-bambu-green'
+                      : 'bg-bambu-dark-tertiary text-bambu-gray'
+                  }`}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </section>
 
-      {/* #1818: Resume-after-failure banner. One row per printer whose queue
-          is gated by a prior failed/aborted print. Visible regardless of
-          tab/layout so the user can clear the gate without hunting for
-          skipped items. Hidden entirely when no gates are active. */}
       {activeTab === 'queue' && gateBlockedPrinters.length > 0 && hasPermission('queue:update_all' as Permission) && (
         <div className="mb-4 space-y-2">
           {gateBlockedPrinters.map(({ printerId, printerName, skippedCount }) => (
             <div
               key={printerId}
-              className="flex items-center gap-3 px-4 py-3 bg-orange-50 dark:bg-orange-500/10 border border-orange-300 dark:border-orange-500/30 rounded-lg"
+              className="flex items-center gap-3 rounded-md border border-orange-500/30 bg-orange-500/10 px-3 py-2.5"
             >
-              <AlertCircle className="w-5 h-5 text-orange-600 dark:text-orange-400 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-orange-800 dark:text-orange-200">
+              <AlertCircle className="h-5 w-5 shrink-0 text-orange-400" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-orange-100">
                   {t('queue.resumeAfterFailure.banner', {
                     printer: printerName,
                     count: skippedCount,
                   })}
                 </div>
-                <div className="text-xs text-orange-800/80 dark:text-orange-200/70 mt-0.5">
+                <div className="mt-0.5 text-xs text-orange-200/70">
                   {t('queue.resumeAfterFailure.bannerHint')}
                 </div>
               </div>
               <button
-                onClick={() =>
-                  setResumeConfirm({ printerId, printerName, skippedCount })
-                }
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-100 dark:bg-orange-500/20 hover:bg-orange-200 dark:hover:bg-orange-500/30 text-orange-900 dark:text-orange-100 text-sm rounded-md border border-orange-300 dark:border-orange-500/40 transition-colors flex-shrink-0"
+                type="button"
+                onClick={() => setResumeConfirm({ printerId, printerName, skippedCount })}
+                className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-orange-500/40 bg-orange-500/15 px-2.5 text-sm text-orange-100 transition-colors hover:bg-orange-500/25"
               >
-                <PlayCircle className="w-4 h-4" />
-                {t('queue.resumeAfterFailure.button')}
+                <PlayCircle className="h-4 w-4" />
+                <span className="hidden sm:inline">{t('queue.resumeAfterFailure.button')}</span>
               </button>
             </div>
           ))}
         </div>
       )}
 
-      {/* Filters — about the print queue items (printer / status / location).
-          The Pipelines tab has its own pipeline + status filters inside the
-          dashboard, so this row is hidden when that tab is active. */}
       {activeTab !== 'pipelines' && (
-      <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-6">
-        <select
-          className="px-2 sm:px-3 py-2 text-sm sm:text-base bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none min-w-0 flex-1 sm:flex-none"
-          value={filterPrinter === -1 ? 'unassigned' : (filterPrinter || '')}
-          onChange={(e) => {
-            const val = e.target.value;
-            if (val === 'unassigned') setFilterPrinter(-1);
-            else if (val === '') setFilterPrinter(null);
-            else setFilterPrinter(Number(val));
-          }}
+        <section
+          data-testid="queue-operator-toolbar"
+          aria-label={t('queue.title')}
+          className="mb-5 border-b border-bambu-dark-tertiary pb-3"
         >
-          <option value="">{t('queue.filter.allPrinters')}</option>
-          <option value="unassigned">{t('queue.filter.unassigned')}</option>
-          {printers?.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-
-        <select
-          className="px-2 sm:px-3 py-2 text-sm sm:text-base bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none min-w-0 flex-1 sm:flex-none"
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-        >
-          <option value="">{t('queue.filter.allStatus')}</option>
-          <option value="pending">{t('queue.status.pending')}</option>
-          <option value="printing">{t('queue.status.printing')}</option>
-          <option value="completed">{t('queue.status.completed')}</option>
-          <option value="failed">{t('queue.status.failed')}</option>
-          <option value="skipped">{t('queue.status.skipped')}</option>
-          <option value="cancelled">{t('queue.status.cancelled')}</option>
-        </select>
-
-        {uniqueLocations.length > 0 && (
-          <select
-            className="px-2 sm:px-3 py-2 text-sm sm:text-base bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg text-white focus:border-bambu-green focus:outline-none min-w-0 flex-1 sm:flex-none"
-            value={filterLocation}
-            onChange={(e) => setFilterLocation(e.target.value)}
-          >
-            <option value="">{t('queue.filter.allLocations')}</option>
-            {uniqueLocations.map((loc) => (
-              <option key={loc} value={loc}>{loc}</option>
-            ))}
-          </select>
-        )}
-
-        <div className="hidden sm:block flex-1" />
-
-        {activeTab === 'history' && historyItems.length > 0 && (
-          <Button
-            className="w-full sm:w-auto"
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowClearHistoryConfirm(true)}
-            disabled={!hasPermission('queue:delete_all')}
-            title={!hasPermission('queue:delete_all') ? t('queue.permissions.noClearHistory') : undefined}
-          >
-            <Trash2 className="w-4 h-4" />
-            {t('queue.clearHistory')}
-          </Button>
-        )}
-      </div>
-      )}
-
-      {/* Queue-tab controls: layout toggle (Position / Printer) + SJF.
-          Hidden on History/Timeline tabs since they don't apply. */}
-      {activeTab === 'queue' && (
-        <div className="flex flex-wrap items-center gap-3 mb-6">
-          <div className="inline-flex items-center bg-bambu-dark-secondary border border-bambu-dark-tertiary rounded-lg p-0.5">
-            <button
-              className={`px-3 py-1.5 text-xs sm:text-sm rounded-md transition-colors flex items-center gap-1.5 ${
-                activeLayout === 'position' ? 'bg-bambu-dark-tertiary text-white' : 'text-bambu-gray hover:text-white'
-              }`}
-              onClick={() => setActiveLayout('position')}
-              title={t('queue.layout.flatList')}
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+            <label htmlFor="queue-printer-filter" className="sr-only">
+              {t('queue.filter.allPrinters')}
+            </label>
+            <select
+              id="queue-printer-filter"
+              className="h-9 min-w-0 rounded-md border border-bambu-dark-tertiary bg-bambu-dark px-2.5 text-sm text-white outline-none focus:border-bambu-green focus:ring-1 focus:ring-bambu-green/30 sm:w-auto"
+              value={filterPrinter === -1 ? 'unassigned' : (filterPrinter || '')}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value === 'unassigned') setFilterPrinter(-1);
+                else if (value === '') setFilterPrinter(null);
+                else setFilterPrinter(Number(value));
+              }}
             >
-              <List className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{t('queue.layout.flatList')}</span>
-            </button>
-            <button
-              className={`px-3 py-1.5 text-xs sm:text-sm rounded-md transition-colors flex items-center gap-1.5 ${
-                activeLayout === 'printer' ? 'bg-bambu-dark-tertiary text-white' : 'text-bambu-gray hover:text-white'
-              }`}
-              onClick={() => setActiveLayout('printer')}
-              title={t('queue.layout.groupByPrinter')}
+              <option value="">{t('queue.filter.allPrinters')}</option>
+              <option value="unassigned">{t('queue.filter.unassigned')}</option>
+              {printers?.map((printer) => (
+                <option key={printer.id} value={printer.id}>{printer.name}</option>
+              ))}
+            </select>
+
+            <label htmlFor="queue-status-filter" className="sr-only">
+              {t('queue.filter.allStatus')}
+            </label>
+            <select
+              id="queue-status-filter"
+              className="h-9 min-w-0 rounded-md border border-bambu-dark-tertiary bg-bambu-dark px-2.5 text-sm text-white outline-none focus:border-bambu-green focus:ring-1 focus:ring-bambu-green/30 sm:w-auto"
+              value={filterStatus}
+              onChange={(event) => setFilterStatus(event.target.value)}
             >
-              <Printer className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{t('queue.layout.byPrinter')}</span>
-            </button>
+              <option value="">{t('queue.filter.allStatus')}</option>
+              <option value="pending">{t('queue.status.pending')}</option>
+              <option value="printing">{t('queue.status.printing')}</option>
+              <option value="completed">{t('queue.status.completed')}</option>
+              <option value="failed">{t('queue.status.failed')}</option>
+              <option value="skipped">{t('queue.status.skipped')}</option>
+              <option value="cancelled">{t('queue.status.cancelled')}</option>
+            </select>
+
+            {uniqueLocations.length > 0 && (
+              <>
+                <label htmlFor="queue-location-filter" className="sr-only">
+                  {t('queue.filter.allLocations')}
+                </label>
+                <select
+                  id="queue-location-filter"
+                  className="col-span-2 h-9 min-w-0 rounded-md border border-bambu-dark-tertiary bg-bambu-dark px-2.5 text-sm text-white outline-none focus:border-bambu-green focus:ring-1 focus:ring-bambu-green/30 sm:col-span-1 sm:w-auto"
+                  value={filterLocation}
+                  onChange={(event) => setFilterLocation(event.target.value)}
+                >
+                  <option value="">{t('queue.filter.allLocations')}</option>
+                  {uniqueLocations.map((location) => (
+                    <option key={location} value={location}>{location}</option>
+                  ))}
+                </select>
+              </>
+            )}
+
+            <div className="hidden flex-1 sm:block" />
+
+            {activeTab === 'history' && historyItems.length > 0 && (
+              <Button
+                className="col-span-2 !h-9 sm:col-span-1"
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowClearHistoryConfirm(true)}
+                disabled={!hasPermission('queue:delete_all')}
+                title={!hasPermission('queue:delete_all') ? t('queue.permissions.noClearHistory') : undefined}
+              >
+                <Trash2 className="h-4 w-4" />
+                {t('queue.clearHistory')}
+              </Button>
+            )}
           </div>
-          <button
-            onClick={() => {
-              const newValue = !(settings?.queue_shortest_first ?? false);
-              sjfMutation.mutate(newValue);
-            }}
-            className={`flex items-center gap-1 px-2 py-1.5 text-xs rounded-lg border transition-colors ${
-              settings?.queue_shortest_first
-                ? 'bg-bambu-green/20 border-bambu-green text-bambu-green'
-                : 'bg-bambu-dark-secondary border-bambu-dark-tertiary text-bambu-gray hover:text-white hover:border-bambu-gray'
-            }`}
-            title={t('queue.sjf.tooltip', 'Shortest Job First — scheduler prioritizes shorter prints')}
-          >
-            <Snail className="w-4 h-4" />
-            <span className="hidden sm:inline">{t('queue.sjf.label', 'SJF')}</span>
-            <span className={`w-1.5 h-1.5 rounded-full ${settings?.queue_shortest_first ? 'bg-bambu-green' : 'bg-bambu-gray'}`} />
-          </button>
-        </div>
+
+          {activeTab === 'queue' && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-bambu-dark-tertiary pt-3">
+              <div className="flex h-9 items-center rounded-md border border-bambu-dark-tertiary bg-bambu-dark">
+                <button
+                  type="button"
+                  aria-pressed={activeLayout === 'position'}
+                  className={`flex h-full items-center gap-1.5 rounded-l-md px-2.5 text-xs transition-colors sm:text-sm ${
+                    activeLayout === 'position'
+                      ? 'bg-bambu-green text-white'
+                      : 'text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
+                  }`}
+                  onClick={() => setActiveLayout('position')}
+                  title={t('queue.layout.flatList')}
+                >
+                  <List className="h-3.5 w-3.5" />
+                  <span>{t('queue.layout.flatList')}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={activeLayout === 'printer'}
+                  className={`flex h-full items-center gap-1.5 rounded-r-md px-2.5 text-xs transition-colors sm:text-sm ${
+                    activeLayout === 'printer'
+                      ? 'bg-bambu-green text-white'
+                      : 'text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
+                  }`}
+                  onClick={() => setActiveLayout('printer')}
+                  title={t('queue.layout.groupByPrinter')}
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  <span>{t('queue.layout.byPrinter')}</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                aria-pressed={settings?.queue_shortest_first ?? false}
+                onClick={() => sjfMutation.mutate(!(settings?.queue_shortest_first ?? false))}
+                className={`flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-xs transition-colors sm:text-sm ${
+                  settings?.queue_shortest_first
+                    ? 'border-bambu-green bg-bambu-green/15 text-bambu-green'
+                    : 'border-bambu-dark-tertiary bg-bambu-dark text-bambu-gray hover:bg-bambu-dark-tertiary hover:text-white'
+                }`}
+                title={t('queue.sjf.tooltip', 'Shortest Job First — scheduler prioritizes shorter prints')}
+              >
+                <Snail className="h-4 w-4" />
+                <span>{t('queue.sjf.label', 'SJF')}</span>
+                <span className={`h-1.5 w-1.5 rounded-full ${settings?.queue_shortest_first ? 'bg-bambu-green' : 'bg-bambu-gray'}`} />
+              </button>
+            </div>
+          )}
+        </section>
       )}
 
+      <div
+        id="queue-panel"
+        role="tabpanel"
+        aria-labelledby={`queue-tab-${activeTab}`}
+        tabIndex={0}
+      >
       {/* Pipelines tab short-circuits before the queue-empty branch so the
           dashboard renders even when the regular queue is empty. */}
       {activeTab === 'pipelines' ? (
@@ -2160,15 +2225,15 @@ export function QueuePage() {
           t={t}
         />
       ) : (
-        <div className="space-y-6 sm:space-y-8">
+        <div className="space-y-5">
           {/* Active Prints */}
           {activeItems.length > 0 && (
             <div>
-              <h2 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4 flex items-center gap-2">
+              <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold text-white sm:text-base">
                 <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
                 {t('queue.sections.currentlyPrinting')}
               </h2>
-              <div className="space-y-2 sm:space-y-3">
+              <div className="space-y-2">
                 {activeItems.map((item) => (
                   <SortableQueueItem
                     key={item.id}
@@ -2193,8 +2258,8 @@ export function QueuePage() {
           {/* Pending Queue */}
           {pendingItems.length > 0 && (
             <div>
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-3 sm:mb-4">
-                <h2 className="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-white sm:text-base">
                   <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600 dark:text-yellow-400" />
                   {t('queue.sections.queued')}
                   <span className="text-xs sm:text-sm font-normal text-bambu-gray">
@@ -2228,7 +2293,7 @@ export function QueuePage() {
               </div>
 
               {/* Bulk action toolbar (now with "Group as batch") */}
-              <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-3 sm:mb-4 p-2 sm:p-3 bg-bambu-dark rounded-lg">
+              <div className="mb-3 flex min-h-10 flex-wrap items-center gap-2 border-y border-bambu-dark-tertiary bg-bambu-dark/40 px-1 py-1.5 sm:gap-3 sm:px-2">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -2297,7 +2362,7 @@ export function QueuePage() {
                   strategy={verticalListSortingStrategy}
                 >
                   {activeLayout === 'position' ? (
-                    <div className="space-y-2 sm:space-y-3">
+                    <div className="space-y-2">
                       {groupedRows.map((row) => (
                         <QueueRowRender
                           key={row.kind === 'item' ? `item-${row.item.id}` : `batch-${row.batchId}`}
@@ -2401,6 +2466,8 @@ export function QueuePage() {
           )}
         </div>
       )}
+
+      </div>
 
       {/* Edit Modal */}
       {editItem && (
