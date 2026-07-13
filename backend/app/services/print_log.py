@@ -7,6 +7,7 @@ import logging
 from datetime import datetime
 from math import isfinite
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.config import settings
@@ -38,8 +39,37 @@ async def backfill_log_entry_energy(
         )
         return False
 
+    effective_energy_cost = energy_cost
+    from backend.app.models.farm_cost_ledger import FarmCostLedgerSnapshot
+    from backend.app.services.farm_cost_ledger import MAX_LEDGER_COMPONENT_VALUE
+
+    snapshot = await db.scalar(
+        select(FarmCostLedgerSnapshot).where(FarmCostLedgerSnapshot.print_log_entry_id == print_log_entry_id)
+    )
+    if snapshot is not None:
+        rate = snapshot.energy_rate_per_kwh
+        if not isfinite(rate) or rate <= 0 or rate >= MAX_LEDGER_COMPONENT_VALUE:
+            logger.warning(
+                "print_log_energy_backfill_policy_invalid print_log_entry_id=%s",
+                print_log_entry_id,
+            )
+            return False
+        effective_energy_cost = round(energy_kwh * rate, 3)
+        if not isfinite(effective_energy_cost) or effective_energy_cost >= MAX_LEDGER_COMPONENT_VALUE:
+            logger.warning(
+                "print_log_energy_backfill_cost_invalid print_log_entry_id=%s",
+                print_log_entry_id,
+            )
+            return False
+        if effective_energy_cost != energy_cost:
+            logger.info(
+                "print_log_energy_backfill_snapshot_rate_applied print_log_entry_id=%s policy_version=%s",
+                print_log_entry_id,
+                snapshot.policy_version,
+            )
+
     entry.energy_kwh = energy_kwh
-    entry.energy_cost = energy_cost
+    entry.energy_cost = effective_energy_cost
     return True
 
 

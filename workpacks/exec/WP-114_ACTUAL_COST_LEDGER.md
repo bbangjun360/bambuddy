@@ -152,6 +152,22 @@ the existing print-log/statistics tests.
   `make test-integration`, and `make verify-full` all passed; the rebuilt
   PostgreSQL app on 18114 and main app on 18000 remained healthy with no app
   startup errors.
+- [x] 2026-07-14 07:43 KST: Third approval audit reproduced four gaps before
+  product changes: delayed energy could use a later live tariff instead of the
+  snapshot, standard Compose did not forward the documented policy variables,
+  unsafe policy versions differed across SQLite/PostgreSQL, and a large finite
+  cost was incomplete in Python but complete or overflowing in SQL.
+- [x] 2026-07-14 07:43 KST: Added failure-first regressions and aligned policy,
+  money, delayed-energy, environment-template, and SQL behavior. Focused
+  regression passed 74 tests plus 12 subtests; production Compose rendered all
+  four fail-closed defaults, and PostgreSQL returned the oversized value as
+  incomplete while repricing `0.25 kWh` to the snapshotted `45.0 KRW`.
+- [x] 2026-07-14 07:54 KST: Final Ruff, YAML, diff, `make verify-fast`,
+  `make test-unit`, `make test-contract`, isolated `make test-integration`, and
+  `make verify-full` passed (194 harness tests, 2 characterizations, 2
+  scenarios). Chromium desktop/mobile checks were nonblank with no overflow,
+  error overlay, console error, or failed response. Main port 18000 remained
+  healthy and the rebuilt 18114 app log contained no startup error.
 
 # Decisions
 
@@ -192,6 +208,15 @@ the existing print-log/statistics tests.
   cost/runtime evidence as incomplete; sanitize invalid actual quantities.
   Row completeness and SQL summaries use the same cost validity predicates so
   invalid values cannot become negative costs or non-finite JSON.
+- Derive delayed actual energy cost from the immutable snapshot tariff when a
+  snapshot exists. A later settings edit must not change the calculation basis
+  associated with that policy version.
+- Require printable policy versions of at most 64 characters and numeric
+  policy/money components below `10^15`. The bound leaves room for summed row
+  values in the shared `NUMERIC(24,8)` rounding contract and is applied in both
+  Python and SQL.
+- Forward the four default-off ledger variables through standard Compose and
+  document them in both generic and farm deployment environment templates.
 
 # Harness Changes
 
@@ -210,6 +235,10 @@ the existing print-log/statistics tests.
   transactions and reproduced duplicate `(1, original)` classifications. The
   fixed write path held the pre-insert archive lock through the outer commit;
   a competing linked write blocked and then became `(2, reprint)`.
+- The third approval audit used failure-first tests for tariff drift, unsafe
+  policy versions, missing Compose propagation, and large finite SQL values.
+  A clean PostgreSQL 16 probe verified the HTTP route stayed serializable and
+  reconciled the same incomplete/complete classifications as Python.
 
 # Implementation
 
@@ -223,8 +252,10 @@ Implemented files and symbols:
 - `backend/app/api/routes/farm_cost_ledger.py`: read-only filtered endpoint.
 - `backend/app/services/print_log.py::write_log_entry`: optional capture hook.
 - `backend/app/services/print_log.py::backfill_log_entry_energy`: exact-run,
-  finite, non-negative delayed energy persistence.
+  finite, bounded, snapshot-tariff delayed energy persistence.
 - Model/router registration and the repository's additive DB creation path.
+- `.env.example`, `deploy/.env.farm.example`, and `docker-compose.yml`:
+  fail-closed policy defaults and standard deployment propagation.
 - Focused unit/integration/architecture tests, harness contract, and runbook.
 - `.fuzzyline/PATCH_LEDGER.yaml`: upstream-core patch record.
 
@@ -268,6 +299,8 @@ to the row totals. With the flag disabled, the route fails closed.
   canonical print-log row remains committable.
 - Missing material or energy observations produce nullable components and an
   explicit completeness state, not invented zero-cost evidence.
+- Invalid, out-of-range, or policy-inconsistent delayed energy evidence is
+  rejected before it can overwrite the exact print-log row.
 - Rollback disables the feature flag and reverts the application commit. The
   additive snapshot table may remain unused; dropping it is optional and is
   never performed automatically.
@@ -307,6 +340,18 @@ The post-fix focused regression passed 64 tests plus Ruff. Final verify-fast,
 unit, contract, isolated integration, and verify-full gates passed against the
 rebuilt PostgreSQL app on 18114. That app emitted no startup errors, Bambuddy
 still starts cleanly, and the main deployment on port 18000 remained healthy.
+
+The third approval audit closed tariff drift, deployment propagation,
+cross-database policy-version validation, and large-finite numeric consistency.
+Its focused regression passed 74 tests plus 12 subtests. PostgreSQL returned a
+synthetic `1e308` material cost as missing without a numeric overflow and used
+the immutable `180 KRW/kWh` snapshot to persist `0.25 kWh` as `45.0 KRW` even
+when the delayed caller supplied `250.0 KRW` from a later tariff.
+
+Final shared gates passed with 194 harness tests, two characterization tests,
+and two scenarios. The rebuilt PostgreSQL app served the ledger and setup UI on
+18114 without server, browser, console, or network errors; the main deployment
+on 18000 remained healthy throughout.
 
 Draft PR #95 is published and review-ready but remains draft pending explicit
 operator approval because it adds schema and a shared print-log hook. Later

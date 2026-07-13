@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from backend.app.models.farm_cost_ledger import FarmCostLedgerSnapshot
 from backend.app.models.print_log import PrintLogEntry
 from backend.app.schemas.print_log import PrintLogEntrySchema, PrintLogResponse
 from backend.app.services import print_log as print_log_service
@@ -133,6 +134,74 @@ async def test_energy_backfill_updates_exact_run_instead_of_latest_for_archive(
     assert updated is True
     assert (first.energy_kwh, first.energy_cost) == (0.25, 45.0)
     assert (second.energy_kwh, second.energy_cost) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_energy_backfill_uses_snapshotted_rate_after_policy_change(db_session):
+    entry = PrintLogEntry(status="completed")
+    db_session.add(entry)
+    await db_session.flush()
+    db_session.add(
+        FarmCostLedgerSnapshot(
+            print_log_entry_id=entry.id,
+            archive_id=None,
+            attempt_number=None,
+            attempt_kind="unlinked",
+            policy_version="kr-farm-2026-07",
+            currency="KRW",
+            material_rate_per_kg=20000.0,
+            energy_rate_per_kwh=180.0,
+            estimated_power_kw=0.1,
+            machine_rate_per_hour=3000.0,
+        )
+    )
+    await db_session.flush()
+
+    updated = await print_log_service.backfill_log_entry_energy(
+        db_session,
+        print_log_entry_id=entry.id,
+        energy_kwh=0.25,
+        energy_cost=250.0,
+    )
+    await db_session.flush()
+    await db_session.refresh(entry)
+
+    assert updated is True
+    assert (entry.energy_kwh, entry.energy_cost) == (0.25, 45.0)
+
+
+@pytest.mark.asyncio
+async def test_energy_backfill_rejects_snapshotted_cost_overflow(db_session):
+    entry = PrintLogEntry(status="completed")
+    db_session.add(entry)
+    await db_session.flush()
+    db_session.add(
+        FarmCostLedgerSnapshot(
+            print_log_entry_id=entry.id,
+            archive_id=None,
+            attempt_number=None,
+            attempt_kind="unlinked",
+            policy_version="kr-farm-2026-07",
+            currency="KRW",
+            material_rate_per_kg=20000.0,
+            energy_rate_per_kwh=180.0,
+            estimated_power_kw=0.1,
+            machine_rate_per_hour=3000.0,
+        )
+    )
+    await db_session.flush()
+
+    updated = await print_log_service.backfill_log_entry_energy(
+        db_session,
+        print_log_entry_id=entry.id,
+        energy_kwh=1e308,
+        energy_cost=45.0,
+    )
+    await db_session.flush()
+    await db_session.refresh(entry)
+
+    assert updated is False
+    assert (entry.energy_kwh, entry.energy_cost) == (None, None)
 
 
 @pytest.mark.asyncio

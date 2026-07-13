@@ -19,6 +19,9 @@ The API joins the immutable snapshot to that run, so a delayed smart-plug
 energy result becomes visible without rewriting the policy snapshot. Delayed
 energy evidence is backfilled by the exact print-log ID created for that run;
 it is never assigned by searching for the latest row of the same archive.
+When that run has a ledger snapshot, its actual energy cost is derived from
+the snapshotted electricity rate rather than a setting that may have changed
+while the smart-plug task was pending.
 
 Failed attempts and reprints are separate print-log rows. Their cost is never
 overwritten by a later successful run.
@@ -42,6 +45,10 @@ FARM_COST_LEDGER_ESTIMATED_POWER_KW=<positive kW>
 FARM_COST_LEDGER_POLICY_VERSION=<reviewed version>
 ```
 
+The root and farm deployment environment templates carry fail-closed defaults,
+and `docker-compose.yml` forwards all four values into Bambuddy. A copied
+`deploy/.env.farm` therefore follows the same activation path as the runbook.
+
 The existing Bambuddy settings must also contain:
 
 ```text
@@ -52,8 +59,9 @@ energy_cost_per_kwh=<KRW/kWh>
 
 If currency is not `KRW`, an electricity, estimated-power, or machine-hour
 rate is not finite and positive, the effective material rate is negative or
-non-finite, or the policy version is empty, Bambuddy retains the canonical
-print-log row but skips the cost snapshot and writes a
+non-finite, any numeric policy value is at least `10^15`, or the policy version
+is empty, longer than 64 characters, or contains non-printable characters,
+Bambuddy retains the canonical print-log row but skips the cost snapshot and writes a
 `farm_cost_ledger_snapshot_skipped` warning. It never relabels another
 currency as KRW.
 
@@ -71,6 +79,7 @@ estimated_energy = estimated_energy_kwh * energy_rate_per_kwh
 estimated_machine = estimated_runtime_hours * machine_rate_per_hour
 
 actual_machine = actual_runtime_hours * snapshotted_machine_rate_per_hour
+actual_energy = actual_energy_kwh * snapshotted_energy_rate_per_kwh
 actual_total = actual_material + actual_energy + actual_machine
 variance = actual_total - estimated_total
 ```
@@ -80,6 +89,11 @@ rate when both are present. Otherwise the configured default filament rate is
 used. Each money component is rounded to two decimal places before deriving
 the row total. Summary totals aggregate those same rounded row values, so the
 summary reconciles exactly to the operator-visible rows.
+
+Numeric policy values and each per-run money component must be below `10^15`.
+This leaves headroom for the three-component row total in the shared
+`NUMERIC(24,8)` SQL rounding contract. Larger finite values are invalid
+evidence, not large legitimate costs.
 
 `actual_total_cost` and `variance_cost` are `null` when material, energy, or
 runtime is missing. The row lists `missing_actual_components`, and the summary

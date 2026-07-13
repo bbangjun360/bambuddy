@@ -23,6 +23,28 @@ class FarmCostLedgerContractTest(unittest.TestCase):
         for mutation in ("@router.post", "@router.put", "@router.patch", "@router.delete"):
             self.assertNotIn(mutation, route)
 
+    def test_standard_compose_exposes_documented_policy_settings(self) -> None:
+        expected_defaults = (
+            "FARM_ACTUAL_COST_LEDGER_ENABLED=false",
+            "FARM_COST_LEDGER_MACHINE_RATE_PER_HOUR_KRW=0",
+            "FARM_COST_LEDGER_ESTIMATED_POWER_KW=0",
+            "FARM_COST_LEDGER_POLICY_VERSION=",
+        )
+        for relative_path in (".env.example", "deploy/.env.farm.example"):
+            content = (ROOT / relative_path).read_text(encoding="utf-8")
+            with self.subTest(relative_path=relative_path):
+                for setting in expected_defaults:
+                    self.assertIn(setting, content)
+
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        for name, default in (
+            ("FARM_ACTUAL_COST_LEDGER_ENABLED", "false"),
+            ("FARM_COST_LEDGER_MACHINE_RATE_PER_HOUR_KRW", "0"),
+            ("FARM_COST_LEDGER_ESTIMATED_POWER_KW", "0"),
+            ("FARM_COST_LEDGER_POLICY_VERSION", ""),
+        ):
+            self.assertIn(f"- {name}=${{{name}:-{default}}}", compose)
+
     def test_ledger_does_not_cross_external_command_boundaries(self) -> None:
         files = [
             ROOT / "backend/app/api/routes/farm_cost_ledger.py",

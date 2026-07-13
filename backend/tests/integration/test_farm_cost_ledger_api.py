@@ -235,6 +235,7 @@ async def test_ledger_filters_reprints_and_marks_missing_energy_incomplete(
     (
         ("actual_material_cost", -1.0, "material", "actual_material_cost", "actual_material_cost"),
         ("actual_material_cost", float("inf"), "material", "actual_material_cost", "actual_material_cost"),
+        ("actual_material_cost", 1e308, "material", "actual_material_cost", "actual_material_cost"),
         ("actual_energy_cost", -1.0, "energy", "actual_energy_cost", "actual_energy_cost"),
         ("actual_energy_cost", float("inf"), "energy", "actual_energy_cost", "actual_energy_cost"),
         ("duration_seconds", -1, "machine_time", "actual_machine_cost", "actual_machine_cost"),

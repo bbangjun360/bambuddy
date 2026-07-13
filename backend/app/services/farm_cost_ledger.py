@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 FAILED_STATUSES = ("failed", "aborted")
 CANCELLED_STATUSES = ("stopped", "cancelled", "skipped")
 ATTEMPT_KINDS = ("original", "reprint", "unlinked")
+# Leaves headroom below NUMERIC(24,8)'s 16 integer digits for row totals.
+MAX_LEDGER_COMPONENT_VALUE = 1_000_000_000_000_000.0
 
 
 @dataclass(frozen=True)
@@ -42,17 +44,33 @@ class CostPolicy:
         if self.currency != "KRW":
             errors.append("currency_not_krw")
         if self.material_rate_per_kg is not None and (
-            not isfinite(self.material_rate_per_kg) or self.material_rate_per_kg < 0
+            not isfinite(self.material_rate_per_kg)
+            or self.material_rate_per_kg < 0
+            or self.material_rate_per_kg >= MAX_LEDGER_COMPONENT_VALUE
         ):
             errors.append("material_rate_invalid")
-        if not isfinite(self.energy_rate_per_kwh) or self.energy_rate_per_kwh <= 0:
+        if (
+            not isfinite(self.energy_rate_per_kwh)
+            or self.energy_rate_per_kwh <= 0
+            or self.energy_rate_per_kwh >= MAX_LEDGER_COMPONENT_VALUE
+        ):
             errors.append("energy_rate_not_positive")
-        if not isfinite(self.estimated_power_kw) or self.estimated_power_kw <= 0:
+        if (
+            not isfinite(self.estimated_power_kw)
+            or self.estimated_power_kw <= 0
+            or self.estimated_power_kw >= MAX_LEDGER_COMPONENT_VALUE
+        ):
             errors.append("estimated_power_not_positive")
-        if not isfinite(self.machine_rate_per_hour) or self.machine_rate_per_hour <= 0:
+        if (
+            not isfinite(self.machine_rate_per_hour)
+            or self.machine_rate_per_hour <= 0
+            or self.machine_rate_per_hour >= MAX_LEDGER_COMPONENT_VALUE
+        ):
             errors.append("machine_rate_not_positive")
         if not self.version:
             errors.append("policy_version_missing")
+        elif len(self.version) > 64 or not self.version.isprintable():
+            errors.append("policy_version_invalid")
         return errors
 
 
@@ -77,7 +95,9 @@ def _money(value: float | Decimal | None) -> float | None:
 
 def _nonnegative_money(value: float | Decimal | None) -> float | None:
     parsed = _as_nonnegative_float(value)
-    return _money(parsed) if parsed is not None else None
+    if parsed is None or parsed >= MAX_LEDGER_COMPONENT_VALUE:
+        return None
+    return _money(parsed)
 
 
 def _as_nonnegative_int(value: int | None) -> int | None:
@@ -104,6 +124,13 @@ def _sql_money(value: Any) -> Any:
 def _sql_nonnegative_finite(value: Any) -> Any:
     """Reject negative, infinite, and PostgreSQL NaN float evidence."""
     return and_(value.isnot(None), value >= 0, value < float("inf"))
+
+
+def _sql_nonnegative_money(value: Any) -> Any:
+    return and_(
+        _sql_nonnegative_finite(value),
+        value < MAX_LEDGER_COMPONENT_VALUE,
+    )
 
 
 def _normalize_db_datetime(value: datetime | None) -> datetime | None:
@@ -217,16 +244,18 @@ async def capture_cost_snapshot(
 
     estimated_material_cost = None
     if estimated_filament_grams is not None and policy.material_rate_per_kg is not None:
-        estimated_material_cost = _money(estimated_filament_grams / 1000.0 * policy.material_rate_per_kg)
+        estimated_material_cost = _nonnegative_money(estimated_filament_grams / 1000.0 * policy.material_rate_per_kg)
 
     estimated_energy_kwh = None
     estimated_energy_cost = None
     estimated_machine_cost = None
     if estimated_duration_seconds is not None:
         estimated_hours = estimated_duration_seconds / 3600.0
-        estimated_energy_kwh = round(estimated_hours * policy.estimated_power_kw, 6)
-        estimated_energy_cost = _money(estimated_energy_kwh * policy.energy_rate_per_kwh)
-        estimated_machine_cost = _money(estimated_hours * policy.machine_rate_per_hour)
+        raw_estimated_energy_kwh = _as_nonnegative_float(estimated_hours * policy.estimated_power_kw)
+        if raw_estimated_energy_kwh is not None:
+            estimated_energy_kwh = round(raw_estimated_energy_kwh, 6)
+            estimated_energy_cost = _nonnegative_money(estimated_energy_kwh * policy.energy_rate_per_kwh)
+        estimated_machine_cost = _nonnegative_money(estimated_hours * policy.machine_rate_per_hour)
 
     snapshot = FarmCostLedgerSnapshot(
         print_log_entry_id=entry.id,
@@ -363,14 +392,19 @@ async def list_cost_ledger(
     )
     items = [_build_item(snapshot, run) for snapshot, run in rows.all()]
 
-    actual_material_valid = _sql_nonnegative_finite(PrintLogEntry.cost)
-    actual_energy_valid = _sql_nonnegative_finite(PrintLogEntry.energy_cost)
+    actual_material_valid = _sql_nonnegative_money(PrintLogEntry.cost)
+    actual_energy_valid = _sql_nonnegative_money(PrintLogEntry.energy_cost)
     actual_duration_valid = and_(
         PrintLogEntry.duration_seconds.isnot(None),
         PrintLogEntry.duration_seconds >= 0,
     )
     machine_rate_valid = _sql_nonnegative_finite(FarmCostLedgerSnapshot.machine_rate_per_hour)
-    actual_machine_valid = and_(actual_duration_valid, machine_rate_valid)
+    actual_machine_value = PrintLogEntry.duration_seconds / 3600.0 * FarmCostLedgerSnapshot.machine_rate_per_hour
+    actual_machine_valid = and_(
+        actual_duration_valid,
+        machine_rate_valid,
+        _sql_nonnegative_money(actual_machine_value),
+    )
     actual_material = case(
         (actual_material_valid, _sql_money(PrintLogEntry.cost)),
         else_=None,
@@ -382,7 +416,7 @@ async def list_cost_ledger(
     actual_machine = case(
         (
             actual_machine_valid,
-            _sql_money(PrintLogEntry.duration_seconds / 3600.0 * FarmCostLedgerSnapshot.machine_rate_per_hour),
+            _sql_money(actual_machine_value),
         ),
         else_=None,
     )

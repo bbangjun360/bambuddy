@@ -12,7 +12,10 @@ from backend.app.core.config import settings
 from backend.app.models.farm_cost_ledger import FarmCostLedgerSnapshot
 from backend.app.models.print_log import PrintLogEntry
 from backend.app.services import farm_cost_ledger
-from backend.app.services.farm_cost_ledger import capture_cost_snapshot
+from backend.app.services.farm_cost_ledger import (
+    MAX_LEDGER_COMPONENT_VALUE,
+    capture_cost_snapshot,
+)
 from backend.app.services.print_log import write_log_entry
 
 
@@ -162,20 +165,40 @@ async def test_non_krw_configuration_skips_snapshot_without_losing_print_log(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "setting_name",
+    ("setting_name", "invalid_value"),
     (
-        "farm_cost_ledger_machine_rate_per_hour_krw",
-        "farm_cost_ledger_estimated_power_kw",
+        ("farm_cost_ledger_machine_rate_per_hour_krw", float("inf")),
+        ("farm_cost_ledger_estimated_power_kw", float("inf")),
+        ("farm_cost_ledger_machine_rate_per_hour_krw", MAX_LEDGER_COMPONENT_VALUE),
     ),
 )
-async def test_nonfinite_policy_rate_skips_snapshot_without_losing_print_log(
+async def test_invalid_policy_rate_skips_snapshot_without_losing_print_log(
     db_session,
     monkeypatch,
     setting_name,
+    invalid_value,
 ):
     _enable_policy(monkeypatch)
     await _configure_krw(db_session)
-    monkeypatch.setattr(settings, setting_name, float("inf"))
+    monkeypatch.setattr(settings, setting_name, invalid_value)
+
+    entry = await write_log_entry(db_session, status="completed", cost=500.0)
+    await db_session.commit()
+
+    assert await db_session.get(PrintLogEntry, entry.id) is not None
+    assert await db_session.scalar(select(func.count(FarmCostLedgerSnapshot.id))) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy_version", ("v1\nforged", "x" * 65))
+async def test_invalid_policy_version_skips_snapshot_consistently(
+    db_session,
+    monkeypatch,
+    policy_version,
+):
+    _enable_policy(monkeypatch)
+    await _configure_krw(db_session)
+    monkeypatch.setattr(settings, "farm_cost_ledger_policy_version", policy_version)
 
     entry = await write_log_entry(db_session, status="completed", cost=500.0)
     await db_session.commit()
