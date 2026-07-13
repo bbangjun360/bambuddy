@@ -66,6 +66,7 @@ import {
   XCircle,
   User,
   Home,
+  MapPin,
   Printer as PrinterIcon,
   Info,
   Cable,
@@ -1042,47 +1043,71 @@ function StatusSummaryBar({ printers }: { printers: Printer[] | undefined }) {
 
   if (!printers?.length) return null;
 
-  const badges: { count: number; dot: string; label: string }[] = [
-    { count: counts.printing, dot: 'bg-bambu-green animate-pulse', label: t('printers.status.printing').toLowerCase() },
-    { count: counts.paused, dot: 'bg-status-warning', label: t('printers.status.paused', 'paused').toLowerCase() },
-    { count: counts.finished, dot: 'bg-blue-400', label: t('printers.status.finished', 'finished').toLowerCase() },
-    { count: counts.idle, dot: counts.idle > 0 ? 'bg-bambu-green' : 'bg-gray-500', label: t('printers.status.available').toLowerCase() },
-    { count: counts.error, dot: 'bg-status-error', label: t('printers.status.problem').toLowerCase() },
-    { count: counts.offline, dot: 'bg-gray-400', label: t('printers.status.offline').toLowerCase() },
+  const badges: { key: string; count: number; dot: string; border: string; label: string }[] = [
+    { key: 'printing', count: counts.printing, dot: 'bg-bambu-green animate-pulse', border: 'border-l-bambu-green', label: t('printers.status.printing') },
+    { key: 'paused', count: counts.paused, dot: 'bg-status-warning', border: 'border-l-status-warning', label: t('printers.status.paused', 'Paused') },
+    { key: 'finished', count: counts.finished, dot: 'bg-blue-400', border: 'border-l-blue-400', label: t('printers.status.finished', 'Finished') },
+    { key: 'idle', count: counts.idle, dot: 'bg-emerald-500', border: 'border-l-emerald-500', label: t('printers.status.available') },
+    { key: 'error', count: counts.error, dot: 'bg-status-error', border: 'border-l-status-error', label: t('printers.status.problem') },
+    { key: 'offline', count: counts.offline, dot: 'bg-gray-400', border: 'border-l-gray-400', label: t('printers.status.offline') },
   ];
 
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-4 gap-y-2 text-bambu-gray">
-      {badges.map(({ count, dot, label }) => count > 0 && (
-        <div key={label} className="flex items-center gap-1.5">
-          <div className={`w-2 h-2 rounded-full ${dot}`} />
-          <span className="text-bambu-gray">
-            <span className="text-white font-medium">{count}</span> {label}
-          </span>
-        </div>
-      ))}
-      {nextFinish && (
-        <>
-          <div className="w-px h-4 bg-bambu-dark-tertiary" />
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-bambu-green font-medium">{t('printers.nextAvailable')}:</span>
-              <span className="text-white font-medium">{nextFinish.name}</span>
+    <section
+      aria-label={t('nav.sections.fleet')}
+      data-testid="fleet-status-summary"
+      className="mt-3 border-y border-bambu-dark-tertiary py-3"
+    >
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+        <dl className="grid min-w-0 flex-1 grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-3 lg:flex lg:flex-wrap lg:gap-x-6">
+          {badges.map(({ key, count, dot, border, label }) => count > 0 && (
+            <div
+              key={key}
+              data-fleet-status={key}
+              className={`min-w-[92px] border-l-2 pl-3 ${border}`}
+            >
+              <dt className="flex items-center gap-1.5 text-[11px] font-medium text-bambu-gray">
+                <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+                <span className="truncate">{label}</span>
+              </dt>
+              <dd className="mt-0.5 text-lg font-semibold leading-none text-gray-900 dark:text-white">
+                {count}
+              </dd>
             </div>
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <div className="w-full sm:w-16 bg-bambu-dark-tertiary rounded-full h-1.5">
+          ))}
+        </dl>
+
+        {nextFinish && (
+          <div
+            aria-label={t('printers.nextAvailable')}
+            className="min-w-0 border-l-2 border-l-bambu-green pl-3 xl:w-72 xl:flex-shrink-0"
+          >
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <span className="truncate text-xs font-medium text-bambu-gray">
+                {t('printers.nextAvailable')}
+              </span>
+              <span className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                {nextFinish.name}
+              </span>
+            </div>
+            <div className="mt-1.5 flex items-center gap-2">
+              <div className="h-1.5 min-w-0 flex-1 rounded-full bg-bambu-dark-tertiary">
                 <div
-                  className="bg-bambu-green h-1.5 rounded-full transition-all"
+                  className="h-1.5 rounded-full bg-bambu-green transition-all"
                   style={{ width: `${nextFinish.progress}%` }}
                 />
               </div>
-              <span className="text-white font-medium">{Math.round(nextFinish.progress)}%</span>
-              <span className="text-bambu-gray">({formatDuration(nextFinish.remainingMin * 60)})</span>
+              <span className="w-9 text-right text-xs font-medium text-gray-900 dark:text-white">
+                {Math.round(nextFinish.progress)}%
+              </span>
+              <span className="text-xs text-bambu-gray">
+                {formatDuration(nextFinish.remainingMin * 60)}
+              </span>
             </div>
           </div>
-        </>
-      )}
-    </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -1113,7 +1138,7 @@ function ToolbarDropdown<T extends string>({
       <button
         type="button"
         onClick={() => setIsOpen(open => !open)}
-        className={`h-8 px-2 rounded-lg border bg-bambu-dark border-bambu-dark-tertiary text-white text-sm font-medium transition-colors hover:bg-bambu-dark-tertiary focus:outline-none focus:border-bambu-green flex items-center justify-between gap-2 ${fullWidth ? 'w-full' : 'min-w-28'}`}
+        className={`flex h-9 items-center justify-between gap-2 rounded-md border border-bambu-dark-tertiary bg-bambu-dark px-2 text-sm font-medium text-white transition-colors hover:bg-bambu-dark-tertiary focus:border-bambu-green focus:outline-none focus:ring-1 focus:ring-bambu-green/40 ${fullWidth ? 'w-full' : 'min-w-28'}`}
       >
         <span className="truncate">{selectedOption?.label}</span>
         <ChevronDown className={`w-4 h-4 text-bambu-gray transition-transform ${isOpen ? 'rotate-180' : ''}`} />
@@ -1122,7 +1147,7 @@ function ToolbarDropdown<T extends string>({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute left-0 top-full z-20 mt-1 min-w-full rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary py-1 shadow-xl">
+          <div className="absolute left-0 top-full z-20 mt-1 min-w-full rounded-md border border-bambu-dark-tertiary bg-bambu-dark-secondary py-1 shadow-xl">
             {options.map(option => (
               <button
                 key={option.value}
@@ -1161,7 +1186,7 @@ function ToolbarMenu({
       <button
         type="button"
         onClick={() => setIsOpen(open => !open)}
-        className="h-8 w-8 rounded-lg border bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary transition-colors flex items-center justify-center"
+        className="flex h-9 w-9 items-center justify-center rounded-md border border-bambu-dark-tertiary bg-bambu-dark text-white transition-colors hover:bg-bambu-dark-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bambu-green"
         aria-label={label}
         title={label}
       >
@@ -1171,7 +1196,7 @@ function ToolbarMenu({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-0 top-full z-20 mt-1 min-w-40 rounded-lg border border-bambu-dark-tertiary bg-bambu-dark-secondary p-2 shadow-xl">
+          <div className="absolute right-0 top-full z-20 mt-1 min-w-40 rounded-md border border-bambu-dark-tertiary bg-bambu-dark-secondary p-2 shadow-xl">
             {children}
           </div>
         </>
@@ -1406,6 +1431,44 @@ const STATUS_GROUP_META: Record<string, { labelKey: string; dot: string }> = {
   finished: { labelKey: 'printers.status.finished',  dot: 'bg-blue-400' },
   idle:     { labelKey: 'printers.status.idle',       dot: 'bg-bambu-green' },
   offline:  { labelKey: 'printers.status.offline',   dot: 'bg-gray-400' },
+};
+
+const PRINTER_CARD_STATE_STYLES: Record<PrinterState | 'maintenance', { border: string; badge: string; dot: string }> = {
+  maintenance: {
+    border: 'border-l-amber-500',
+    badge: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    dot: 'bg-amber-500',
+  },
+  error: {
+    border: 'border-l-status-error',
+    badge: 'border-status-error/30 bg-status-error/10 text-status-error',
+    dot: 'bg-status-error',
+  },
+  printing: {
+    border: 'border-l-bambu-green',
+    badge: 'border-bambu-green/30 bg-bambu-green/10 text-bambu-green',
+    dot: 'bg-bambu-green animate-pulse',
+  },
+  paused: {
+    border: 'border-l-status-warning',
+    badge: 'border-status-warning/30 bg-status-warning/10 text-status-warning',
+    dot: 'bg-status-warning',
+  },
+  finished: {
+    border: 'border-l-blue-400',
+    badge: 'border-blue-400/30 bg-blue-400/10 text-blue-600 dark:text-blue-300',
+    dot: 'bg-blue-400',
+  },
+  idle: {
+    border: 'border-l-emerald-500',
+    badge: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+    dot: 'bg-emerald-500',
+  },
+  offline: {
+    border: 'border-l-gray-500',
+    badge: 'border-gray-500/30 bg-gray-500/10 text-gray-600 dark:text-gray-300',
+    dot: 'bg-gray-400',
+  },
 };
 
 /** Classify a printer into one of the UI status buckets. */
@@ -3107,10 +3170,19 @@ function PrinterCard({
     </div>
   );
 
+  const cardState = printer.is_active === false ? 'maintenance' : classifyPrinterStatus(status);
+  const cardStateLabel = cardState === 'maintenance'
+    ? t('printers.maintenance.pillLabel')
+    : t(STATUS_GROUP_META[cardState]?.labelKey || 'printers.status.idle');
+  const cardStateStyle = PRINTER_CARD_STATE_STYLES[cardState];
+
   return (
     <Card
       id={`printer-card-${printer.id}`}
-      className={`relative flex h-full flex-col ${isSelected ? 'ring-2 ring-bambu-green' : ''} ${selectionMode || viewMode === 'compact' ? 'cursor-pointer' : ''}`}
+      role="article"
+      aria-label={`${printer.name}: ${cardStateLabel}`}
+      data-printer-state={cardState}
+      className={`relative flex h-full flex-col !rounded-lg border-l-4 ${cardStateStyle.border} ${isSelected ? 'ring-2 ring-bambu-green' : ''} ${selectionMode || viewMode === 'compact' ? 'cursor-pointer' : ''}`}
       onClick={handleCardClick}
       onDragEnter={handleCardDragEnter}
       onDragOver={handleCardDragOver}
@@ -3133,7 +3205,7 @@ function PrinterCard({
       {/* Drop zone overlay */}
       {(isDraggingFile || isDropUploading) && (
         <div
-          className={`absolute inset-0 z-10 rounded-xl border-2 border-dashed flex items-center justify-center transition-colors ${
+          className={`absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
             isDropUploading
               ? 'bg-bambu-green/10 border-bambu-green/50'
               : canDrop
@@ -3161,7 +3233,7 @@ function PrinterCard({
           </div>
         </div>
       )}
-      <CardContent className={`${cardSize >= 3 ? 'p-5' : ''} flex flex-1 flex-col`}>
+      <CardContent className={`${viewMode === 'compact' ? '!p-3' : cardSize >= 3 ? '!p-5' : '!p-4'} flex flex-1 flex-col`}>
         {/* Header */}
         <div className={getSpacing()}>
           {/* Top row: Image, Name, Menu */}
@@ -3171,12 +3243,12 @@ function PrinterCard({
               <img
                 src={getPrinterImage(printer.model)}
                 alt={printer.model || t('common.printer')}
-                className={`object-contain rounded-lg flex-shrink-0 ${getImageSize()}`}
+                className={`flex-shrink-0 rounded-md bg-bambu-dark p-1 object-contain ${getImageSize()}`}
               />
               <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <h3 className={`font-semibold text-white ${getTitleSize()}`}>{printer.name}</h3>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2 pt-0.5">
+                    <h3 className={`truncate font-semibold text-white ${getTitleSize()}`}>{printer.name}</h3>
                     {/* Connection indicator dot for compact mode */}
                     {viewMode === 'compact' && (() => {
                       const hmsErrors = status?.connected && status.hms_errors ? filterKnownHMSErrors(status.hms_errors) : [];
@@ -3202,6 +3274,19 @@ function PrinterCard({
                       );
                     })()}
                   </div>
+                  <div className="flex flex-shrink-0 items-center gap-1.5">
+                    {viewMode === 'expanded' && (
+                      <span
+                        data-printer-primary-state={cardState}
+                        className={`inline-flex h-6 items-center gap-1.5 rounded-md border px-2 text-[11px] font-semibold ${cardStateStyle.badge}`}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={`h-1.5 w-1.5 rounded-full ${cardStateStyle.dot}`}
+                        />
+                        {cardStateLabel}
+                      </span>
+                    )}
                   {viewMode === 'compact' && showClearPlateButton && (
                     <button
                       type="button"
@@ -3218,22 +3303,34 @@ function PrinterCard({
                       )}
                     </button>
                   )}
+                  </div>
                 </div>
-                <p className="text-sm text-bambu-gray">
-                  {printer.model || 'Unknown Model'}
+                <div
+                  data-printer-metadata
+                  className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-bambu-gray"
+                >
+                  <span className="font-medium text-gray-700 dark:text-bambu-gray-light">
+                    {printer.model || 'Unknown Model'}
+                  </span>
+                  {printer.location && (
+                    <span className="inline-flex min-w-0 items-center gap-1" title={printer.location}>
+                      <MapPin className="h-3 w-3 flex-shrink-0" />
+                      <span className="max-w-36 truncate">{printer.location}</span>
+                    </span>
+                  )}
                   {/* Nozzle Info - only in expanded */}
                   {viewMode === 'expanded' && status?.nozzles && status.nozzles[0]?.nozzle_diameter && (
-                    <span className="ml-1.5 text-bambu-gray" title={status.nozzles[0].nozzle_type || 'Nozzle'}>
-                      • {status.nozzles[0].nozzle_diameter}mm
+                    <span title={status.nozzles[0].nozzle_type || 'Nozzle'}>
+                      {status.nozzles[0].nozzle_diameter}mm
                     </span>
                   )}
                   {viewMode === 'expanded' && maintenanceInfo && maintenanceInfo.total_print_hours > 0 && (
-                    <span className="ml-2 text-bambu-gray">
-                      <Clock className="w-3 h-3 inline-block mr-1" />
+                    <span className="inline-flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
                       {Math.round(maintenanceInfo.total_print_hours)}h
                     </span>
                   )}
-                </p>
+                </div>
               </div>
             </div>
           </div>
@@ -8326,7 +8423,7 @@ export function PrintersPage() {
         type="button"
         onClick={toggleHideDisconnected}
         aria-pressed={hideDisconnected}
-        className={`h-8 px-2 rounded-lg border text-sm font-medium transition-colors ${inMenu ? 'w-full' : ''} ${
+        className={`h-9 rounded-md border px-2 text-sm font-medium transition-colors ${inMenu ? 'w-full' : ''} ${
           hideDisconnected
             ? 'bg-bambu-green border-bambu-green text-white'
             : 'bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary'
@@ -8355,7 +8452,7 @@ export function PrintersPage() {
         />
         <button
           onClick={toggleSortDirection}
-          className="h-8 shrink-0 px-2 rounded-lg border bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary transition-colors flex items-center justify-center"
+          className="flex h-9 shrink-0 items-center justify-center rounded-md border border-bambu-dark-tertiary bg-bambu-dark px-2 text-white transition-colors hover:bg-bambu-dark-tertiary"
           title={sortAsc ? t('printers.sort.descending') : t('printers.sort.ascending')}
         >
           {sortAsc ? (
@@ -8367,14 +8464,14 @@ export function PrintersPage() {
       </div>
 
       {/* Page view toggle: Cards / Cam Wall */}
-      <div className={`flex h-8 items-center bg-bambu-dark rounded-lg border border-bambu-dark-tertiary ${inMenu ? 'w-full' : ''}`}>
+      <div className={`flex h-9 items-center rounded-md border border-bambu-dark-tertiary bg-bambu-dark ${inMenu ? 'w-full' : ''}`}>
         <button
           type="button"
           onClick={() => {
             setPageView('cards');
             localStorage.setItem('printerPageView', 'cards');
           }}
-          className={`flex h-full items-center gap-1 rounded-l-lg px-2 text-xs font-medium transition-colors ${inMenu ? 'flex-1 justify-center' : ''} ${
+          className={`flex h-full items-center gap-1 rounded-l-md px-2 text-xs font-medium transition-colors ${inMenu ? 'flex-1 justify-center' : ''} ${
             pageView === 'cards' ? 'bg-bambu-green text-white' : 'text-white hover:bg-bambu-dark-tertiary'
           }`}
           title={t('printers.pageView.cards')}
@@ -8389,7 +8486,7 @@ export function PrintersPage() {
             setPageView('camwall');
             localStorage.setItem('printerPageView', 'camwall');
           }}
-          className={`flex h-full items-center gap-1 rounded-r-lg px-2 text-xs font-medium transition-colors ${inMenu ? 'flex-1 justify-center' : ''} ${
+          className={`flex h-full items-center gap-1 rounded-r-md px-2 text-xs font-medium transition-colors ${inMenu ? 'flex-1 justify-center' : ''} ${
             pageView === 'camwall' ? 'bg-bambu-green text-white' : 'text-white hover:bg-bambu-dark-tertiary'
           }`}
           title={t('printers.pageView.camWall')}
@@ -8402,7 +8499,7 @@ export function PrintersPage() {
       </div>
 
       {/* Card size selector */}
-      <div className={`flex h-8 items-center bg-bambu-dark rounded-lg border border-bambu-dark-tertiary ${pageView === 'camwall' ? 'opacity-40 pointer-events-none' : ''} ${inMenu ? 'w-full' : ''}`}>
+      <div className={`flex h-9 items-center rounded-md border border-bambu-dark-tertiary bg-bambu-dark ${pageView === 'camwall' ? 'opacity-40 pointer-events-none' : ''} ${inMenu ? 'w-full' : ''}`}>
         {cardSizeLabels.map((label, index) => {
           const size = index + 1;
           const isSelected = cardSize === size;
@@ -8415,9 +8512,9 @@ export function PrintersPage() {
                 localStorage.setItem('printerCardSize', String(size));
               }}
               className={`h-full px-2 text-xs font-medium transition-colors ${inMenu ? 'flex-1' : ''} ${
-                index === 0 ? 'rounded-l-lg' : ''
+                index === 0 ? 'rounded-l-md' : ''
               } ${
-                index === cardSizeLabels.length - 1 ? 'rounded-r-lg' : ''
+                index === cardSizeLabels.length - 1 ? 'rounded-r-md' : ''
               } ${
                 isSelected
                   ? 'bg-bambu-green text-white'
@@ -8441,7 +8538,7 @@ export function PrintersPage() {
           if (selectionMode) clearSelection();
           else setIsSelectionMode(true);
         }}
-        className={`h-8 px-2 rounded-lg border transition-colors ${inMenu ? 'w-full justify-center gap-1.5 text-sm font-medium flex items-center' : ''} ${
+        className={`h-9 rounded-md border px-2 transition-colors ${inMenu ? 'w-full justify-center gap-1.5 text-sm font-medium flex items-center' : ''} ${
           selectionMode
             ? 'bg-bambu-green border-bambu-green text-white'
             : 'bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary'
@@ -8458,7 +8555,7 @@ export function PrintersPage() {
         <div className={`relative ${inMenu ? 'w-full' : ''}`}>
           <button
             onClick={() => setShowPowerDropdown(!showPowerDropdown)}
-            className={`h-8 flex items-center gap-1.5 px-2 text-sm rounded-lg border transition-colors ${
+            className={`flex h-9 items-center gap-1.5 rounded-md border px-2 text-sm transition-colors ${
               inMenu
                 ? 'w-full justify-between bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary hover:text-white'
                 : 'bg-bambu-dark border-bambu-dark-tertiary text-white hover:bg-bambu-dark-tertiary'
@@ -8507,7 +8604,7 @@ export function PrintersPage() {
         onClick={() => setShowAddModal(true)}
         disabled={!hasPermission('printers:create')}
         title={!hasPermission('printers:create') ? t('printers.permission.noAdd') : undefined}
-        className={`!h-8 !min-h-8 px-2 py-0 ${inMenu ? 'w-full' : ''}`}
+        className={`!h-9 !min-h-9 px-2 py-0 ${inMenu ? 'w-full' : ''}`}
       >
         <Plus className="w-4 h-4" />
         {t('printers.addPrinter')}
@@ -8516,19 +8613,25 @@ export function PrintersPage() {
   );
 
   return (
-    <div className="p-4 md:p-8">
-      <div className="space-y-3 mb-6">
+    <div className="px-3 py-4 sm:px-5 lg:px-6">
+      <section aria-labelledby="printer-fleet-heading" className="mb-5 space-y-4">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-            <PrinterIcon className="w-7 h-7 text-bambu-green" />
-            {t('printers.title')}
+          <h1 id="printer-fleet-heading" className="flex items-center gap-2.5 text-xl font-semibold text-white sm:text-2xl">
+            <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-bambu-green/10 text-bambu-green">
+              <PrinterIcon className="h-5 w-5" />
+            </span>
+            <span className="truncate">{t('printers.title')}</span>
           </h1>
           <StatusSummaryBar printers={printers} />
         </div>
-        <div ref={toolbarRef} className="relative flex items-center gap-2">
+        <div
+          ref={toolbarRef}
+          data-testid="printer-fleet-toolbar"
+          className="relative flex min-h-11 items-center gap-2 border-b border-bambu-dark-tertiary pb-3"
+        >
           {/* Only show search bar when printers exist */}
           {printers && printers.length > 0 && (
-            <div className="relative min-w-0 flex-1">
+            <div className="relative min-w-0 flex-1 sm:max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bambu-gray/50" />
               <input
                 type="search"
@@ -8540,7 +8643,7 @@ export function PrintersPage() {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={t('printers.search')}
                 aria-label={t('printers.search')}
-                className="w-full h-8 pl-9 pr-8 bg-bambu-dark border border-bambu-dark-tertiary rounded-lg text-white text-sm placeholder:text-bambu-gray/50 focus:outline-none focus:border-bambu-green"
+                className="h-9 w-full rounded-md border border-bambu-dark-tertiary bg-bambu-dark pl-9 pr-8 text-sm text-white placeholder:text-bambu-gray/50 focus:border-bambu-green focus:outline-none focus:ring-1 focus:ring-bambu-green/40"
               />
               {search && (
                 <button
@@ -8582,30 +8685,32 @@ export function PrintersPage() {
             </div>
           )}
         </div>
-      </div>
+      </section>
 
       {isLoading ? (
-        <div className="text-center py-12 text-bambu-gray">{t('common.loading')}</div>
+        <div className="flex min-h-64 items-center justify-center text-bambu-gray">{t('common.loading')}</div>
       ) : printers?.length === 0 ? (
-        <Card>
-          <CardContent className="text-center py-12">
-            <p className="text-bambu-gray mb-4">{t('printers.noPrintersConfigured')}</p>
-            <Button
-              onClick={() => setShowAddModal(true)}
-              disabled={!hasPermission('printers:create')}
-              title={!hasPermission('printers:create') ? t('printers.permission.noAdd') : undefined}
-            >
-              <Plus className="w-4 h-4" />
-              {t('printers.addPrinter')}
-            </Button>
-          </CardContent>
-        </Card>
+        <section className="flex min-h-64 flex-col items-center justify-center border-y border-bambu-dark-tertiary px-4 text-center">
+          <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-md border border-bambu-dark-tertiary bg-bambu-dark-secondary text-bambu-gray">
+            <PrinterIcon className="h-6 w-6" />
+          </span>
+          <p className="mb-4 text-sm text-bambu-gray">{t('printers.noPrintersConfigured')}</p>
+          <Button
+            onClick={() => setShowAddModal(true)}
+            disabled={!hasPermission('printers:create')}
+            title={!hasPermission('printers:create') ? t('printers.permission.noAdd') : undefined}
+          >
+            <Plus className="w-4 h-4" />
+            {t('printers.addPrinter')}
+          </Button>
+        </section>
       ) : sortedPrinters.length === 0 && (search.trim() || statusFilter !== 'all' || locationFilter !== 'all') ? (
-        <Card>
-          <CardContent className="text-center py-12">
-            <p className="text-bambu-gray">{t('printers.noSearchResults')}</p>
-          </CardContent>
-        </Card>
+        <section className="flex min-h-48 flex-col items-center justify-center border-y border-bambu-dark-tertiary px-4 text-center">
+          <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-md border border-bambu-dark-tertiary text-bambu-gray">
+            <Search className="h-5 w-5" />
+          </span>
+          <p className="text-sm text-bambu-gray">{t('printers.noSearchResults')}</p>
+        </section>
       ) : pageView === 'camwall' ? (
         <CameraWall
           printers={sortedPrinters}
@@ -8644,7 +8749,7 @@ export function PrintersPage() {
         />
       ) : groupedPrinters ? (
         /* Grouped view (location, status, or model) */
-        <div className="space-y-6">
+        <div className="space-y-5">
           {(() => {
             const keys = sortBy === 'status'
               ? STATUS_GROUP_ORDER.filter(k => groupedPrinters[k]?.length > 0)
@@ -8672,7 +8777,7 @@ export function PrintersPage() {
                 onToggle={() => toggleSectionCollapse(collapseKey)}
                 summaryClassName="py-1"
                 summary={
-                  <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                  <h2 className="flex items-center gap-2 text-base font-semibold text-white">
                     <span className={`w-2 h-2 rounded-full ${dot}`} />
                     {label}
                     <span className="text-sm font-normal text-bambu-gray">({groupPrinters.length})</span>
@@ -8692,7 +8797,7 @@ export function PrintersPage() {
                   </h2>
                 }
               >
-                <div className={`grid gap-4 ${cardSize >= 3 ? 'gap-6' : ''} ${getGridClasses()}`}>
+                <div className={`grid gap-3 ${cardSize >= 3 ? 'gap-4' : ''} ${getGridClasses()}`}>
                   {groupPrinters.map((printer) => (
                     <PrinterCard
                       key={printer.id}
@@ -8741,7 +8846,7 @@ export function PrintersPage() {
         </div>
       ) : (
         /* Regular grid view */
-        <div className={`grid gap-4 ${cardSize >= 3 ? 'gap-6' : ''} ${getGridClasses()}`}>
+        <div className={`grid gap-3 ${cardSize >= 3 ? 'gap-4' : ''} ${getGridClasses()}`}>
           {sortedPrinters.map((printer) => (
             <PrinterCard
               key={printer.id}

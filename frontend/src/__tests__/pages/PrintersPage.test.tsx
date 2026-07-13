@@ -150,6 +150,82 @@ describe('PrintersPage', () => {
         expect(screen.getByText('X1 Carbon')).toBeInTheDocument();
       });
     });
+
+    it('keeps printer identity and connection state attached to each card', async () => {
+      render(<PrintersPage />);
+
+      await waitFor(() => {
+        const card = document.getElementById('printer-card-1');
+        expect(card).toBeInTheDocument();
+        expect(within(card!).getByRole('heading', { name: 'X1 Carbon' })).toBeInTheDocument();
+        expect(within(card!).getByText('X1C')).toBeInTheDocument();
+        expect(within(card!).getByText('Connected')).toBeInTheDocument();
+      });
+    });
+
+    it('keeps fleet search and add commands available with configured printers', async () => {
+      render(<PrintersPage />);
+
+      await waitFor(() => {
+        expect(screen.getByRole('searchbox', { name: 'Search printers...' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Add Printer' })).toBeInTheDocument();
+      });
+    });
+
+    it('renders a semantic fleet summary with the current state count', async () => {
+      render(<PrintersPage />);
+
+      const summary = await screen.findByRole('region', { name: 'Fleet' });
+
+      await waitFor(() => {
+        const available = summary.querySelector('[data-fleet-status="idle"]');
+        expect(available).toBeInTheDocument();
+        expect(within(available as HTMLElement).getByText('Available')).toBeInTheDocument();
+        expect(within(available as HTMLElement).getByText('2')).toBeInTheDocument();
+      });
+    });
+
+    it('exposes operational state and location in the printer card hierarchy', async () => {
+      render(<PrintersPage />);
+
+      const card = await screen.findByRole('article', { name: 'X1 Carbon: Idle' });
+      const primaryState = card.querySelector('[data-printer-primary-state="idle"]');
+
+      expect(card).toHaveAttribute('data-printer-state', 'idle');
+      expect(primaryState).toBeInTheDocument();
+      expect(within(primaryState as HTMLElement).getByText('Idle')).toBeInTheDocument();
+      expect(within(card).getByText('Workshop')).toBeInTheDocument();
+    });
+
+    it('distinguishes printing and offline cards without changing their controls', async () => {
+      server.use(
+        http.get('/api/v1/printers/:id/status', ({ params }) => {
+          if (params.id === '1') {
+            return HttpResponse.json({
+              ...mockPrinterStatus,
+              state: 'RUNNING',
+              progress: 42,
+              remaining_time: 18,
+            });
+          }
+          return HttpResponse.json({
+            ...mockPrinterStatus,
+            connected: false,
+            state: null,
+          });
+        }),
+      );
+
+      render(<PrintersPage />);
+
+      const printingCard = await screen.findByRole('article', { name: 'X1 Carbon: Printing' });
+      const offlineCard = await screen.findByRole('article', { name: 'P1S Backup: Offline' });
+
+      expect(printingCard).toHaveAttribute('data-printer-state', 'printing');
+      expect(offlineCard).toHaveAttribute('data-printer-state', 'offline');
+      expect(within(printingCard).queryByRole('button', { name: 'Add Printer' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add Printer' })).toBeInTheDocument();
+    });
   });
 
   describe('printer info', () => {
