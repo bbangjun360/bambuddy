@@ -95,6 +95,68 @@ describe('SettingsPage', () => {
       });
     });
 
+    it('does not request the current-user 2FA status when auth is disabled', async () => {
+      let authStatusRequests = 0;
+      let twoFAStatusRequests = 0;
+      server.use(
+        http.get('/api/v1/auth/status', () => {
+          authStatusRequests += 1;
+          return HttpResponse.json({ auth_enabled: false, requires_setup: false });
+        }),
+        http.get('/api/v1/auth/2fa/status', () => {
+          twoFAStatusRequests += 1;
+          return HttpResponse.json({
+            totp_enabled: false,
+            email_otp_enabled: false,
+            backup_codes_remaining: 0,
+          });
+        }),
+      );
+
+      render(<SettingsPage />);
+
+      await waitFor(() => {
+        expect(authStatusRequests).toBe(1);
+      });
+      expect(twoFAStatusRequests).toBe(0);
+    });
+
+    it('requests the current-user 2FA status when auth is enabled', async () => {
+      let twoFAStatusRequests = 0;
+      server.use(
+        http.get('/api/v1/auth/status', () =>
+          HttpResponse.json({ auth_enabled: true, requires_setup: false }),
+        ),
+        http.get('/api/v1/auth/me', () =>
+          HttpResponse.json({
+            id: 1,
+            username: 'admin',
+            role: 'admin',
+            is_active: true,
+            is_admin: true,
+            groups: [],
+            permissions: ['settings:update'],
+            created_at: '2026-01-01T00:00:00Z',
+          }),
+        ),
+        http.get('/api/v1/auth/2fa/status', () => {
+          twoFAStatusRequests += 1;
+          return HttpResponse.json({
+            totp_enabled: false,
+            email_otp_enabled: false,
+            backup_codes_remaining: 0,
+          });
+        }),
+      );
+      setAuthToken('test-token');
+
+      render(<SettingsPage />);
+
+      await waitFor(() => {
+        expect(twoFAStatusRequests).toBe(1);
+      });
+    });
+
     it('shows settings tabs', async () => {
       render(<SettingsPage />);
 
