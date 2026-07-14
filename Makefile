@@ -12,6 +12,7 @@
         verify-fast verify-full context-check workpack-check hooks-check
 
 HARNESS_ENV ?= .env.harness
+export HARNESS_ENV
 -include $(HARNESS_ENV)
 HARNESS_COMPOSE ?= harness/docker-compose.harness.yml
 HARNESS_OBSERVABILITY_COMPOSE ?= harness/docker-compose.observability.yml
