@@ -36,5 +36,12 @@ class SwapmodStateMachineCycle(Base):
     transition_log: Mapped[list[dict]] = mapped_column(JSON, default=list, nullable=False)
     transition_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    # Every state transition increments this field, so it also rejects stale
+    # ORM updates without adding a schema column or changing the public model.
+    __mapper_args__ = {
+        "version_id_col": transition_count,
+        "version_id_generator": False,
+    }
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
