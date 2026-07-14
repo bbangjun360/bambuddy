@@ -15,7 +15,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
-HARNESS_ENV_FILE = ROOT / ".env.harness"
+
+
+def _resolve_harness_env_file() -> Path:
+    selected = Path(os.environ.get("HARNESS_ENV", ".env.harness"))
+    return selected if selected.is_absolute() else ROOT / selected
+
+
+HARNESS_ENV_FILE = _resolve_harness_env_file()
 LOCAL_HOSTNAMES = {"localhost"}
 
 
