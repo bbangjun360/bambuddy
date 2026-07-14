@@ -1,8 +1,23 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import unittest
-from tempfile import TemporaryDirectory
 from pathlib import Path
+from tempfile import TemporaryDirectory
+
+ROOT = Path(__file__).resolve().parents[2]
+MAKEFILE = ROOT / "Makefile"
+RUNTIME_ENV_CONSUMERS = {
+    "harness/scripts/backup_restore.py": "ENV_FILE",
+    "harness/scripts/obico_shadow.py": "HARNESS_ENV_FILE",
+    "harness/scripts/observability_health.py": "HARNESS_ENV_FILE",
+    "harness/scripts/orca_direct_slice.py": "HARNESS_ENV_FILE",
+    "harness/scripts/orca_health.py": "HARNESS_ENV_FILE",
+    "harness/scripts/persistence.py": "ENV_FILE",
+    "harness/scripts/smoke.py": "HARNESS_ENV_FILE",
+}
 
 DEFAULT_HARNESS_ENV = "\n".join(
     [
@@ -63,6 +78,64 @@ class HarnessEnvTest(unittest.TestCase):
         self.assertEqual(values["BAMBUDDY_PORT"], "18130")
         self.assertEqual(values["MOCK_PORT"], "19130")
         self.assertEqual(values["ORCA_API_PORT"], "13130")
+
+
+class HarnessEnvSelectionContractTest(unittest.TestCase):
+    def _selected_path(self, script: str, constant: str, selected: str) -> Path:
+        env = os.environ.copy()
+        env["HARNESS_ENV"] = selected
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import runpy, sys; print(runpy.run_path(sys.argv[1])[sys.argv[2]])",
+                script,
+                constant,
+            ],
+            cwd=ROOT,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return Path(result.stdout.strip())
+
+    def test_runtime_scripts_honor_absolute_harness_env_selection(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            selected = Path(tmpdir) / "selected.env"
+            selected.write_text("COMPOSE_PROJECT_NAME=farm_harness\n", encoding="utf-8")
+
+            for script, constant in RUNTIME_ENV_CONSUMERS.items():
+                with self.subTest(script=script):
+                    self.assertEqual(
+                        self._selected_path(script, constant, str(selected)),
+                        selected,
+                    )
+
+    def test_runtime_scripts_anchor_relative_selection_at_repository_root(self) -> None:
+        selected = Path("harness/fixtures/selected.env")
+
+        for script, constant in RUNTIME_ENV_CONSUMERS.items():
+            with self.subTest(script=script):
+                self.assertEqual(
+                    self._selected_path(script, constant, str(selected)),
+                    ROOT / selected,
+                )
+
+    def test_makefile_exports_harness_env_to_runtime_scripts(self) -> None:
+        self.assertIn("export HARNESS_ENV", MAKEFILE.read_text(encoding="utf-8").splitlines())
+
+    def test_destructive_harness_scripts_keep_default_project_guard(self) -> None:
+        for script in (
+            ROOT / "harness/scripts/backup_restore.py",
+            ROOT / "harness/scripts/persistence.py",
+        ):
+            with self.subTest(script=script.name):
+                source = script.read_text(encoding="utf-8")
+                self.assertIn('COMPOSE_PROJECT_NAME") != "farm_harness"', source)
+                self.assertIn("refusing", source)
 
 
 if __name__ == "__main__":
