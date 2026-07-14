@@ -157,6 +157,12 @@ before any command can run.
       lock the cycle row. The focused mock-only suite passed 33 backend tests and
       2 harness tests; fast, unit, and contract gates passed 195 harness tests.
       No real printer or actuator command was sent.
+- [x] 2026-07-14 10:43 KST A follow-up stale-writer audit reproduced an older
+      ORM session overwriting a committed transition after a row lock was released.
+      `transition_count` now also serves as SQLAlchemy's optimistic version key,
+      so stale updates fail instead of restoring an unsafe retryable state. The
+      failure-first regression passed with 42 state-machine tests; all 33 focused
+      direct-canary tests and 2 harness tests remained green. No real command ran.
 
 ## Decisions
 
@@ -188,6 +194,9 @@ before any command can run.
   send. That lock is held through the synthetic transport result transition. If
   the process or final DB write fails after send, the earlier durable active state
   blocks another command and requires reconciliation/manual review.
+- `transition_count` is both the public transition counter and the ORM optimistic
+  version. Every transition increments it; an UPDATE based on an older count is
+  rejected rather than overwriting a newer physical-command outcome.
 - The direct-canary transport route requires the broader SwapMod state-machine
   flag in addition to both direct-canary flags. A stale ready cycle cannot be
   actuated after the state machine is disabled.
@@ -210,6 +219,8 @@ before any command can run.
   for both the initial claim and the transport transaction, then commits the
   sent/failed transition; a final commit failure leaves the earlier active state
   durable and non-retryable.
+- Stale-write protection reuses the existing non-null `transition_count` column as
+  the mapper version ID. It adds no column, migration, dependency, or API field.
 - Final runtime browser evidence used only the isolated `farm_wp110_audit`
   harness on ports 18110/19110 with a fresh synthetic database and no printer
   records. No production credential, customer data, real printer, MQTT, FTPS, or
@@ -230,6 +241,8 @@ Observed on 2026-07-14 KST:
   competing-cycle, stale-cycle, exact-byte send, unreadable/non-UTF-8 sequence,
   durable pre-send intent, transport-exception persistence, SQLite concurrency,
   and PostgreSQL initial-claim and transport row-lock checks.
+- State-machine service/API tests: 42/42 passed, including a two-session stale
+  writer that must raise `StaleDataError` and preserve the first transition log.
 - A separate ephemeral PostgreSQL 16.4 run issued two concurrent requests against
   one cycle and observed exactly one synthetic send; the second request failed
   `cycle_state_not_ready_for_step`.
@@ -298,6 +311,8 @@ Observed on 2026-07-14 KST:
 - The approval audit closes the pre-claim PostgreSQL race: the cycle row is locked
   before validating and persisting `START_STEP`, so direct-canary and ordinary
   state-machine writers cannot concurrently decide from the same ready state.
+- Optimistic versioning closes the post-lock stale-write race: a request that read
+  an older transition cannot overwrite the committed send/manual-review outcome.
 
 ## Risks and human gates
 
