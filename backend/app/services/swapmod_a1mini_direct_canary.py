@@ -179,8 +179,11 @@ class SwapmodA1MiniDirectCanaryService:
         if not _is_a1_mini(printer_model):
             raise SwapmodA1MiniDirectCanaryError("printer_model_not_a1_mini", "direct canary requires A1 Mini")
 
-        await _acquire_direct_canary_execution_lock(db, printer_id=printer_id)
-        await db.refresh(cycle)
+        cycle = await _lock_cycle_for_direct_canary_claim(
+            db,
+            cycle_id=cycle.id,
+            printer_id=printer_id,
+        )
         if cycle.printer_id is None or int(cycle.printer_id) != int(printer_id):
             raise SwapmodA1MiniDirectCanaryError("printer_id_mismatch", "cycle printer does not match request")
 
@@ -374,6 +377,34 @@ async def _acquire_direct_canary_execution_lock(db: AsyncSession, *, printer_id:
         "database_dialect_not_supported",
         "A1 Mini direct canary requires SQLite or PostgreSQL transaction locking",
     )
+
+
+async def _lock_cycle_for_direct_canary_claim(
+    db: AsyncSession,
+    *,
+    cycle_id: int,
+    printer_id: int,
+) -> SwapmodStateMachineCycle:
+    """Lock the cycle before persisting the physical-command intent."""
+    await _acquire_direct_canary_execution_lock(db, printer_id=printer_id)
+    result = await db.execute(
+        select(SwapmodStateMachineCycle)
+        .where(SwapmodStateMachineCycle.id == cycle_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    cycle = result.scalar_one_or_none()
+    if cycle is None:
+        raise SwapmodA1MiniDirectCanaryError(
+            "cycle_missing_before_claim",
+            "SwapMod cycle disappeared before direct canary claim",
+        )
+    if cycle.printer_id is None or int(cycle.printer_id) != int(printer_id):
+        raise SwapmodA1MiniDirectCanaryError(
+            "printer_id_changed_before_claim",
+            "SwapMod cycle printer changed before direct canary claim",
+        )
+    return cycle
 
 
 async def _lock_active_cycle_for_transport(
