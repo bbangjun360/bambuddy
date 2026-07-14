@@ -173,9 +173,117 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       await waitFor(() => {
-        expect(screen.getByText('All Printers')).toBeInTheDocument();
-        expect(screen.getByText('All Status')).toBeInTheDocument();
+        expect(screen.getByRole('combobox', { name: 'All Printers' })).toBeInTheDocument();
+        expect(screen.getByRole('combobox', { name: 'All Status' })).toBeInTheDocument();
       });
+    });
+
+    it('keeps queue workspaces and active controls available together', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      await screen.findByText('Test Print 1');
+      expect(screen.getByRole('tab', { name: /^Queue/ })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: /^History/ })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Timeline' })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: 'Pipelines' })).toBeInTheDocument();
+      expect(screen.getByTitle('List')).toBeInTheDocument();
+      expect(screen.getByTitle('Group by Printer')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Select All' })).toBeInTheDocument();
+
+      await user.click(screen.getByRole('tab', { name: /^History/ }));
+      expect(await screen.findByText('Completed Print')).toBeInTheDocument();
+      await user.click(screen.getByRole('tab', { name: /^Queue/ }));
+      expect(await screen.findByText('Test Print 1')).toBeInTheDocument();
+    });
+
+    it('exposes compact operator landmarks and accessible tabs', async () => {
+      const user = userEvent.setup();
+      render(<QueuePage />);
+
+      await screen.findByText('Test Print 1');
+      const surface = screen.getByTestId('queue-operator-surface');
+      expect(surface).toHaveAttribute('data-density', 'compact');
+      expect(screen.getByTestId('queue-status-summary')).toBeInTheDocument();
+      expect(screen.getByTestId('queue-operator-toolbar')).toBeInTheDocument();
+
+      const tablist = screen.getByRole('tablist');
+      expect(tablist).toBeInTheDocument();
+      const queueTab = screen.getByRole('tab', { name: /^Queue/ });
+      const historyTab = screen.getByRole('tab', { name: /^History/ });
+      const panel = screen.getByRole('tabpanel');
+      expect(queueTab).toHaveAttribute('aria-selected', 'true');
+      expect(historyTab).toHaveAttribute('aria-selected', 'false');
+      expect(queueTab).toHaveAttribute('aria-controls', 'queue-panel');
+      expect(panel).toHaveAttribute('aria-labelledby', 'queue-tab-queue');
+
+      queueTab.focus();
+      await user.keyboard('{ArrowRight}');
+      expect(historyTab).toHaveFocus();
+      expect(historyTab).toHaveAttribute('aria-selected', 'true');
+      await user.keyboard('{ArrowLeft}');
+      expect(queueTab).toHaveFocus();
+      expect(queueTab).toHaveAttribute('aria-selected', 'true');
+
+      const rows = screen.getAllByTestId('queue-job-row');
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row).toHaveAttribute('data-density', 'compact');
+      }
+
+      await user.click(historyTab);
+      expect(queueTab).toHaveAttribute('aria-selected', 'false');
+      expect(historyTab).toHaveAttribute('aria-selected', 'true');
+      expect(panel).toHaveAttribute('aria-labelledby', 'queue-tab-history');
+      expect(screen.getByRole('combobox', { name: 'Sort: History' })).toHaveClass('h-8');
+    });
+
+    it('names compact row tools and gives icon controls stable targets', async () => {
+      render(<QueuePage />);
+
+      await screen.findByText('Test Print 1');
+      const selectButton = screen.getByRole('button', { name: 'Select: Test Print 1' });
+      const reorderButton = screen.getByRole('button', {
+        name: 'Drag to reorder (ASAP only): Test Print 1',
+      });
+      const archiveLink = screen.getByRole('link', { name: 'View archive: Test Print 1' });
+      const sortSelect = screen.getByRole('combobox', { name: 'Sort: Queued' });
+      const sortDirectionButton = screen.getByRole('button', { name: 'Ascending' });
+
+      expect(sortSelect).toHaveClass('h-8');
+      for (const control of [selectButton, reorderButton, archiveLink, sortDirectionButton]) {
+        expect(control).toHaveClass('h-8', 'w-8');
+      }
+    });
+
+    it('reserves a mobile gutter between job rows and the fixed bug report button', async () => {
+      render(<QueuePage />);
+
+      await screen.findByText('Test Print 1');
+      const rows = screen.getAllByTestId('queue-job-row');
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row).toHaveClass('mr-14', 'sm:mr-0');
+      }
+    });
+
+    it('keeps the mobile resume-after-failure icon button accessibly named', async () => {
+      server.use(
+        http.get('/api/v1/queue/', () => {
+          return HttpResponse.json([
+            {
+              ...mockQueueItems[0],
+              status: 'skipped',
+              error_message: 'Previous print failed or was aborted',
+            },
+          ]);
+        })
+      );
+      render(<QueuePage />);
+
+      const resumeButton = await screen.findByRole('button', { name: 'Resume after failure' });
+      expect(resumeButton).toHaveAttribute('aria-label', 'Resume after failure');
+      expect(resumeButton).toHaveAttribute('title', 'Resume after failure');
     });
   });
 
@@ -202,7 +310,7 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       // The History tab now owns the completed/cancelled/failed list.
-      await user.click(await screen.findByRole('button', { name: /^History/ }));
+      await user.click(await screen.findByRole('tab', { name: /^History/ }));
 
       await waitFor(() => {
         expect(screen.getByText('Completed Print')).toBeInTheDocument();
@@ -270,11 +378,7 @@ describe('QueuePage', () => {
       const user = userEvent.setup();
       render(<QueuePage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('All Printers')).toBeInTheDocument();
-      });
-
-      const printerSelect = screen.getByDisplayValue('All Printers');
+      const printerSelect = await screen.findByRole('combobox', { name: 'All Printers' });
       await user.click(printerSelect);
 
       expect(screen.getByText('Unassigned')).toBeInTheDocument();
@@ -284,11 +388,7 @@ describe('QueuePage', () => {
       const user = userEvent.setup();
       render(<QueuePage />);
 
-      await waitFor(() => {
-        expect(screen.getByText('All Status')).toBeInTheDocument();
-      });
-
-      const statusSelect = screen.getByDisplayValue('All Status');
+      const statusSelect = await screen.findByRole('combobox', { name: 'All Status' });
       await user.click(statusSelect);
 
       expect(screen.getByRole('option', { name: 'Pending' })).toBeInTheDocument();
@@ -336,7 +436,7 @@ describe('QueuePage', () => {
       const user = userEvent.setup();
       render(<QueuePage />);
 
-      await user.click(await screen.findByRole('button', { name: /^History/ }));
+      await user.click(await screen.findByRole('tab', { name: /^History/ }));
 
       await waitFor(() => {
         expect(screen.getByText('Completed Print')).toBeInTheDocument();
@@ -353,7 +453,7 @@ describe('QueuePage', () => {
       render(<QueuePage />);
 
       // Clear History only renders inside the History tab now.
-      await user.click(await screen.findByRole('button', { name: /^History/ }));
+      await user.click(await screen.findByRole('tab', { name: /^History/ }));
 
       await waitFor(() => {
         expect(screen.getByText('Clear History')).toBeInTheDocument();
@@ -364,7 +464,7 @@ describe('QueuePage', () => {
       const user = userEvent.setup();
       render(<QueuePage />);
 
-      await user.click(await screen.findByRole('button', { name: /^History/ }));
+      await user.click(await screen.findByRole('tab', { name: /^History/ }));
 
       await waitFor(() => {
         expect(screen.getByText('Clear History')).toBeInTheDocument();

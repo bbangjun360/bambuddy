@@ -67,10 +67,14 @@ OUTSIDE the code: deployment, real integrations, physical rollout.
    after upstream v0.2.4.9 integration. WP-112 changes only the shared operator
    shell and was visually approved and merged as PR #93. WP-113 PR #94 was
    visually approved on 2026-07-13 and changes only the printer fleet surface:
-   status summary, responsive tools, and printer-card scan hierarchy. Queue,
-   library/inventory, and settings redesigns follow as separate observable Work
-   Packages after operators review each preceding slice; no page workflow,
-   printer command, or backend contract is changed by WP-112 or WP-113.
+   status summary, responsive tools, and printer-card scan hierarchy. WP-115 is
+   the next slice and redesigns only the Queue operator surface: compact status
+   rail, accessible tabs, responsive tools, and denser run rows. It is validated
+   in draft PR #96 and awaiting operator visual review. Library/inventory and
+   settings redesigns follow
+   as separate observable Work Packages after operators review each preceding
+   slice; no page workflow, printer command, or backend contract is changed by
+   WP-112, WP-113, or WP-115.
 
 ## Explicitly deferred (do not start without operator approval)
 
