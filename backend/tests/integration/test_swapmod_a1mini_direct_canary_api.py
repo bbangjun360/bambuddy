@@ -35,9 +35,9 @@ class SwapmodA1MiniDirectCanaryApiTest(unittest.IsolatedAsyncioTestCase):
             api_key,
             auth_ephemeral,
             group,
-            printer,
             print_log,
             print_queue,
+            printer,
             settings,
             swapmod_state_machine,
             user,
@@ -49,7 +49,7 @@ class SwapmodA1MiniDirectCanaryApiTest(unittest.IsolatedAsyncioTestCase):
         (self.root / "release.gcode").write_text(self.release_text, encoding="utf-8")
         (self.root / "load.gcode").write_text("G91\nG4 P20\nG90\n", encoding="utf-8")
         self.release_sha = hashlib.sha256(self.release_text.encode("utf-8")).hexdigest()
-        self.load_sha = hashlib.sha256("G91\nG4 P20\nG90\n".encode("utf-8")).hexdigest()
+        self.load_sha = hashlib.sha256(b"G91\nG4 P20\nG90\n").hexdigest()
 
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
         async with self.engine.begin() as conn:
@@ -92,6 +92,7 @@ class SwapmodA1MiniDirectCanaryApiTest(unittest.IsolatedAsyncioTestCase):
             "farm_swapmod_state_machine_enabled": direct_route.settings.farm_swapmod_state_machine_enabled,
             "farm_swapmod_a1mini_direct_canary_enabled": direct_route.settings.farm_swapmod_a1mini_direct_canary_enabled,
             "farm_swapmod_a1mini_direct_canary_allow_real_commands": direct_route.settings.farm_swapmod_a1mini_direct_canary_allow_real_commands,
+            "farm_swapmod_a1mini_direct_canary_target_printer_id": direct_route.settings.farm_swapmod_a1mini_direct_canary_target_printer_id,
             "farm_swapmod_a1mini_direct_canary_sequence_root": direct_route.settings.farm_swapmod_a1mini_direct_canary_sequence_root,
             "farm_swapmod_a1mini_direct_canary_release_sequence_file": direct_route.settings.farm_swapmod_a1mini_direct_canary_release_sequence_file,
             "farm_swapmod_a1mini_direct_canary_release_sequence_sha256": direct_route.settings.farm_swapmod_a1mini_direct_canary_release_sequence_sha256,
@@ -101,6 +102,7 @@ class SwapmodA1MiniDirectCanaryApiTest(unittest.IsolatedAsyncioTestCase):
         direct_route.settings.farm_swapmod_state_machine_enabled = True
         direct_route.settings.farm_swapmod_a1mini_direct_canary_enabled = False
         direct_route.settings.farm_swapmod_a1mini_direct_canary_allow_real_commands = False
+        direct_route.settings.farm_swapmod_a1mini_direct_canary_target_printer_id = 101
         direct_route.settings.farm_swapmod_a1mini_direct_canary_sequence_root = str(self.root)
         direct_route.settings.farm_swapmod_a1mini_direct_canary_release_sequence_file = "release.gcode"
         direct_route.settings.farm_swapmod_a1mini_direct_canary_release_sequence_sha256 = self.release_sha
@@ -152,7 +154,62 @@ class SwapmodA1MiniDirectCanaryApiTest(unittest.IsolatedAsyncioTestCase):
         body = response.json()
         self.assertFalse(body["enabled"])
         self.assertFalse(body["allow_real_commands"])
+        self.assertEqual(body["target_printer_id"], 101)
         self.assertFalse(body["arbitrary_gcode_supported"])
+
+    async def test_confirmation_preview_returns_phrase_and_checklist(self) -> None:
+        response = await self.client.get(
+            "/api/v1/swapmod-a1-mini-direct-canary/confirmation-preview",
+            params={"printer_id": 101, "cycle_key": "preview-cycle", "step": "RELEASE_PLATE"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["sequence_configured"])
+        self.assertEqual(body["sequence_sha256"], self.release_sha)
+        self.assertEqual(
+            body["required_operator_approval_phrase"],
+            f"CONFIRM_A1_MINI_DIRECT_PLATE_CHANGE 101 preview-cycle RELEASE_PLATE {self.release_sha}",
+        )
+        self.assertIn("operator_present", body["checklist_fields"])
+        self.assertEqual(len(body["checklist_fields"]), 10)
+
+    async def test_confirmation_preview_load_step_uses_load_sha(self) -> None:
+        response = await self.client.get(
+            "/api/v1/swapmod-a1-mini-direct-canary/confirmation-preview",
+            params={"printer_id": 101, "cycle_key": "preview-cycle", "step": "LOAD_NEXT_PLATE"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["sequence_sha256"], self.load_sha)
+
+    async def test_confirmation_preview_rejects_a_non_canary_printer(self) -> None:
+        response = await self.client.get(
+            "/api/v1/swapmod-a1-mini-direct-canary/confirmation-preview",
+            params={"printer_id": 7, "cycle_key": "preview-cycle", "step": "RELEASE_PLATE"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+    async def test_transport_rejects_when_named_canary_is_not_configured(self) -> None:
+        await self.create_release_ready_cycle("api-direct-no-target")
+        direct_route.settings.farm_swapmod_a1mini_direct_canary_enabled = True
+        direct_route.settings.farm_swapmod_a1mini_direct_canary_allow_real_commands = True
+        direct_route.settings.farm_swapmod_a1mini_direct_canary_target_printer_id = None
+
+        response = await self.client.post(
+            "/api/v1/swapmod-a1-mini-direct-canary/cycles/api-direct-no-target/transport-steps",
+            json={
+                "canary_key": "api-direct-no-target",
+                "printer_id": 101,
+                "step": RELEASE_PLATE,
+                "operator_approved": True,
+                "operator_approval_phrase": "not-used",
+                "checklist": self.complete_checklist(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     async def test_transport_step_is_disabled_by_default(self) -> None:
         await self.create_release_ready_cycle("api-direct-disabled")
@@ -171,6 +228,36 @@ class SwapmodA1MiniDirectCanaryApiTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertIn("disabled", response.json()["detail"].lower())
+
+    async def test_transport_rejects_when_state_machine_is_disabled(self) -> None:
+        await self.create_release_ready_cycle("api-direct-state-machine-disabled")
+        direct_route.settings.farm_swapmod_state_machine_enabled = False
+        direct_route.settings.farm_swapmod_a1mini_direct_canary_enabled = True
+        direct_route.settings.farm_swapmod_a1mini_direct_canary_allow_real_commands = True
+        phrase = required_a1mini_direct_canary_phrase(
+            printer_id=101,
+            cycle_key="api-direct-state-machine-disabled",
+            step=RELEASE_PLATE,
+            sequence_sha256=self.release_sha,
+        )
+        transport = FakeDirectTransport()
+
+        with patch.object(direct_route, "get_a1mini_direct_transport", return_value=transport):
+            response = await self.client.post(
+                "/api/v1/swapmod-a1-mini-direct-canary/cycles/api-direct-state-machine-disabled/transport-steps",
+                json={
+                    "canary_key": "api-direct-state-machine-disabled",
+                    "printer_id": 101,
+                    "step": RELEASE_PLATE,
+                    "operator_approved": True,
+                    "operator_approval_phrase": phrase,
+                    "checklist": self.complete_checklist(),
+                },
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("state machine", response.json()["detail"].lower())
+        self.assertEqual(transport.sent, [])
 
     async def test_schema_rejects_raw_gcode_field(self) -> None:
         await self.create_release_ready_cycle("api-direct-schema")

@@ -4,6 +4,7 @@ import unittest
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm.exc import StaleDataError
 
 from backend.app.core.database import Base
 from backend.app.models.print_log import PrintLogEntry
@@ -39,13 +40,13 @@ from backend.app.services.swapmod_state_machine import (
     apply_swapmod_event,
     apply_swapmod_transport_step,
     apply_swapmod_verification,
-    evaluate_swapmod_canary_execution_gate,
     create_swapmod_cycle,
     create_swapmod_operator_trigger,
+    evaluate_swapmod_canary_execution_gate,
     get_swapmod_cycle,
     public_swapmod_cycle,
-    required_swapmod_canary_approval_phrase,
     recover_swapmod_cycle_after_restart,
+    required_swapmod_canary_approval_phrase,
 )
 
 
@@ -165,7 +166,9 @@ class SwapmodStateMachineServiceTest(unittest.IsolatedAsyncioTestCase):
         cycle = await create_swapmod_cycle(self.session, cycle_key="swapmod-cycle-review", printer_id=101)
         cycle = await apply_swapmod_event(self.session, cycle, PRINT_FINISHED, event_id="event-1")
         cycle = await apply_swapmod_event(self.session, cycle, START_STEP, event_id="event-2", step=RELEASE_PLATE)
-        cycle = await apply_swapmod_event(self.session, cycle, STEP_MOCK_SUCCEEDED, event_id="event-3", step=RELEASE_PLATE)
+        cycle = await apply_swapmod_event(
+            self.session, cycle, STEP_MOCK_SUCCEEDED, event_id="event-3", step=RELEASE_PLATE
+        )
 
         cycle = await apply_swapmod_event(
             self.session,
@@ -219,6 +222,26 @@ class SwapmodStateMachineServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.transition_log, first_log)
         self.assertEqual(second.seen_event_ids, ["same-event"])
 
+    async def test_stale_writer_cannot_overwrite_a_committed_transition(self) -> None:
+        cycle = await create_swapmod_cycle(self.session, cycle_key="swapmod-cycle-stale-writer", printer_id=101)
+        await self.session.commit()
+
+        async with self.sessionmaker() as first_db, self.sessionmaker() as stale_db:
+            first_cycle = await get_cycle(first_db, cycle.cycle_key)
+            stale_cycle = await get_cycle(stale_db, cycle.cycle_key)
+
+            await apply_swapmod_event(first_db, first_cycle, PRINT_FINISHED, event_id="first-writer")
+            await first_db.commit()
+
+            with self.assertRaises(StaleDataError):
+                await apply_swapmod_event(stale_db, stale_cycle, PRINT_FINISHED, event_id="stale-writer")
+            await stale_db.rollback()
+
+        async with self.sessionmaker() as verify_db:
+            persisted = await get_cycle(verify_db, cycle.cycle_key)
+            self.assertEqual(persisted.transition_count, 1)
+            self.assertEqual(persisted.seen_event_ids, ["first-writer"])
+
     async def test_invalid_transition_blocks_unknown_state(self) -> None:
         cycle = await create_swapmod_cycle(self.session, cycle_key="swapmod-cycle-invalid", printer_id=101)
 
@@ -236,7 +259,9 @@ class SwapmodStateMachineServiceTest(unittest.IsolatedAsyncioTestCase):
         cycle = await create_swapmod_cycle(self.session, cycle_key="swapmod-cycle-no-dispatch", printer_id=101)
         cycle = await apply_swapmod_event(self.session, cycle, PRINT_FINISHED, event_id="event-1")
         cycle = await apply_swapmod_event(self.session, cycle, START_STEP, event_id="event-2", step=RELEASE_PLATE)
-        cycle = await apply_swapmod_event(self.session, cycle, STEP_MOCK_SUCCEEDED, event_id="event-3", step=RELEASE_PLATE)
+        cycle = await apply_swapmod_event(
+            self.session, cycle, STEP_MOCK_SUCCEEDED, event_id="event-3", step=RELEASE_PLATE
+        )
 
         self.assertEqual(cycle.state, VERIFY_RELEASED)
         self.assertEqual(await self.count_rows(PrintQueueItem), 0)
@@ -293,7 +318,9 @@ class SwapmodStateMachineServiceTest(unittest.IsolatedAsyncioTestCase):
         cycle = await create_swapmod_cycle(self.session, cycle_key="swapmod-verification-pass", printer_id=101)
         cycle = await apply_swapmod_event(self.session, cycle, PRINT_FINISHED, event_id="event-1")
         cycle = await apply_swapmod_event(self.session, cycle, START_STEP, event_id="event-2", step=RELEASE_PLATE)
-        cycle = await apply_swapmod_event(self.session, cycle, STEP_MOCK_SUCCEEDED, event_id="event-3", step=RELEASE_PLATE)
+        cycle = await apply_swapmod_event(
+            self.session, cycle, STEP_MOCK_SUCCEEDED, event_id="event-3", step=RELEASE_PLATE
+        )
 
         cycle = await apply_swapmod_verification(
             self.session,

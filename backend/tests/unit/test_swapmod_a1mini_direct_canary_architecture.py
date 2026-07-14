@@ -17,6 +17,7 @@ class SwapmodA1MiniDirectCanaryArchitectureTest(unittest.TestCase):
         self.assertIn("farm_swapmod_a1mini_direct_canary_enabled: bool = False", text)
         self.assertIn("farm_swapmod_a1mini_direct_canary_allow_real_commands: bool = False", text)
         self.assertIn("farm_swapmod_a1mini_direct_canary_require_human_confirmation: bool = True", text)
+        self.assertIn("farm_swapmod_a1mini_direct_canary_target_printer_id: int | None = None", text)
 
     def test_files_exist_and_route_is_explicit(self) -> None:
         for path in (SERVICE, ROUTE, SCHEMA):
@@ -25,6 +26,7 @@ class SwapmodA1MiniDirectCanaryArchitectureTest(unittest.TestCase):
         route_text = ROUTE.read_text(encoding="utf-8")
         self.assertIn('APIRouter(prefix="/swapmod-a1-mini-direct-canary"', route_text)
         self.assertIn('@router.get("/status"', route_text)
+        self.assertIn("_require_direct_canary_target", route_text)
         self.assertIn('@router.post("/cycles/{cycle_key}/transport-steps"', route_text)
 
     def test_schema_does_not_accept_raw_command_or_path_fields(self) -> None:

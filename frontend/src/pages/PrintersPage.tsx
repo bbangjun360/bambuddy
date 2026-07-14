@@ -92,6 +92,7 @@ import { api, discoveryApi, firmwareApi, withStreamToken, ApiError } from '../ap
 import { formatDateOnly, formatETA, formatDuration, parseUTCDate } from '../utils/date';
 import type { Printer, PrinterCreate, PrinterStatus, AMSUnit, DiscoveredPrinter, FirmwareUpdateInfo, FirmwareUploadStatus, LinkedSpoolInfo, SpoolAssignment, HMSError, InventorySpool, SmartPlug, PrinterDiagnosticResult } from '../api/client';
 import { Card, CardContent } from '../components/Card';
+import { SwapModPlateChangeControl } from '../components/swapmod/SwapModPlateChangeControl';
 import { Button } from '../components/Button';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { BulkPrinterToolbar, type PrinterState } from '../components/BulkPrinterToolbar';
@@ -3234,6 +3235,14 @@ function PrinterCard({
         </div>
       )}
       <CardContent className={`${viewMode === 'compact' ? '!p-3' : cardSize >= 3 ? '!p-5' : '!p-4'} flex flex-1 flex-col`}>
+        {/* WP-110 slice 4 (draft): supervised SwapMod plate-change control.
+            Renders only while the canary is armed; otherwise returns null. */}
+        <SwapModPlateChangeControl
+          printer={printer}
+          isConnected={isConnected === true}
+          canControl={printer.is_active !== false && hasPermission('printers:control')}
+          isA1Mini={mapModelCode(printer.model) === 'A1 Mini'}
+        />
         {/* Header */}
         <div className={getSpacing()}>
           {/* Top row: Image, Name, Menu */}
