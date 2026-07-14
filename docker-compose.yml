@@ -121,6 +121,13 @@ services:
       # Example: DATABASE_URL=postgresql+asyncpg://bambuddy:password@db-host:5432/bambuddy
       #- DATABASE_URL=
       #
+      # WP-114 actual cost ledger. Defaults remain fail-closed; configure the
+      # reviewed KRW policy in .env before changing the enabled flag.
+      - FARM_ACTUAL_COST_LEDGER_ENABLED=${FARM_ACTUAL_COST_LEDGER_ENABLED:-false}
+      - FARM_COST_LEDGER_MACHINE_RATE_PER_HOUR_KRW=${FARM_COST_LEDGER_MACHINE_RATE_PER_HOUR_KRW:-0}
+      - FARM_COST_LEDGER_ESTIMATED_POWER_KW=${FARM_COST_LEDGER_ESTIMATED_POWER_KW:-0}
+      - FARM_COST_LEDGER_POLICY_VERSION=${FARM_COST_LEDGER_POLICY_VERSION:-}
+      #
       # Slicer API sidecar (optional — Settings → "Use Slicer API" toggles this on).
       # Default points at the OrcaSlicer sidecar on the docker host; change if you
       # run the sidecar on a different host/port. The matching docker-compose.yml

@@ -9,6 +9,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
+from math import isfinite
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -30,6 +31,7 @@ from backend.app.api.routes import (
     erp_draft_write,
     erp_readonly,
     external_links,
+    farm_cost_ledger,
     filaments,
     firmware,
     github_backup,
@@ -52,14 +54,14 @@ from backend.app.api.routes import (
     obico_shadow,
     orca_cloud,
     pending_uploads,
+    pipeline_runs,
     plate_change_3mf_postprocess,
     plate_change_command,
-    printflow_canary,
-    pipeline_runs,
     print_log,
     print_queue,
     printer_sensor_history,
     printers,
+    printflow_canary,
     projects,
     settings as settings_routes,
     slice_jobs,
@@ -70,12 +72,12 @@ from backend.app.api.routes import (
     spoolbuddy,
     spoolman,
     spoolman_inventory,
+    support,
     swapmod_3mf_dry_run,
     swapmod_a1mini_direct_canary,
     swapmod_bed_readiness,
     swapmod_canary_preflight,
     swapmod_state_machine,
-    support,
     system,
     updates,
     user_notifications,
@@ -4608,6 +4610,7 @@ async def on_print_complete(printer_id: int, data: dict):
     log_timing("Archive status update")
 
     # Write independent print log entry (separate table, never touches archives)
+    print_log_entry_id: int | None = None
     try:
         async with async_session() as db:
             from backend.app.models.archive import PrintArchive
@@ -4650,7 +4653,7 @@ async def on_print_complete(printer_id: int, data: dict):
                 if _run_cost is None and _run_status == "completed":
                     _run_cost = archive.cost
 
-                await write_log_entry(
+                log_entry = await write_log_entry(
                     db,
                     archive_id=archive.id,
                     status=_run_status,
@@ -4669,6 +4672,7 @@ async def on_print_complete(printer_id: int, data: dict):
                     created_by_username=_print_user_info.get("username") if _print_user_info else None,
                 )
                 await db.commit()
+                print_log_entry_id = log_entry.id
                 logger.info("[PRINT_LOG] Log entry written for archive %s", archive_id)
     except Exception as e:
         logger.warning("[PRINT_LOG] Failed to write log entry for archive %s: %s", archive_id, e)
@@ -4726,6 +4730,14 @@ async def on_print_complete(printer_id: int, data: dict):
                 energy_cost_per_kwh = await get_setting(db, "energy_cost_per_kwh")
                 cost_per_kwh = float(energy_cost_per_kwh) if energy_cost_per_kwh else 0.15
                 energy_cost_value = round(energy_used * cost_per_kwh, 3)
+                if not isfinite(energy_used) or not isfinite(energy_cost_value) or energy_cost_value < 0:
+                    logger.warning(
+                        "[ENERGY-BG] Invalid energy evidence for archive %s (kWh=%s, cost=%s)",
+                        archive_id,
+                        energy_used,
+                        energy_cost_value,
+                    )
+                    return
 
                 # First-run-only overwrite of archive.energy_kwh / energy_cost so a
                 # reprint doesn't visually clobber the source archive's energy data
@@ -4743,19 +4755,18 @@ async def on_print_complete(printer_id: int, data: dict):
                     archive.energy_kwh = energy_used
                     archive.energy_cost = energy_cost_value
 
-                # Backfill the latest PrintLogEntry for this archive with energy
-                # (write_log_entry above ran before this background task completed,
-                # so energy fields are still NULL on that row).
-                latest_run = await db.execute(
-                    select(PrintLogEntry)
-                    .where(PrintLogEntry.archive_id == archive_id)
-                    .order_by(PrintLogEntry.id.desc())
-                    .limit(1)
-                )
-                run_row = latest_run.scalar_one_or_none()
-                if run_row is not None:
-                    run_row.energy_kwh = energy_used
-                    run_row.energy_cost = energy_cost_value
+                # The same archive can be printing on multiple printers. Use
+                # the exact row created above instead of whichever run is
+                # newest when this background task eventually executes.
+                if print_log_entry_id is not None:
+                    from backend.app.services.print_log import backfill_log_entry_energy
+
+                    await backfill_log_entry_energy(
+                        db,
+                        print_log_entry_id=print_log_entry_id,
+                        energy_kwh=energy_used,
+                        energy_cost=energy_cost_value,
+                    )
 
                 await db.commit()
                 logger.info("[ENERGY-BG] Saved: %s kWh, cost=%s", energy_used, energy_cost_value)
@@ -6740,6 +6751,7 @@ app.include_router(orca_cloud.router, prefix=app_settings.api_prefix)
 app.include_router(local_presets.router, prefix=app_settings.api_prefix)
 app.include_router(smart_plugs.router, prefix=app_settings.api_prefix)
 app.include_router(print_log.router, prefix=app_settings.api_prefix)
+app.include_router(farm_cost_ledger.router, prefix=app_settings.api_prefix)
 app.include_router(print_queue.router, prefix=app_settings.api_prefix)
 app.include_router(kprofiles.router, prefix=app_settings.api_prefix)
 app.include_router(notifications.router, prefix=app_settings.api_prefix)
