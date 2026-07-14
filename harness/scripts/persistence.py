@@ -2,12 +2,20 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-ENV_FILE = ROOT / ".env.harness"
+
+
+def _resolve_harness_env_file() -> Path:
+    selected = Path(os.environ.get("HARNESS_ENV", ".env.harness"))
+    return selected if selected.is_absolute() else ROOT / selected
+
+
+ENV_FILE = _resolve_harness_env_file()
 COMPOSE_FILE = ROOT / "harness/docker-compose.harness.yml"
 
 
