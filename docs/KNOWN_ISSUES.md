@@ -20,6 +20,17 @@ local workarounds between sessions.
 
 ## FIXED
 
+### HARNESS-05 Runtime scripts ignored selected `HARNESS_ENV` — FIXED 2026-07-14
+
+- Was: Make and Docker Compose accepted `HARNESS_ENV=<path>`, but seven
+  runtime scripts still read the worktree-local `.env.harness`. Health checks
+  could probe the wrong ports, and persistence or restore commands could
+  target or reject a different Compose project than the one Make selected.
+- Fix: commit `7a67c4f7` exports the selected path and resolves absolute or
+  repository-relative paths consistently in smoke, observability, Orca,
+  Obico, persistence, and backup/restore scripts. Contract tests cover every
+  consumer; the destructive-script `farm_harness` project guard is unchanged.
+
 ### PROCESS-07 Stacked Work Package PRs skipped Validation — FIXED 2026-07-14
 
 - Was: `.github/workflows/validation.yml` ran for pull requests targeting
