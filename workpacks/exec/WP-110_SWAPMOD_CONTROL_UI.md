@@ -72,7 +72,7 @@ before any command can run.
 
 1. Backend read-only cycle listing + test. DONE 2026-07-09
 2. `swapmodApi` client + SwapMod settings tab with failure log. DONE 2026-07-09
-3. Sequence/speed editor (versioned, re-hashed, reviewed). TODO — operator-approved
+3. Sequence/speed editor (versioned, re-hashed, review-gated). DRAFT 2026-07-14 — operator-approved
 4. Printer-card plate-change control + confirmation gate. DRAFT 2026-07-09 — operator-approved (PR pending review + operator-present E2E)
 
 ## Progress
@@ -130,6 +130,21 @@ before any command can run.
       commits `START_STEP` before transport, and hashes/sends one immutable byte
       snapshot. Transport exceptions persist a no-retry manual-review state. No
       real printer or actuator command was sent.
+- [x] 2026-07-14 03:23 KST Milestone 3 implemented on the stacked
+      `feature/wp-110-sequence-editor` branch. The Settings tab exposes only
+      server-derived release/load targets and integer feedrates. Saving re-verifies
+      the pinned source and complete action set, changes only numeric `F` spans,
+      and writes a new mode-0600 candidate plus audit manifest without modifying
+      or selecting the active sequence.
+- [x] 2026-07-14 03:23 KST Candidate creation remains default-off, requires
+      `settings:update` plus `printers:control`, and rejects saves while either
+      direct-canary opt-in is armed. New candidates are always
+      `PENDING_REVIEW`, `active=false`, and have no API activation path. No real
+      printer or actuator command was sent.
+- [x] 2026-07-14 04:03 KST Milestone 3 focused, frontend-wide, shared-gate,
+      isolated runtime, and desktop/mobile browser verification completed. The
+      synthetic runtime wrote only inactive candidates; both pinned source hashes
+      remained unchanged and no real printer or actuator command was sent.
 - [x] 2026-07-14 06:25 KST Second transaction audit reproduced four additional
       fail-open gaps: direct transport remained callable while the state-machine
       flag was off, the durable `START_STEP` commit released all DB protection
@@ -149,6 +164,20 @@ before any command can run.
       and `make verify-full FRONTEND_TESTED=1`. The rebuilt default-off app on
       18141 remained healthy and reported both real-command flags false with no
       named target.
+- [x] 2026-07-14 06:53 KST Refreshed stacked Draft PR #97 onto the second
+      transaction audit. Failure-first editor tests reproduced six boundary
+      defects: a post-validation directory link swap redirected candidate writes,
+      parenthesized-comment `F` text was exposed as speed, a mutated manifest was
+      reported as latest, string feedrates were coerced, directory entries were
+      not synced, and ANSI actor controls reached the audit record.
+- [x] 2026-07-14 07:09 KST The editor now pins candidate storage with a no-follow
+      directory descriptor through exclusive pair creation and directory fsync,
+      validates the pending/inactive manifest contract, parses only executable
+      feedrates, requires strict JSON integers, and sanitizes audit actors. All 29
+      focused backend tests, the 33-test direct-canary suite plus 27 subtests, 2
+      harness tests, 177 frontend files / 2336 tests, lint/build, shared gates,
+      isolated runtime, and desktop/mobile browser checks passed. No real command
+      ran; main port 18000 remained healthy.
 - [x] 2026-07-14 10:12 KST Independent approval audit reproduced a PostgreSQL
       claim race: the per-printer advisory lock serialized direct-canary requests
       but did not block a normal state-machine writer before durable `START_STEP`.
@@ -203,6 +232,31 @@ before any command can run.
 - Sequence validation and transport use the same byte snapshot. The service reads
   the allowlisted file once, verifies that byte string against the configured
   SHA-256, decodes those exact bytes as UTF-8, and sends only that text.
+- Sequence editing is a candidate-generation boundary, not an actuation or
+  activation boundary. The API accepts only a pinned base SHA-256 and the full
+  server-generated `{action_id, feedrate}` set. It accepts no sequence text,
+  path, target coordinate, command, filename, approval, or activation field.
+- Editable actions are restricted to `G0`/`G1` lines with exactly one positive
+  integer `F` word in 1..30000. Labels and targets are derived by the server;
+  comments and raw lines are not returned. Re-rendering replaces only each
+  validated `F` number span, preserving line endings and every other source byte.
+- Candidate storage is a server-owned hidden directory under the already trusted
+  sequence root. New mode-0600 candidate and manifest files use exclusive create;
+  collision retries allocate another server ID, while other storage errors fail
+  closed. A symbolic-link candidate directory is rejected.
+- Candidate writes reopen the directory with `O_DIRECTORY | O_NOFOLLOW`, retain
+  that descriptor through both exclusive file writes, and `fsync` the directory
+  before returning success. A link swap after validation cannot redirect output;
+  a file or directory-sync failure removes the candidate pair.
+- Parenthesized and semicolon comments are excluded before feedrate words are
+  parsed, while character offsets still refer to the immutable original text.
+  Request feedrates are strict JSON integers. Latest-candidate reads accept only
+  manifests that preserve the structured action, hash, pending-review, inactive,
+  and no-activation contract.
+- Saving records `PENDING_REVIEW` and `active=false`. A later supervised session
+  can use a candidate only after out-of-band review and an explicit environment
+  filename/SHA update plus restart. The application provides no candidate
+  approval, selection, or activation endpoint in this slice.
 
 ## Implementation and harness changes
 
@@ -221,14 +275,64 @@ before any command can run.
   durable and non-retryable.
 - Stale-write protection reuses the existing non-null `transition_count` column as
   the mapper version ID. It adds no column, migration, dependency, or API field.
-- Final runtime browser evidence used only the isolated `farm_wp110_audit`
+- Milestone 3 adds `swapmod_sequence_editor.py` service/schema modules and two
+  endpoints on the existing direct-canary router: read-only
+  `GET /sequence-editor` and administrative `POST /sequence-versions`. It adds
+  no database schema, migration, external service call, or production dependency.
+- `SwapModSequenceEditor.tsx` is isolated from the physical control component.
+  It renders release/load segmented controls, structured target/feedrate rows,
+  the pinned hash, and latest pending candidate status. Direct-canary arming
+  disables all editor inputs and saving.
+- Candidate manifests and one structured INFO log provide version ID, step,
+  base/candidate hashes, operator, review status, and inactive state. They omit
+  source text and filesystem paths. Non-printable actor characters are replaced
+  before either artifact is written.
+- Milestone 4 final runtime browser evidence used only the isolated `farm_wp110_audit`
   harness on ports 18110/19110 with a fresh synthetic database and no printer
   records. No production credential, customer data, real printer, MQTT, FTPS, or
   raw G-code path was used.
+- Milestone 3 final runtime evidence used only `farm_wp110_sequence` on
+  18142/19142. Its mounted release/load files were synthetic, both direct-canary
+  flags were false, and the editor flag alone was true. The main 18000 service
+  and every other isolated project remained untouched.
 
 ## Validation
 
 Observed on 2026-07-14 KST:
+
+- Sequence editor service/architecture/API tests: 29/29 passed, covering exact
+  action-set validation, stale and mismatched hashes, CRLF preservation,
+  immutable source bytes, exclusive version creation, mode-0700/0600 storage,
+  symbolic-link and post-validation link-swap rejection, file and directory-fsync
+  cleanup failures, comment-aware feedrate parsing, strict integer requests,
+  pending/inactive manifest validation, redacted audit logging, forbidden raw
+  content/path/coordinate fields, default-off behavior, and armed-canary refusal.
+- `SwapModSequenceEditor.test.tsx`: 7/7 passed, covering default-off read-only
+  state, structured-only rendering, full action save payload, pending/inactive
+  result, armed-canary blocking, range validation, and release/load switching.
+- Existing `make test-swapmod-a1mini-direct-canary` regression: 2/2 harness,
+  33 backend tests, and 27 subtests passed after the pinned-sequence loader was
+  shared with the editor and the second transport audit was merged.
+- Full lockfile-based frontend validation passed: 177 files / 2336 tests, all 11
+  locale files at 5584 leaves, ESLint, TypeScript, and the production Vite build.
+  Only the existing large-chunk warning remains.
+- `make verify-fast FRONTEND_TESTED=1`, `make test-unit`, `make test-contract`,
+  `make test-integration`, and `make verify-full FRONTEND_TESTED=1` passed. The
+  shared gates ran 195 harness tests, 2 characterization tests, 2 scenarios, and
+  root/health/docs/mock smoke against the isolated 18142/19142 harness.
+- The enabled-editor runtime returned only structured actions, verified both
+  pinned SHA-256 values, and reported `direct_canary_armed=false` and
+  `activation_supported=false`. API and UI saves each created a new
+  `PENDING_REVIEW`, `active=false` candidate. The source hashes stayed unchanged;
+  the candidate directory was mode 0700 and candidate/manifest files mode 0600.
+- Headless Chrome at 1440x1000 and 390x844 passed the real Settings SwapMod
+  surface, including UI save and Release/Load/Release cache retention. Both views
+  had no raw content/path leak, activation control, armed warning, horizontal
+  overflow, clipped/overlapping control, failed image, error overlay, or
+  console/runtime exception. The only HTTP 401s were the existing, explicitly
+  tested unauthenticated `/auth/2fa/status` contract; no editor request failed.
+- The main Bambuddy instance at port 18000 remained healthy before and after the
+  isolated runtime and browser checks.
 
 - `SwapModPlateChangeControl.test.tsx`: 13/13 passed, including target-printer
   eligibility, full server checklist, command-failure and uncertain transport,
@@ -294,6 +398,16 @@ Observed on 2026-07-14 KST:
   operator must inspect the printer before any new attempt.
 - Rollback is the Draft PR merge commit; there is no migration or persistent schema
   change to reverse. Both canary flags remain default-off.
+- Editor write failures leave the configured source unchanged. A candidate file
+  without its matching valid manifest is ignored, and a tampered or missing
+  candidate is not reported as latest. There is no automatic retry or activation.
+- A candidate-directory link swap or directory-sync failure returns no version
+  and cannot redirect output outside the validated root. Incomplete pairs are
+  removed; any remaining crash orphan stays inert because it has no valid paired
+  pending/inactive manifest.
+- Editor rollback is `FARM_SWAPMOD_A1MINI_SEQUENCE_EDITOR_ENABLED=false` plus a
+  restart. Existing candidates remain inert audit artifacts; the active
+  filename/hash settings never change during a save.
 
 ## Outcomes
 
@@ -304,6 +418,10 @@ Observed on 2026-07-14 KST:
   safety evidence.
 - Bambuddy remains the sole command authority. No arbitrary G-code endpoint exists
   or is introduced by this Work Package.
+- Milestone 3 remains a stacked Draft change above PR #90. It is excluded from
+  delegated routine merge because speed changes are physically consequential;
+  operator review is still required even though candidate generation cannot send
+  or activate a command.
 - The second transaction audit closes the post-commit/pre-send state gap: the
   broader state machine must remain enabled, the printer and cycle are locked
   again through send, and a changed/unreadable printer state sends nothing and

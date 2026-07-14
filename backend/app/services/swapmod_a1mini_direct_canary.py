@@ -203,7 +203,7 @@ class SwapmodA1MiniDirectCanaryService:
         if not operator_approved:
             raise SwapmodA1MiniDirectCanaryError("operator_approval_missing", "operator approval is required")
 
-        sequence_text, sequence_sha256 = _select_sequence(
+        sequence_text, sequence_sha256 = load_pinned_a1mini_sequence(
             step=step,
             sequence_root=sequence_root,
             release_sequence_file=release_sequence_file,
@@ -471,7 +471,7 @@ async def _require_only_recent_unresolved_cycle(
         )
 
 
-def _select_sequence(
+def load_pinned_a1mini_sequence(
     *,
     step: str,
     sequence_root: str | Path | None,

@@ -7448,6 +7448,53 @@ export interface SwapmodConfirmationPreview {
 
 export type SwapmodStep = 'RELEASE_PLATE' | 'LOAD_NEXT_PLATE';
 
+export interface SwapmodSequenceAction {
+  action_id: string;
+  label: string;
+  target: string;
+  feedrate: number;
+}
+
+export interface SwapmodSequenceCandidate {
+  version_id: string;
+  step: SwapmodStep;
+  base_sha256: string;
+  sha256: string;
+  created_at: string;
+  created_by: string;
+  review_status: 'PENDING_REVIEW';
+  active: false;
+  activation_supported: false;
+  operator_review_required: true;
+  actions: SwapmodSequenceAction[];
+}
+
+export interface SwapmodEditableSequence {
+  step: SwapmodStep;
+  configured: boolean;
+  integrity_verified: boolean;
+  editable: boolean;
+  base_sha256: string | null;
+  error_code: string | null;
+  actions: SwapmodSequenceAction[];
+  latest_candidate: SwapmodSequenceCandidate | null;
+}
+
+export interface SwapmodSequenceEditorStatus {
+  enabled: boolean;
+  direct_canary_armed: boolean;
+  feedrate_min: number;
+  feedrate_max: number;
+  activation_supported: false;
+  sequences: SwapmodEditableSequence[];
+}
+
+export interface SwapmodSequenceCandidateRequest {
+  step: SwapmodStep;
+  base_sha256: string;
+  actions: Array<{ action_id: string; feedrate: number }>;
+}
+
 export interface SwapmodTransportStepRequest {
   canary_key: string;
   printer_id: number;
@@ -7479,6 +7526,15 @@ export const swapmodApi = {
 
   getCanaryStatus: () =>
     request<SwapmodCanaryStatus>('/swapmod-a1-mini-direct-canary/status'),
+
+  getSequenceEditorStatus: () =>
+    request<SwapmodSequenceEditorStatus>('/swapmod-a1-mini-direct-canary/sequence-editor'),
+
+  createSequenceCandidate: (body: SwapmodSequenceCandidateRequest) =>
+    request<SwapmodSequenceCandidate>('/swapmod-a1-mini-direct-canary/sequence-versions', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   confirmationPreview: (printerId: number, cycleKey: string, step: SwapmodStep) => {
     const query = new URLSearchParams({
