@@ -149,6 +149,14 @@ before any command can run.
       and `make verify-full FRONTEND_TESTED=1`. The rebuilt default-off app on
       18141 remained healthy and reported both real-command flags false with no
       named target.
+- [x] 2026-07-14 10:12 KST Independent approval audit reproduced a PostgreSQL
+      claim race: the per-printer advisory lock serialized direct-canary requests
+      but did not block a normal state-machine writer before durable `START_STEP`.
+      A failure-first regression now requires the initial cycle selection to use
+      `FOR UPDATE`; both the initial claim and post-commit transport transaction
+      lock the cycle row. The focused mock-only suite passed 33 backend tests and
+      2 harness tests; fast, unit, and contract gates passed 195 harness tests.
+      No real printer or actuator command was sent.
 
 ## Decisions
 
@@ -172,14 +180,14 @@ before any command can run.
   review window. A different cycle in that window blocks direct transport, which
   prevents a refresh or second tab from repeating uncertain motion.
 - A physical send requires a durable active-state claim. SQLite uses
-  `BEGIN IMMEDIATE`; PostgreSQL uses a per-printer transaction advisory lock. The
-  cycle is refreshed under that lock and `START_STEP` is committed before the
-  transport call. A new transaction then reclaims the printer lock, locks and
-  refreshes the cycle row, verifies the expected active state, and rechecks the
-  printer immediately before send. That lock is held through the synthetic
-  transport result transition. If the process or final DB write fails after send,
-  the earlier durable active state blocks another command and requires
-  reconciliation/manual review.
+  `BEGIN IMMEDIATE`; PostgreSQL uses a per-printer transaction advisory lock plus
+  cycle `FOR UPDATE`. The cycle is locked and refreshed before `START_STEP` is
+  committed, so normal state-machine writers cannot race the durable claim. A new
+  transaction then reclaims the printer lock, locks and refreshes the cycle row,
+  verifies the expected active state, and rechecks the printer immediately before
+  send. That lock is held through the synthetic transport result transition. If
+  the process or final DB write fails after send, the earlier durable active state
+  blocks another command and requires reconciliation/manual review.
 - The direct-canary transport route requires the broader SwapMod state-machine
   flag in addition to both direct-canary flags. A stale ready cycle cannot be
   actuated after the state machine is disabled.
@@ -198,9 +206,10 @@ before any command can run.
   service contract.
 - The transaction hardening is internal to the existing direct-canary service. It
   adds no schema or dependency. The service intentionally commits the active
-  transition before crossing the physical transport boundary, reclaims the
-  printer/cycle locks for send, then commits the sent/failed transition; a final
-  commit failure leaves the earlier active state durable and non-retryable.
+  transition before crossing the physical transport boundary, locks the cycle row
+  for both the initial claim and the transport transaction, then commits the
+  sent/failed transition; a final commit failure leaves the earlier active state
+  durable and non-retryable.
 - Final runtime browser evidence used only the isolated `farm_wp110_audit`
   harness on ports 18110/19110 with a fresh synthetic database and no printer
   records. No production credential, customer data, real printer, MQTT, FTPS, or
@@ -216,11 +225,11 @@ Observed on 2026-07-14 KST:
   paths.
 - Full frontend: 176 files / 2329 tests passed. ESLint and the production Vite
   build passed; only the existing large-chunk warning remains.
-- `make test-swapmod-a1mini-direct-canary`: 2/2 harness mock tests and 32 backend
+- `make test-swapmod-a1mini-direct-canary`: 2/2 harness mock tests and 33 backend
   service/architecture/API tests plus 27 subtests passed, including named-target,
   competing-cycle, stale-cycle, exact-byte send, unreadable/non-UTF-8 sequence,
   durable pre-send intent, transport-exception persistence, SQLite concurrency,
-  and PostgreSQL lock-call failures.
+  and PostgreSQL initial-claim and transport row-lock checks.
 - A separate ephemeral PostgreSQL 16.4 run issued two concurrent requests against
   one cycle and observed exactly one synthetic send; the second request failed
   `cycle_state_not_ready_for_step`.
@@ -232,9 +241,9 @@ Observed on 2026-07-14 KST:
 - Ruff 0.14.11 check and format check passed for every changed backend file. A
   diagnostic repository-wide run reported 47 existing findings outside this WP;
   no unrelated file was reformatted.
-- `make verify-fast FRONTEND_TESTED=1`: 190 harness tests twice plus 2
+- `make verify-fast FRONTEND_TESTED=1`: 195 harness tests twice plus 2
   characterization tests passed.
-- `make test-unit` and `make test-contract`: 190/190 harness tests each passed.
+- `make test-unit` and `make test-contract`: 195/195 harness tests each passed.
   `make test-integration` passed against the running isolated harness.
 - `make verify-full FRONTEND_TESTED=1` against a fresh PostgreSQL harness on
   18141/19141 passed, including root/health/docs/mock smoke and 2 scenarios.
@@ -286,6 +295,9 @@ Observed on 2026-07-14 KST:
   broader state machine must remain enabled, the printer and cycle are locked
   again through send, and a changed/unreadable printer state sends nothing and
   becomes manual review.
+- The approval audit closes the pre-claim PostgreSQL race: the cycle row is locked
+  before validating and persisting `START_STEP`, so direct-canary and ordinary
+  state-machine writers cannot concurrently decide from the same ready state.
 
 ## Risks and human gates
 

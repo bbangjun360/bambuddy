@@ -19,6 +19,7 @@ from backend.app.services.swapmod_a1mini_direct_canary import (
     SwapmodA1MiniDirectCanaryService,
     _acquire_direct_canary_execution_lock,
     _lock_active_cycle_for_transport,
+    _lock_cycle_for_direct_canary_claim,
     required_a1mini_direct_canary_phrase,
 )
 from backend.app.services.swapmod_state_machine import (
@@ -351,6 +352,25 @@ class SwapmodA1MiniDirectCanaryServiceTest(unittest.IsolatedAsyncioTestCase):
             cycle_id=7,
             printer_id=101,
             expected_state=RELEASING_PLATE,
+        )
+
+        statement = db.execute.await_args_list[1].args[0]
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        self.assertIn("FOR UPDATE", sql)
+        self.assertIs(result, locked_cycle)
+
+    async def test_postgres_locks_cycle_row_before_durable_active_claim(self) -> None:
+        db = MagicMock(spec=AsyncSession)
+        db.get_bind.return_value.dialect.name = "postgresql"
+        locked_cycle = SimpleNamespace(printer_id=101, state="READY_TO_RELEASE")
+        row_result = MagicMock()
+        row_result.scalar_one_or_none.return_value = locked_cycle
+        db.execute = AsyncMock(side_effect=[None, row_result])
+
+        result = await _lock_cycle_for_direct_canary_claim(
+            db,
+            cycle_id=7,
+            printer_id=101,
         )
 
         statement = db.execute.await_args_list[1].args[0]
